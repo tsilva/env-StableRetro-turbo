@@ -75,12 +75,22 @@ jobs:
       id-token: write
     if: github.event_name == 'release' && github.event.action == 'published'
     steps:
-      - name: Download all dists
+      - name: Download wheels Ubuntu
         uses: actions/download-artifact@v4
         with:
-          # Unpacks default artifact into dist/
-          # If `name: artifact` is omitted, the action will create extra parent dir
-          name: artifact
+          name: wheels-ubuntu-22.04
+          path: dist
+
+      - name: Download wheels macOS
+        uses: actions/download-artifact@v4
+        with:
+          name: wheels-macos-14
+          path: dist
+
+      - name: Download sdist
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist
           path: dist
 
       - name: Publish to PyPI
