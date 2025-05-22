@@ -64,7 +64,7 @@ jobs:
       - name: Upload sdist
         uses: actions/upload-artifact@v4
         with:
-          name: sdist-${{ matrix.os }}
+          name: sdist
           path: dist/*.tar.gz
 
   upload_pypi:
