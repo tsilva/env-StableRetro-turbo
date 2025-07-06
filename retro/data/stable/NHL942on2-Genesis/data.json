@@ -183,6 +183,22 @@
     "time": {
       "address": 16761958,
       "type": ">u4"
+    },
+    "p1_ori": {
+      "address": 16756895,
+      "type": ">u1"
+    },
+    "p2_ori": {
+      "address": 16757663,
+      "type": ">u1"
+    },
+    "p1_2_ori": {
+      "address": 16757023,
+      "type": ">u1"
+    },
+    "p2_2_ori": {
+      "address": 16757791,
+      "type": ">u1"
     }
   }
 }

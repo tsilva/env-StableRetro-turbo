@@ -40,6 +40,10 @@
       "address": 16763432,
       "type": ">u4"
     },
+    "p1_ori": {
+      "address": 16756895,
+      "type": ">u1"
+    },
     "p1_passing": {
       "address": 16762594,
       "type": ">u2"
@@ -92,6 +96,10 @@
       "address": 16764300,
       "type": ">u4"
     },
+    "p2_ori": {
+      "address": 16757663,
+      "type": ">u1"
+    },
     "p2_passing": {
       "address": 16763462,
       "type": ">u2"
@@ -143,6 +151,14 @@
     "time": {
       "address": 16761958,
       "type": ">u4"
+    },
+    "p1_ori": {
+      "address": 16756895,
+      "type": ">u1"
+    },
+    "p2_ori": {
+      "address": 16757663,
+      "type": ">u1"
     }
   }
 }
