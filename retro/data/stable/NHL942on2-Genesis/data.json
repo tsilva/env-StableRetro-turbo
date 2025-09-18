@@ -1,5 +1,9 @@
 {
   "info": {
+    "control": {
+      "address": 16761632,
+      "type": ">i2"
+    },
     "fullstar_x": {
       "address": 16760700,
       "type": ">i2"
@@ -17,12 +21,16 @@
       "type": ">i2"
     },
     "g2_x": {
-      "address": 16757706,
+      "address": 16757834,
       "type": ">i2"
     },
     "g2_y": {
-      "address": 16757726,
+      "address": 16757854,
       "type": ">i2"
+    },
+    "p1_2_ori": {
+      "address": 16757023,
+      "type": ">u1"
     },
     "p1_2_vel_x": {
       "address": 16756978,
@@ -64,6 +72,10 @@
       "address": 16763432,
       "type": ">u4"
     },
+    "p1_ori": {
+      "address": 16756895,
+      "type": ">u1"
+    },
     "p1_passing": {
       "address": 16762594,
       "type": ">u2"
@@ -91,6 +103,10 @@
     "p1_y": {
       "address": 16756830,
       "type": ">i2"
+    },
+    "p2_2_ori": {
+      "address": 16757791,
+      "type": ">u1"
     },
     "p2_2_vel_x": {
       "address": 16757746,
@@ -132,6 +148,10 @@
       "address": 16764300,
       "type": ">u4"
     },
+    "p2_ori": {
+      "address": 16757663,
+      "type": ">u1"
+    },
     "p2_passing": {
       "address": 16763462,
       "type": ">u2"
@@ -164,6 +184,10 @@
       "address": 16761958,
       "type": ">u2"
     },
+    "puck_control": {
+      "address": 16758698,
+      "type": ">i2"
+    },
     "puck_vel_x": {
       "address": 16758642,
       "type": "|i1"
@@ -183,22 +207,6 @@
     "time": {
       "address": 16761958,
       "type": ">u4"
-    },
-    "p1_ori": {
-      "address": 16756895,
-      "type": ">u1"
-    },
-    "p2_ori": {
-      "address": 16757663,
-      "type": ">u1"
-    },
-    "p1_2_ori": {
-      "address": 16757023,
-      "type": ">u1"
-    },
-    "p2_2_ori": {
-      "address": 16757791,
-      "type": ">u1"
     }
   }
 }
