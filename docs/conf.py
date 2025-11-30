@@ -92,7 +92,7 @@ html_theme_options = {
     "dark_logo": "img/stable_retro_white.svg",
     "gtag": "G-0VNK81VVGP",
     "description": "",
-    "image": "img/stable-retro-github.png",
+    "image": "img/stable-retro-github.svg",
     "versioning": True,
     "source_repository": "https://github.com/Farama-Foundation/stable-retro/",
     "source_branch": "master",
