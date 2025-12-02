@@ -42,7 +42,7 @@
     },
     "p1_ori": {
       "address": 16756895,
-      "type": ">u1"
+      "type": "|u1"
     },
     "p1_passing": {
       "address": 16762594,
@@ -98,7 +98,7 @@
     },
     "p2_ori": {
       "address": 16757663,
-      "type": ">u1"
+      "type": "|u1"
     },
     "p2_passing": {
       "address": 16763462,
@@ -154,11 +154,11 @@
     },
     "p1_ori": {
       "address": 16756895,
-      "type": ">u1"
+      "type": "|u1"
     },
     "p2_ori": {
       "address": 16757663,
-      "type": ">u1"
+      "type": "|u1"
     }
   }
 }

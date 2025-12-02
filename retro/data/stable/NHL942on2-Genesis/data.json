@@ -30,7 +30,7 @@
     },
     "p1_2_ori": {
       "address": 16757023,
-      "type": ">u1"
+      "type": "|u1"
     },
     "p1_2_vel_x": {
       "address": 16756978,
@@ -74,7 +74,7 @@
     },
     "p1_ori": {
       "address": 16756895,
-      "type": ">u1"
+      "type": "|u1"
     },
     "p1_passing": {
       "address": 16762594,
@@ -106,7 +106,7 @@
     },
     "p2_2_ori": {
       "address": 16757791,
-      "type": ">u1"
+      "type": "|u1"
     },
     "p2_2_vel_x": {
       "address": 16757746,
@@ -150,7 +150,7 @@
     },
     "p2_ori": {
       "address": 16757663,
-      "type": ">u1"
+      "type": "|u1"
     },
     "p2_passing": {
       "address": 16763462,

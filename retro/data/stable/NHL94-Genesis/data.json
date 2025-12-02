@@ -26,7 +26,7 @@
     },
     "p1_2_ori": {
       "address": 16757023,
-      "type": ">u1"
+      "type": "|u1"
     },
     "p1_2_vel_x": {
       "address": 16756978,
@@ -46,7 +46,7 @@
     },
     "p1_3_ori": {
       "address": 16757151,
-      "type": ">u1"
+      "type": "|u1"
     },
     "p1_3_vel_x": {
       "address": 16757106,
@@ -66,7 +66,7 @@
     },
     "p1_4_ori": {
       "address": 16757279,
-      "type": ">u1"
+      "type": "|u1"
     },
     "p1_4_vel_x": {
       "address": 16757234,
@@ -86,7 +86,7 @@
     },
     "p1_5_ori": {
       "address": 16757407,
-      "type": ">u1"
+      "type": "u1"
     },
     "p1_5_vel_x": {
       "address": 16757362,
@@ -130,7 +130,7 @@
     },
     "p1_ori": {
       "address": 16756895,
-      "type": ">u1"
+      "type": "u1"
     },
     "p1_passing": {
       "address": 16762594,
@@ -162,7 +162,7 @@
     },
     "p2_2_ori": {
       "address": 16757791,
-      "type": ">u1"
+      "type": "|u1"
     },
     "p2_2_vel_x": {
       "address": 16757746,
@@ -182,7 +182,7 @@
     },
     "p2_3_ori": {
       "address": 16757919,
-      "type": ">u1"
+      "type": "|u1"
     },
     "p2_3_vel_x": {
       "address": 16757874,
@@ -202,7 +202,7 @@
     },
     "p2_4_ori": {
       "address": 16758047,
-      "type": ">u1"
+      "type": "|u1"
     },
     "p2_4_vel_x": {
       "address": 16758002,
@@ -222,7 +222,7 @@
     },
     "p2_5_ori": {
       "address": 16758175,
-      "type": ">u1"
+      "type": "u1"
     },
     "p2_5_vel_x": {
       "address": 16758130,
@@ -266,7 +266,7 @@
     },
     "p2_ori": {
       "address": 16757663,
-      "type": ">u1"
+      "type": "|u1"
     },
     "p2_passing": {
       "address": 16763462,
