@@ -86,7 +86,7 @@
     },
     "p1_5_ori": {
       "address": 16757407,
-      "type": "u1"
+      "type": "|u1"
     },
     "p1_5_vel_x": {
       "address": 16757362,
@@ -130,7 +130,7 @@
     },
     "p1_ori": {
       "address": 16756895,
-      "type": "u1"
+      "type": "|u1"
     },
     "p1_passing": {
       "address": 16762594,
@@ -222,7 +222,7 @@
     },
     "p2_5_ori": {
       "address": 16758175,
-      "type": "u1"
+      "type": "|u1"
     },
     "p2_5_vel_x": {
       "address": 16758130,

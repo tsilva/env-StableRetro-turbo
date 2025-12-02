@@ -1,6 +1,5 @@
 import argparse
 
-
 import retro
 from retro.examples.interactive import Interactive
 

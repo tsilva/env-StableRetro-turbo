@@ -55,11 +55,15 @@ class MoreDeterministicRetroState(gym.Wrapper):
     def step(self, act):
         if self._reset_on_step:
             self.reset(state=self.get_state())
-        self._last_obs, rew, self._terminated, self._truncated, info = self.env.step(act)
+        self._last_obs, rew, self._terminated, self._truncated, info = self.env.step(
+            act,
+        )
         return self._last_obs, rew, self._terminated, self._truncated, info
 
     def get_state(self):
-        assert not (self._terminated or self._truncated), "cannot store a terminal state"
+        assert not (
+            self._terminated or self._truncated
+        ), "cannot store a terminal state"
         return (self.unwrapped.em.get_state(), self._last_obs)
 
 
