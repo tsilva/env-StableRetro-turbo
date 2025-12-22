@@ -253,9 +253,13 @@ add_core(32x picodrive)
 add_core(saturn mednafen_saturn)
 
 if(APPLE)
-  message(WARNING "FBNeo arcade emulator is currently not supported on macOS")
+  message(
+    WARNING
+      "FBNeo arcade and parallel N64 emulator is currently not supported on macOS"
+  )
 else()
   add_core(fbneo fbneo)
+  add_core(n64 parallel_n64)
 endif()
 
 set(CLEAN_CORES)

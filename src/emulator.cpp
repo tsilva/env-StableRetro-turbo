@@ -28,7 +28,11 @@ static Emulator* s_loadedEmulator = nullptr;
 static map<string, const char*> s_envVariables = {
 	{ "genesis_plus_gx_bram", "per game" },
 	{ "genesis_plus_gx_render", "single field" },
-	{ "genesis_plus_gx_blargg_ntsc_filter", "disabled" }
+	{ "genesis_plus_gx_blargg_ntsc_filter", "disabled" },
+
+	// Parallel-N64 defaults: force a CPU-rendered framebuffer so the frontend can read pixels.
+	// If left on auto, the core may choose an OpenGL path and provide no CPU buffer.
+	{ "parallel-n64-gfxplugin", "angrylion" },
 };
 
 static void (*retro_init)(void);
@@ -131,6 +135,21 @@ bool Emulator::loadRom(const string& romPath) {
 	retro_get_system_av_info(&m_avInfo);
 	fixScreenSize(romPath);
 
+	// For some cores (notably some N64 cores), the initial AV info can be wrong.
+	// Prefer the per-frame dimensions passed to cbVideoRefresh.
+	{
+		retro_system_info systemInfo;
+		retro_get_system_info(&systemInfo);
+		m_updateGeometryFromVideoRefresh =
+			!strcmp(systemInfo.library_name, "ParaLLEl N64") ||
+			!strcmp(systemInfo.library_name, "Mupen64Plus") ||
+			!strcmp(systemInfo.library_name, "Mupen64Plus-Next");
+	}
+
+	if (m_serializationQuirks & RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE) {
+		m_needsInitFrame = true;
+	}
+
 	m_romLoaded = true;
 	m_romPath = romPath;
 	return true;
@@ -140,6 +159,9 @@ void Emulator::run() {
 	assert(s_loadedEmulator == this);
 	m_audioData.clear();
 	retro_run();
+	if (m_serializationQuirks & RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE) {
+		m_needsInitFrame = false;
+	}
 }
 
 void Emulator::reset() {
@@ -169,6 +191,10 @@ void Emulator::reset() {
 	}
 
 	retro_reset();
+
+	if (m_serializationQuirks & RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE) {
+		m_needsInitFrame = true;
+	}
 }
 
 void Emulator::unloadCore() {
@@ -201,6 +227,7 @@ void Emulator::unloadRom() {
 
 bool Emulator::serialize(void* data, size_t size) {
 	assert(s_loadedEmulator == this);
+	ensureInitializedForSerialization();
 	return retro_serialize(data, size);
 }
 
@@ -213,7 +240,13 @@ bool Emulator::unserialize(const void* data, size_t size) {
 			reset();
 		}
 
-		return retro_unserialize(data, size);
+
+			ensureInitializedForSerialization();
+			bool ok = retro_unserialize(data, size);
+			if (ok && (m_serializationQuirks & RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE)) {
+				m_needsInitFrame = false;
+			}
+			return ok;
 	} catch (...) {
 		return false;
 	}
@@ -222,6 +255,13 @@ bool Emulator::unserialize(const void* data, size_t size) {
 size_t Emulator::serializeSize() {
 	assert(s_loadedEmulator == this);
 	return retro_serialize_size();
+}
+
+void Emulator::ensureInitializedForSerialization() {
+	if ((m_serializationQuirks & RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE) && m_needsInitFrame) {
+		// Run a single frame to satisfy cores that require initialization before (de)serialization
+		run();
+	}
 }
 
 void Emulator::clearCheats() {
@@ -283,6 +323,10 @@ bool Emulator::loadCore(const string& corePath) {
 	retro_set_input_state(cbInputState);
 	retro_init();
 
+		if (m_serializationQuirks & RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE) {
+			m_needsInitFrame = true;
+		}
+
 	return true;
 }
 
@@ -312,6 +356,16 @@ void Emulator::fixScreenSize(const string& romName) {
 	} else if (!strcmp(systemInfo.library_name, "Mednafen PCE Fast")) {
 		m_avInfo.geometry.base_width = 256;
 		m_avInfo.geometry.base_height = 242;
+	} else if (!strcmp(systemInfo.library_name, "ParaLLEl N64") ||
+			   !strcmp(systemInfo.library_name, "Mupen64Plus") ||
+			   !strcmp(systemInfo.library_name, "Mupen64Plus-Next")) {
+		// Some N64 libretro cores report a half-height (or otherwise unexpected)
+		// base_height which causes the frontend to display only the top half
+		// of the frame. Ensure we have at least a 480px height reported so the
+		// image isn't vertically cropped.
+		if (m_avInfo.geometry.base_height < 480) {
+			m_avInfo.geometry.base_height = 480;
+		}
 	}
 }
 
@@ -416,14 +470,38 @@ bool Emulator::cbEnvironment(unsigned cmd, void* data) {
 		cb->log = cbLog;
 		return true;
 	}
+	case RETRO_ENVIRONMENT_SET_SERIALIZATION_QUIRKS: {
+		s_loadedEmulator->m_serializationQuirks = *reinterpret_cast<const uint64_t*>(data);
+		if (s_loadedEmulator->m_serializationQuirks & RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE) {
+			s_loadedEmulator->m_needsInitFrame = true;
+		}
+		return true;
+	}
 	default:
 		return false;
 	}
 	return false;
 }
 
-void Emulator::cbVideoRefresh(const void* data, unsigned, unsigned, size_t pitch) {
+void Emulator::cbVideoRefresh(const void* data, unsigned width, unsigned height, size_t pitch) {
 	assert(s_loadedEmulator);
+	if (s_loadedEmulator->m_updateGeometryFromVideoRefresh && width && height) {
+		s_loadedEmulator->m_avInfo.geometry.base_width = width;
+		s_loadedEmulator->m_avInfo.geometry.base_height = height;
+		if (s_loadedEmulator->m_avInfo.geometry.max_width < width) {
+			s_loadedEmulator->m_avInfo.geometry.max_width = width;
+		}
+		if (s_loadedEmulator->m_avInfo.geometry.max_height < height) {
+			s_loadedEmulator->m_avInfo.geometry.max_height = height;
+		}
+	}
+	// Hardware rendering: the core is signaling that the framebuffer lives on the GPU.
+	// We currently don't support GPU readback here; ignore and keep m_imgData null.
+	if (data == RETRO_HW_FRAME_BUFFER_VALID) {
+		s_loadedEmulator->m_imgData = nullptr;
+		s_loadedEmulator->m_imgPitch = 0;
+		return;
+	}
 	if (data) {
 		s_loadedEmulator->m_imgData = data;
 	}
