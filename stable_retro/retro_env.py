@@ -35,6 +35,13 @@ class RetroEnv(gym.Env, EzPickle):
         obs_type=retro.Observations.IMAGE,
         render_mode="human",
     ):
+        if inttype is retro.data.Integrations.DEFAULT or isinstance(
+            inttype,
+            retro.data.DefaultIntegrations,
+        ):
+            retro.data.DefaultIntegrations._init()
+            inttype = retro.data.DefaultIntegrations.DEFAULT
+
         EzPickle.__init__(
             self,
             game,
