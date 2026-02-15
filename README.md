@@ -149,7 +149,7 @@ Supported Pythons: 3.7 to 3.12
 @misc{stable-retro,
   author = {Poliquin, Mathieu},
   title = {Stable Retro, a maintained fork of OpenAI's gym-retro},
-  year = {2025},
+  year = {2026},
   publisher = {GitHub},
   journal = {GitHub repository},
   howpublished = {\url{https://github.com/Farama-Foundation/stable-retro}},
