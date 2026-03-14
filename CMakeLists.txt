@@ -31,12 +31,18 @@ endif()
 
 find_package(Git QUIET)
 
-file(READ "${CMAKE_SOURCE_DIR}/stable_retro/VERSION.txt" PROJECT_VERSION)
-string(REGEX REPLACE "\n$" "" PROJECT_VERSION "${PROJECT_VERSION}")
+file(READ "${CMAKE_SOURCE_DIR}/stable_retro/VERSION.txt" STABLE_RETRO_VERSION)
+string(REGEX REPLACE "\n$" "" STABLE_RETRO_VERSION "${STABLE_RETRO_VERSION}")
+string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" PROJECT_VERSION
+                     "${STABLE_RETRO_VERSION}")
+if(NOT PROJECT_VERSION)
+  message(FATAL_ERROR
+          "Unable to derive a CMake project version from ${STABLE_RETRO_VERSION}")
+endif()
 set_property(
   DIRECTORY
   APPEND
-  PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/VERSION")
+  PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/stable_retro/VERSION.txt")
 
 project("Gym Retro" VERSION ${PROJECT_VERSION})
 set(CMAKE_CXX_STANDARD 14)
