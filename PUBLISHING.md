@@ -16,6 +16,11 @@
 This fork exists to provide a straightforward install path for Apple Silicon
 users without asking them to build `stable-retro` from source.
 
+## Versioning
+
+This project tracks upstream `stable-retro` releases and publishes downstream
+Apple Silicon fixes as post releases such as `0.9.9.post1`.
+
 ## Using The Package
 
 Install from PyPI:
@@ -31,7 +36,7 @@ artifact.
 
 1. Update [`/stable_retro/VERSION.txt`](stable_retro/VERSION.txt).
 2. Commit and push the release commit.
-3. Create a tag such as `v0.9.14`.
+3. Create a tag such as `v0.9.9.post1`.
 4. Publish a GitHub Release for that tag.
 5. Let GitHub Actions build the macOS arm64 wheels, publish them to PyPI, and
    attach the `.whl` files to the GitHub Release.

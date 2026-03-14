@@ -43,8 +43,8 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
-  # Homebrew-provided runtime deps used for public arm64 wheels currently
-  # target macOS 14.0, so published binaries must match that baseline.
+  # Homebrew-provided runtime deps used for public arm64 wheels currently target
+  # macOS 14.0, so published binaries must match that baseline.
   set(CMAKE_MACOSX_DEPLOYMENT_TARGET 14.0)
 else()
   set(CMAKE_MACOSX_DEPLOYMENT_TARGET 10.7)
@@ -156,8 +156,10 @@ set(COREINFO)
 set(CORE_TARGETS)
 set(BUILD_CORES
     "gb;nes;snes;genesis"
-    CACHE STRING
-          "Semicolon-separated platform/core names to build. Empty builds the default full set.")
+    CACHE
+      STRING
+      "Semicolon-separated platform/core names to build. Empty builds the default full set."
+)
 
 function(add_core platform core_name)
   set(target_name ${core_name}_libretro${CMAKE_SHARED_LIBRARY_SUFFIX})
@@ -333,7 +335,9 @@ if(CMAKE_CROSSCOMPILING)
   find_program(CAPNPC_CXX_EXECUTABLE capnpc-c++)
 endif()
 
-if(ENABLE_CAPNPROTO AND NOT CAPN_PROTO_FOUND AND NOT BUILD_MANYLINUX)
+if(ENABLE_CAPNPROTO
+   AND NOT CAPN_PROTO_FOUND
+   AND NOT BUILD_MANYLINUX)
   if(NOT CMAKE_CROSSCOMPILING OR CAPNP_EXECUTABLE)
     set(CAPN_PROTO_FOUND ON)
     set(BUILD_TESTING
@@ -444,7 +448,9 @@ add_library(
   ${LUA_LIBRARY})
 target_link_libraries(retro-base ${ZLIB_LIBRARY} ${LIBZIP_LIBRARIES}
                       ${LUA_LIBRARY} ${LUA_LIBRRAY} ${HWRENDER_LIBRARIES})
-add_dependencies(retro-base ${CORE_TARGETS})
+if(CORE_TARGETS)
+  add_dependencies(retro-base ${CORE_TARGETS})
+endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_link_libraries(retro-base dl)

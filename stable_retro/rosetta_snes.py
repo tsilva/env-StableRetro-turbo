@@ -35,10 +35,15 @@ class _RosettaSnesHelper:
         helper_path = package_dir / "helpers" / HELPER_NAME
         core_dir = package_dir / "cores_rosetta"
 
-        missing = [str(path) for path in (helper_path, core_dir / "snes9x_libretro.dylib") if not path.exists()]
+        missing = [
+            str(path)
+            for path in (helper_path, core_dir / "snes9x_libretro.dylib")
+            if not path.exists()
+        ]
         if missing:
             raise RosettaSnesError(
-                "Rosetta SNES assets are missing from this install: " + ", ".join(missing),
+                "Rosetta SNES assets are missing from this install: "
+                + ", ".join(missing),
             )
 
         try:

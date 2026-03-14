@@ -2,7 +2,9 @@ import os
 import sys
 
 import stable_retro.data
-from stable_retro._retro import Movie, RetroEmulator as NativeRetroEmulator, core_path
+from stable_retro._retro import Movie
+from stable_retro._retro import RetroEmulator as NativeRetroEmulator
+from stable_retro._retro import core_path
 from stable_retro.enums import Actions, Observations, State
 from stable_retro.retro_env import RetroEnv
 from stable_retro.rosetta_snes import RosettaSnesEmulator, should_use_rosetta_snes

@@ -138,7 +138,10 @@ def build_native_snes_core(destination: Path, jobs: str):
             jobs,
         ],
     )
-    shutil.copy2(source_dir / "snes9x_libretro.dylib", destination / "snes9x_libretro.dylib")
+    shutil.copy2(
+        source_dir / "snes9x_libretro.dylib",
+        destination / "snes9x_libretro.dylib",
+    )
 
 
 def build_rosetta_snes_helper(destination: Path):
@@ -236,6 +239,7 @@ class CMakeBuild(build_ext):
             build_native_snes_core(SCRIPT_DIR / "stable_retro" / "cores", jobs)
             build_rosetta_snes_core(SCRIPT_DIR / "stable_retro" / "cores_rosetta", jobs)
             build_rosetta_snes_helper(SCRIPT_DIR / "stable_retro" / "helpers")
+
 
 setup(
     name="stable-retro-apple-silicon",
