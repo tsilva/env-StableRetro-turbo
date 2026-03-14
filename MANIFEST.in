@@ -1,5 +1,6 @@
 recursive-include third-party **
 recursive-include cores **
+recursive-include tools *.cpp
 recursive-exclude stable_retro/data rom.*
 recursive-include stable_retro/data rom.sha
 global-exclude .git* .*.yml *.o *.a *.dylib *.so *.dll

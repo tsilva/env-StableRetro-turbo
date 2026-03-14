@@ -2,9 +2,10 @@ import os
 import sys
 
 import stable_retro.data
-from stable_retro._retro import Movie, RetroEmulator, core_path
+from stable_retro._retro import Movie, RetroEmulator as NativeRetroEmulator, core_path
 from stable_retro.enums import Actions, Observations, State
 from stable_retro.retro_env import RetroEnv
+from stable_retro.rosetta_snes import RosettaSnesEmulator, should_use_rosetta_snes
 
 ROOT_DIR = os.path.abspath(os.path.dirname(__file__))
 core_path(os.path.join(os.path.dirname(__file__), "cores"))
@@ -29,6 +30,15 @@ __all__ = [
 ]
 
 stable_retro.data.init_core_info(core_path())
+
+
+class RetroEmulator:
+    load_core_info = staticmethod(NativeRetroEmulator.load_core_info)
+
+    def __new__(cls, rom_path):
+        if should_use_rosetta_snes(rom_path):
+            return RosettaSnesEmulator(rom_path)
+        return NativeRetroEmulator(rom_path)
 
 
 def get_core_path(corename):

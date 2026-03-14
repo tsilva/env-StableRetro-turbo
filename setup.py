@@ -1,4 +1,5 @@
 import os
+import platform
 import shlex
 import shutil
 import subprocess
@@ -21,6 +22,8 @@ PUBLIC_CORE_NAMES = tuple(
     ).split(",")
     if core.strip()
 )
+ROSETTA_HELPER_NAME = "rosetta_snes_helper"
+ROSETTA_CORE_NAME = "snes9x_libretro.dylib"
 
 DATA_PACKAGE_DIRS = {
     "stable_retro.data.stable": SCRIPT_DIR / "stable_retro" / "data" / "stable",
@@ -54,6 +57,8 @@ def stable_retro_package_data():
     for core in PUBLIC_CORE_NAMES:
         files.append(f"cores/{core}.json")
         files.append(f"cores/{core}_libretro.dylib")
+    files.append(f"helpers/{ROSETTA_HELPER_NAME}")
+    files.append(f"cores_rosetta/{ROSETTA_CORE_NAME}")
     return files
 
 
@@ -81,6 +86,77 @@ def copy_public_core_assets(destination: Path):
             target = destination / asset.name
             if asset.resolve() != target.resolve():
                 shutil.copy2(asset, target)
+
+
+def should_build_rosetta_snes():
+    return (
+        sys.platform == "darwin"
+        and platform.machine() == "arm64"
+        and os.environ.get("STABLE_RETRO_BUILD_ROSETTA_SNES", "1") != "0"
+    )
+
+
+def build_rosetta_snes_core(destination: Path, jobs: str):
+    source_dir = SCRIPT_DIR / "cores" / "snes" / "libretro"
+    destination.mkdir(parents=True, exist_ok=True)
+    subprocess.check_call(["make", "-C", str(source_dir), "clean"])
+    subprocess.check_call(
+        [
+            "make",
+            "-C",
+            str(source_dir),
+            "platform=osx",
+            "CC=clang -arch x86_64",
+            "CXX=clang++ -arch x86_64",
+            jobs,
+        ],
+    )
+    shutil.copy2(source_dir / ROSETTA_CORE_NAME, destination / ROSETTA_CORE_NAME)
+
+
+def build_native_snes_core(destination: Path, jobs: str):
+    source_dir = SCRIPT_DIR / "cores" / "snes" / "libretro"
+    destination.mkdir(parents=True, exist_ok=True)
+    subprocess.check_call(["make", "-C", str(source_dir), "clean"])
+    subprocess.check_call(
+        [
+            "make",
+            "-C",
+            str(source_dir),
+            "platform=osx",
+            "CC=clang -arch arm64",
+            "CXX=clang++ -arch arm64",
+            jobs,
+        ],
+    )
+    shutil.copy2(source_dir / "snes9x_libretro.dylib", destination / "snes9x_libretro.dylib")
+
+
+def build_rosetta_snes_helper(destination: Path):
+    destination.mkdir(parents=True, exist_ok=True)
+    helper_path = destination / ROSETTA_HELPER_NAME
+    compile_cmd = [
+        "clang++",
+        "-arch",
+        "x86_64",
+        "-std=c++17",
+        "-O2",
+        "-I",
+        str(SCRIPT_DIR / "src"),
+        "-I",
+        str(SCRIPT_DIR / "third-party"),
+        "-I",
+        str(SCRIPT_DIR / "third-party" / "gtest" / "googletest" / "include"),
+        "-o",
+        str(helper_path),
+        str(SCRIPT_DIR / "tools" / "rosetta_snes_helper.cpp"),
+        str(SCRIPT_DIR / "src" / "emulator.cpp"),
+        str(SCRIPT_DIR / "src" / "imageops.cpp"),
+        str(SCRIPT_DIR / "src" / "memory.cpp"),
+        str(SCRIPT_DIR / "src" / "utils.cpp"),
+        "-lz",
+    ]
+    subprocess.check_call(compile_cmd)
 
 
 class CMakeBuild(build_ext):
@@ -143,6 +219,14 @@ class CMakeBuild(build_ext):
         subprocess.check_call(["make", jobs, "all"])
         if package_dir is not None:
             copy_public_core_assets(package_dir / "cores")
+            if should_build_rosetta_snes():
+                build_native_snes_core(package_dir / "cores", jobs)
+                build_rosetta_snes_core(package_dir / "cores_rosetta", jobs)
+                build_rosetta_snes_helper(package_dir / "helpers")
+        elif should_build_rosetta_snes():
+            build_native_snes_core(SCRIPT_DIR / "stable_retro" / "cores", jobs)
+            build_rosetta_snes_core(SCRIPT_DIR / "stable_retro" / "cores_rosetta", jobs)
+            build_rosetta_snes_helper(SCRIPT_DIR / "stable_retro" / "helpers")
 
 setup(
     name="stable-retro-apple-silicon",

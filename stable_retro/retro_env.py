@@ -375,7 +375,10 @@ class RetroEnv(gym.Env, EzPickle):
     def record_movie(self, path):
         """Start recording gameplay input to a BK2 movie at ``path``."""
         self.movie = retro.Movie(path, True, self.players)
-        self.movie.configure(self.gamename, self.em)
+        self.movie.configure(
+            self.gamename,
+            getattr(self.em, "native_emulator", self.em),
+        )
         if self.initial_state:
             self.movie.set_state(self.initial_state)
 

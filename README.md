@@ -18,6 +18,12 @@
 
 **The Result:** Go from zero to training in under 60 seconds on your M-series Mac.
 
+SNES note: on Apple Silicon, SNES uses an automatic Rosetta helper because the native arm64 `snes9x` path is not stable across the bundled integrations. If Rosetta is not installed yet, install it once with:
+
+```bash
+softwareupdate --install-rosetta --agree-to-license
+```
+
 ## 🚀 Quick Start
 
 ```bash
@@ -42,6 +48,7 @@ import retro
 - Matching downloadable wheel files attached to GitHub Releases
 - A maintained Apple Silicon packaging layer on top of upstream [`stable-retro`](https://github.com/Farama-Foundation/stable-retro)
 - The same `stable_retro` and `retro` import surface users expect
+- Automatic Rosetta fallback for SNES on Apple Silicon so bundled SNES integrations keep rendering correctly
 
 ## 📦 Release Matrix
 
