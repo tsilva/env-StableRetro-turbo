@@ -25,7 +25,7 @@ namespace Retro {
 
 static Emulator* s_loadedEmulator = nullptr;
 
-static map<string, const char*> s_envVariables = {
+static map<string, string> s_envVariables = {
 	{ "genesis_plus_gx_bram", "per game" },
 	{ "genesis_plus_gx_render", "single field" },
 	{ "genesis_plus_gx_blargg_ntsc_filter", "disabled" },
@@ -167,6 +167,15 @@ bool Emulator::loadRom(const string& romPath) {
 		return false;
 	}
 
+	retro_system_info systemInfo;
+	retro_get_system_info(&systemInfo);
+	if (!strcmp(systemInfo.library_name, "Snes9x")) {
+		// Snes9x expects an explicit reset after load_game on Apple Silicon.
+		// Without it, cold boot never produces frames and savestates collapse
+		// after a few steps because core state is only partially initialized.
+		retro_reset();
+	}
+
 #ifdef ENABLE_HW_RENDER
 	// If HW rendering was enabled during retro_load_game, now call context_reset
 	// This must be done after RETRO_ENVIRONMENT_SET_HW_RENDER has returned and
@@ -184,8 +193,6 @@ bool Emulator::loadRom(const string& romPath) {
 	// For some cores (notably some N64 cores), the initial AV info can be wrong.
 	// Prefer the per-frame dimensions passed to cbVideoRefresh.
 	{
-		retro_system_info systemInfo;
-		retro_get_system_info(&systemInfo);
 		m_updateGeometryFromVideoRefresh =
 			!strcmp(systemInfo.library_name, "ParaLLEl N64") ||
 			!strcmp(systemInfo.library_name, "Mupen64Plus") ||
@@ -485,15 +492,42 @@ bool Emulator::cbEnvironment(unsigned cmd, void* data) {
 			break;
 		}
 		return true;
+	case RETRO_ENVIRONMENT_SET_VARIABLES: {
+		auto* vars = reinterpret_cast<const retro_variable*>(data);
+		if (!vars) {
+			return false;
+		}
+		for (; vars->key; ++vars) {
+			if (!vars->value || s_envVariables.count(vars->key)) {
+				continue;
+			}
+			const char* defaults = strchr(vars->value, ';');
+			if (!defaults) {
+				continue;
+			}
+			defaults += 1;
+			while (*defaults == ' ') {
+				++defaults;
+			}
+			const char* end = strchr(defaults, '|');
+			s_envVariables[vars->key] =
+				end ? string(defaults, end - defaults) : string(defaults);
+		}
+		return true;
+	}
 	case RETRO_ENVIRONMENT_GET_VARIABLE: {
 		struct retro_variable* var = reinterpret_cast<struct retro_variable*>(data);
 		if (s_envVariables.count(string(var->key))) {
-			var->value = s_envVariables[string(var->key)];
+			var->value = s_envVariables[string(var->key)].c_str();
 			return true;
 		}
 		return false;
 	}
+	case RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE:
+		*reinterpret_cast<bool*>(data) = false;
+		return true;
 	case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY:
+	case RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY:
 		if (!s_loadedEmulator->m_corePath) {
 			s_loadedEmulator->m_corePath = strdup(corePath().c_str());
 		}
@@ -508,6 +542,19 @@ bool Emulator::cbEnvironment(unsigned cmd, void* data) {
 			s_loadedEmulator->m_map.emplace_back(static_cast<const retro_memory_map*>(data)->descriptors[i]);
 		}
 		s_loadedEmulator->reconfigureAddressSpace();
+		return true;
+	case RETRO_ENVIRONMENT_SET_GEOMETRY: {
+		auto* geom = reinterpret_cast<const retro_system_av_info*>(data);
+		if (geom) {
+			s_loadedEmulator->m_avInfo.geometry = geom->geometry;
+			s_loadedEmulator->m_avInfo.timing = geom->timing;
+		}
+		return true;
+	}
+	case RETRO_ENVIRONMENT_SET_CONTROLLER_INFO:
+	case RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS:
+	case RETRO_ENVIRONMENT_SET_PERFORMANCE_LEVEL:
+	case RETRO_ENVIRONMENT_SET_SUPPORT_ACHIEVEMENTS:
 		return true;
 	case RETRO_ENVIRONMENT_SET_ROTATION: {
 		const unsigned* rotation = reinterpret_cast<const unsigned*>(data);
@@ -575,24 +622,53 @@ void Emulator::cbVideoRefresh(const void* data, unsigned width, unsigned height,
 			// Read pixels from GPU framebuffer to CPU
 			const void* pixels = s_loadedEmulator->m_hwRender.readbackFramebuffer(width, height);
 			if (pixels) {
-				s_loadedEmulator->m_imgData = pixels;
-				s_loadedEmulator->m_imgPitch = s_loadedEmulator->m_hwRender.getReadbackPitch();
 				s_loadedEmulator->m_imgDepth = 32;  // RGBA8888
+				data = pixels;
+				pitch = s_loadedEmulator->m_hwRender.getReadbackPitch();
+			} else {
 				return;
 			}
 		}
+#else
+		return;
 #endif
-		// HW render not enabled or failed - keep m_imgData null
-		s_loadedEmulator->m_imgData = nullptr;
-		s_loadedEmulator->m_imgPitch = 0;
+	}
+
+	// NULL means "duplicate the previous frame".
+	if (!data || !width || !height) {
 		return;
 	}
-	if (data) {
-		s_loadedEmulator->m_imgData = data;
+
+	size_t bytes_per_pixel = 0;
+	switch (s_loadedEmulator->m_imgDepth) {
+	case 15:
+	case 16:
+		bytes_per_pixel = 2;
+		break;
+	case 32:
+		bytes_per_pixel = 4;
+		break;
+	default:
+		return;
 	}
-	if (pitch) {
-		s_loadedEmulator->m_imgPitch = pitch;
+
+	const size_t row_bytes = width * bytes_per_pixel;
+	if (!pitch) {
+		pitch = row_bytes;
 	}
+	if (pitch < row_bytes) {
+		return;
+	}
+
+	s_loadedEmulator->m_imgBuffer.resize(row_bytes * height);
+	auto* dst = s_loadedEmulator->m_imgBuffer.data();
+	const auto* src = static_cast<const uint8_t*>(data);
+	for (unsigned y = 0; y < height; ++y) {
+		memcpy(dst + (y * row_bytes), src + (y * pitch), row_bytes);
+	}
+
+	s_loadedEmulator->m_imgData = dst;
+	s_loadedEmulator->m_imgPitch = row_bytes;
 }
 
 void Emulator::cbAudioSample(int16_t left, int16_t right) {

@@ -173,3 +173,6 @@ third-party/libzip/regress/
 third-party/libzip/src/zipcmp
 third-party/libzip/src/zipmerge
 third-party/libzip/src/ziptool
+
+# PyPI verification
+pypi-proof/

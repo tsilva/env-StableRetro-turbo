@@ -93,6 +93,7 @@ private:
 	const void* m_imgData = nullptr;
 	size_t m_imgPitch = 0;
 	int m_imgDepth = 0;
+	std::vector<uint8_t> m_imgBuffer;
 
 	// Audio buffer; accumulated during run()
 	std::vector<int16_t> m_audioData;
