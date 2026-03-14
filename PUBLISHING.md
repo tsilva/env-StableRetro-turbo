@@ -1,48 +1,37 @@
 # Publishing
 
-This fork publishes public Apple Silicon wheels for
-`stable-retro-apple-silicon`.
+`stable-retro-apple-silicon` publishes Apple Silicon wheels for the
+`stable-retro` API surface.
 
-## PyPI Continuity
+## Availability
 
-Versions `0.9.10` through `0.9.12` were already published for this package from
-the earlier transitional repo layout. This fork now becomes the canonical source
-tree, so the next public release from here should be `0.9.13` or newer.
+- PyPI package: `stable-retro-apple-silicon`
+- GitHub Releases: matching `.whl` assets for each tagged release
+- Target platform: Apple Silicon `arm64`
+- Supported macOS baseline: `14.0+`
+- Supported Python versions: `3.9` to `3.12`
 
-## Before The First Release From This Fork
+## Why This Exists
 
-1. Create the PyPI trusted publisher entry for this GitHub repo and
-   [`/.github/workflows/release.yml`](.github/workflows/release.yml).
-2. Confirm the default branch on GitHub is either `master` or `main`.
+This fork exists to provide a straightforward install path for Apple Silicon
+users without asking them to build `stable-retro` from source.
+
+## Using The Package
+
+Install from PyPI:
+
+```bash
+pip install stable-retro-apple-silicon
+```
+
+Or download the wheel directly from GitHub Releases if you want a specific
+artifact.
 
 ## Release Checklist
 
 1. Update [`/stable_retro/VERSION.txt`](stable_retro/VERSION.txt).
 2. Commit and push the release commit.
-3. Create a tag such as `v0.9.13`.
+3. Create a tag such as `v0.9.14`.
 4. Publish a GitHub Release for that tag.
 5. Let GitHub Actions build the macOS arm64 wheels, publish them to PyPI, and
    attach the `.whl` files to the GitHub Release.
-
-## Local Verification
-
-Build the public wheel locally:
-
-```bash
-python -m pip install --upgrade build
-CMAKE_ARGS="-DBUILD_CORES=gb;nes;snes;genesis -DBUILD_TESTS=OFF -DENABLE_CAPNPROTO=OFF" \
-STABLE_RETRO_PUBLIC_CORES="gambatte,fceumm,snes9x,genesis_plus_gx" \
-python -m build --wheel
-```
-
-Inspect that the wheel contains no `rom.*` payloads except `rom.sha`:
-
-```bash
-unzip -l dist/*.whl | rg 'rom\.'
-```
-
-Expected result:
-
-- `rom.sha` entries may appear
-- actual ROM payloads such as `rom.gb`, `rom.nes`, `rom.sfc`, and `rom.sms`
-  must not appear

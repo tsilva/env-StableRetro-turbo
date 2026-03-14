@@ -5,14 +5,12 @@
 This repository is a publishable Apple Silicon fork of
 [stable-retro](https://github.com/Farama-Foundation/stable-retro). It keeps the
 upstream source tree at the repo root, adds Apple Silicon build fixes, and
-publishes ROM-safe public wheels under the `stable-retro-apple-silicon` package
-name.
+publishes public wheels under the `stable-retro-apple-silicon` package name.
 
 ## Install
 
 ```bash
 pip install stable-retro-apple-silicon
-python -m stable_retro.import /path/to/your/roms
 ```
 
 The import names stay the same:
@@ -36,24 +34,34 @@ import retro
 | CPU | Apple Silicon `arm64` |
 | macOS | `14.0+` |
 | Python | `3.9` to `3.12` |
-| Wheel contents | code, public cores, `rom.sha` metadata, no ROM payloads |
+| Wheel contents | code, public cores, game metadata |
 | Public cores | Game Boy, NES, SNES, Sega Master System |
 
-## ROM Policy
+## What You Get
 
-Public wheels do not bundle copyrighted ROM files. The package includes game
-metadata and `rom.sha` hashes, and users import their own ROMs after install.
-
-Local imported `rom.*` payloads are ignored by Git and excluded from build
-artifacts. Only `rom.sha` files are kept.
+- Native Apple Silicon wheels published to PyPI
+- Matching downloadable wheel files attached to GitHub Releases
+- A maintained Apple Silicon packaging layer on top of upstream `stable-retro`
+- The same `stable_retro` and `retro` import surface users expect from
+  `stable-retro`
 
 ## Build Notes
 
 - Apple Silicon wheel builds use a restricted public core set:
   `gambatte`, `fceumm`, `snes9x`, `genesis_plus_gx`
 - CapnProto is disabled in the public wheel build path
-- release automation publishes wheels to PyPI and also attaches them to GitHub
+- Release automation publishes wheels to PyPI and also attaches them to GitHub
   Releases
+
+## Using Installed Wheels
+
+After install, use the standard `stable-retro` APIs:
+
+```python
+import stable_retro as retro
+
+env = retro.make("Alleyway-GameBoy-v0", render_mode="rgb_array")
+```
 
 ## Upstream Docs
 
