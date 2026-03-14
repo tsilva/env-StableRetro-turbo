@@ -223,16 +223,11 @@ function(add_core platform core_name)
   endif()
 
   unset(core_archflags)
-  set(core_cc "${CMAKE_C_COMPILER}")
-  set(core_cxx "${CMAKE_CXX_COMPILER}")
   if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
     # Libretro makefiles default to legacy x86 macOS arch flags when unset.
     # Force native Apple Silicon core binaries so they can be loaded by the
-    # arm64 Python extension on modern Macs. Some cores ignore ARCHFLAGS and
-    # only honor the compiler command itself, so pass the arch explicitly.
+    # arm64 Python extension on modern Macs.
     set(core_archflags "ARCHFLAGS=-arch arm64 ${core_macos_min_version_flag}")
-    set(core_cc "${CMAKE_C_COMPILER} -arch arm64")
-    set(core_cxx "${CMAKE_CXX_COMPILER} -arch arm64")
   endif()
 
   add_custom_command(
@@ -240,7 +235,7 @@ function(add_core platform core_name)
     COMMAND
       ${CMAKE_COMMAND} -E env CFLAGS=${core_cflags} CXXFLAGS=${core_cxxflags}
       LDFLAGS=${core_ldflags} ${core_archflags} $(MAKE) -f ${makefile}
-      CC="${core_cc}" CXX="${core_cxx}"
+      CC="${CMAKE_C_COMPILER}" CXX="${CMAKE_CXX_COMPILER}"
       fpic=${core_fpic_flags} ${libretro_platform}
     COMMAND ${CMAKE_COMMAND} -E copy "${core_name}_libretro${DYNLIB_SUFFIX}"
             "${TARGET_PATH}"
