@@ -96,9 +96,15 @@ def should_build_rosetta_snes():
     )
 
 
+def macos_min_flag(default: str):
+    min_version = os.environ.get("MACOSX_DEPLOYMENT_TARGET", default)
+    return f"-mmacosx-version-min={min_version}"
+
+
 def build_rosetta_snes_core(destination: Path, jobs: str):
     source_dir = SCRIPT_DIR / "cores" / "snes" / "libretro"
     destination.mkdir(parents=True, exist_ok=True)
+    min_flag = macos_min_flag("11.0")
     subprocess.check_call(["make", "-C", str(source_dir), "clean"])
     subprocess.check_call(
         [
@@ -108,6 +114,7 @@ def build_rosetta_snes_core(destination: Path, jobs: str):
             "platform=osx",
             "CC=clang -arch x86_64",
             "CXX=clang++ -arch x86_64",
+            f"fpic=-fPIC {min_flag}",
             jobs,
         ],
     )
@@ -117,6 +124,7 @@ def build_rosetta_snes_core(destination: Path, jobs: str):
 def build_native_snes_core(destination: Path, jobs: str):
     source_dir = SCRIPT_DIR / "cores" / "snes" / "libretro"
     destination.mkdir(parents=True, exist_ok=True)
+    min_flag = macos_min_flag("11.0")
     subprocess.check_call(["make", "-C", str(source_dir), "clean"])
     subprocess.check_call(
         [
@@ -126,6 +134,7 @@ def build_native_snes_core(destination: Path, jobs: str):
             "platform=osx",
             "CC=clang -arch arm64",
             "CXX=clang++ -arch arm64",
+            f"fpic=-fPIC {min_flag}",
             jobs,
         ],
     )
