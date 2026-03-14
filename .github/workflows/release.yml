@@ -1,0 +1,79 @@
+name: release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  release:
+    types: [published]
+
+jobs:
+  build_wheels:
+    name: Build macOS arm64 wheels
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip cibuildwheel==3.3.1
+
+      - name: Build wheels
+        env:
+          CIBW_ARCHS_MACOS: arm64
+          CIBW_BUILD_VERBOSITY: 1
+        run: python -m cibuildwheel . --output-dir wheelhouse
+
+      - name: Report built wheels
+        run: ls -lh wheelhouse/*.whl
+
+      - name: Upload wheel artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: wheels-macos-arm64
+          path: wheelhouse/*.whl
+
+  publish_pypi:
+    name: Publish to PyPI
+    needs: build_wheels
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    if: github.event_name == 'release' && github.event.action == 'published'
+
+    steps:
+      - name: Download wheel artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: wheels-macos-arm64
+          path: dist
+
+      - name: Publish wheel
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  upload_release_assets:
+    name: Upload Release Assets
+    needs: build_wheels
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    if: github.event_name == 'release' && github.event.action == 'published'
+
+    steps:
+      - name: Download wheel artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: wheels-macos-arm64
+          path: dist
+
+      - name: Attach wheels to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/*.whl --clobber --repo "${{ github.repository }}"

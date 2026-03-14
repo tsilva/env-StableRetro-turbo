@@ -42,7 +42,13 @@ project("Gym Retro" VERSION ${PROJECT_VERSION})
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-set(CMAKE_MACOSX_DEPLOYMENT_TARGET 10.7)
+if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+  # Homebrew-provided runtime deps used for public arm64 wheels currently
+  # target macOS 14.0, so published binaries must match that baseline.
+  set(CMAKE_MACOSX_DEPLOYMENT_TARGET 14.0)
+else()
+  set(CMAKE_MACOSX_DEPLOYMENT_TARGET 10.7)
+endif()
 set(CMAKE_CXX_FLAGS
     "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wno-sign-compare -Wno-missing-field-initializers -fvisibility=hidden"
 )
@@ -68,6 +74,7 @@ option(ENABLE_HW_RENDER
        "Enable hardware rendering support for GPU cores (requires EGL/OpenGL)"
        OFF)
 option(BUILD_N64 "Build Parallel N64 core (requires OpenGL headers)" ON)
+option(ENABLE_CAPNPROTO "Enable CapnProto-based search save/load support" ON)
 
 set(BUILD_PYTHON
     ON
@@ -87,7 +94,7 @@ endif()
 find_package(ZLIB REQUIRED)
 find_package(PkgConfig)
 
-if(NOT BUILD_MANYLINUX)
+if(ENABLE_CAPNPROTO AND NOT BUILD_MANYLINUX)
   # CapnProto requires a newer kernel than manylinux1 provides
   find_package(CapnProto QUIET)
 endif()
@@ -147,6 +154,10 @@ file(MAKE_DIRECTORY "${PYLIB_DIRECTORY}/stable_retro/cores")
 set(CORES)
 set(COREINFO)
 set(CORE_TARGETS)
+set(BUILD_CORES
+    "gb;nes;snes;genesis"
+    CACHE STRING
+          "Semicolon-separated platform/core names to build. Empty builds the default full set.")
 
 function(add_core platform core_name)
   set(target_name ${core_name}_libretro${CMAKE_SHARED_LIBRARY_SUFFIX})
@@ -191,6 +202,7 @@ function(add_core platform core_name)
   set(core_ldflags "-w ${STATIC_LDFLAGS}")
   set(core_cflags "-w")
   set(core_cxxflags "-w")
+  unset(core_macos_min_version_flag)
 
   if(WIN32 AND NOT CMAKE_CROSSCOMPILING)
     set(core_ldflags "${core_ldflags} ${STATIC_LDFLAGS}")
@@ -201,16 +213,30 @@ function(add_core platform core_name)
   endif()
 
   if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    set(core_macos_min_version_flag
+        "-mmacosx-version-min=${CMAKE_MACOSX_DEPLOYMENT_TARGET}")
+    set(core_ldflags "${core_ldflags} ${core_macos_min_version_flag}")
+    set(core_cflags "${core_cflags} ${core_macos_min_version_flag}")
+    set(core_cxxflags "${core_cxxflags} ${core_macos_min_version_flag}")
     set(core_fpic_flags
-        "${core_fpic_flags} -mmacosx-version-min=10.7 -stdlib=libc++")
+        "${core_fpic_flags} ${core_macos_min_version_flag} -stdlib=libc++")
+  endif()
+
+  unset(core_archflags)
+  if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+    # Libretro makefiles default to legacy x86 macOS arch flags when unset.
+    # Force native Apple Silicon core binaries so they can be loaded by the
+    # arm64 Python extension on modern Macs.
+    set(core_archflags "ARCHFLAGS=-arch arm64 ${core_macos_min_version_flag}")
   endif()
 
   add_custom_command(
     OUTPUT "${TARGET_PATH}"
     COMMAND
       ${CMAKE_COMMAND} -E env CFLAGS=${core_cflags} CXXFLAGS=${core_cxxflags}
-      LDFLAGS=${core_ldflags} $(MAKE) -f ${makefile} CC="${CMAKE_C_COMPILER}"
-      CXX="${CMAKE_CXX_COMPILER}" fpic=${core_fpic_flags} ${libretro_platform}
+      LDFLAGS=${core_ldflags} ${core_archflags} $(MAKE) -f ${makefile}
+      CC="${CMAKE_C_COMPILER}" CXX="${CMAKE_CXX_COMPILER}"
+      fpic=${core_fpic_flags} ${libretro_platform}
     COMMAND ${CMAKE_COMMAND} -E copy "${core_name}_libretro${DYNLIB_SUFFIX}"
             "${TARGET_PATH}"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/cores/${platform}/${subdir}"
@@ -244,22 +270,27 @@ function(add_core platform core_name)
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/cores/${platform}/${subdir}")
 endfunction()
 
-add_core(snes snes9x)
-add_core(genesis genesis_plus_gx)
-add_core(nes fceumm)
-add_core(atari2600 stella)
+function(maybe_add_core platform core_name)
+  if(BUILD_CORES)
+    list(FIND BUILD_CORES "${platform}" platform_idx)
+    list(FIND BUILD_CORES "${core_name}" core_idx)
+    if(platform_idx EQUAL -1 AND core_idx EQUAL -1)
+      return()
+    endif()
+  endif()
+  add_core(${platform} ${core_name})
+endfunction()
 
-if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
-  message(warning "Detected Apple Silicon, skipping gambatte (gb)")
-else()
-  add_core(gb gambatte)
-endif()
-
-add_core(gba mgba)
-add_core(pce mednafen_pce_fast)
-add_core(32x picodrive)
-add_core(saturn mednafen_saturn)
-add_core(ds melonds)
+maybe_add_core(snes snes9x)
+maybe_add_core(genesis genesis_plus_gx)
+maybe_add_core(nes fceumm)
+maybe_add_core(atari2600 stella)
+maybe_add_core(gb gambatte)
+maybe_add_core(gba mgba)
+maybe_add_core(pce mednafen_pce_fast)
+maybe_add_core(32x picodrive)
+maybe_add_core(saturn mednafen_saturn)
+maybe_add_core(ds melonds)
 
 if(APPLE)
   message(
@@ -267,10 +298,10 @@ if(APPLE)
       "FBNeo arcade and parallel N64 emulator is currently not supported on macOS"
   )
 else()
-  add_core(fbneo fbneo)
+  maybe_add_core(fbneo fbneo)
   if(BUILD_N64)
     if(STABLE_RETRO_HAVE_GL_GL_H)
-      add_core(n64 parallel_n64)
+      maybe_add_core(n64 parallel_n64)
     else()
       message(
         WARNING
@@ -284,7 +315,7 @@ endif()
 
 # Flycast (Dreamcast) - requires hardware rendering
 if(ENABLE_HW_RENDER)
-  add_core(flycast flycast)
+  maybe_add_core(flycast flycast)
 endif()
 
 set(CLEAN_CORES)
@@ -302,7 +333,7 @@ if(CMAKE_CROSSCOMPILING)
   find_program(CAPNPC_CXX_EXECUTABLE capnpc-c++)
 endif()
 
-if(NOT CAPN_PROTO_FOUND AND NOT BUILD_MANYLINUX)
+if(ENABLE_CAPNPROTO AND NOT CAPN_PROTO_FOUND AND NOT BUILD_MANYLINUX)
   if(NOT CMAKE_CROSSCOMPILING OR CAPNP_EXECUTABLE)
     set(CAPN_PROTO_FOUND ON)
     set(BUILD_TESTING
@@ -317,8 +348,6 @@ if(NOT CAPN_PROTO_FOUND AND NOT BUILD_MANYLINUX)
     add_subdirectory(third-party/capnproto/c++)
   endif()
 endif()
-
-set(CAPN_PROTO_FOUND OFF)
 
 if(CAPN_PROTO_FOUND)
   add_definitions(-DUSE_CAPNP)
@@ -346,7 +375,11 @@ if(CAPN_PROTO_FOUND)
     endif()
   endif()
 else()
-  message(WARNING "Could not find CapnProto, disabling search save/load")
+  if(ENABLE_CAPNPROTO)
+    message(WARNING "Could not find CapnProto, disabling search save/load")
+  else()
+    message(STATUS "ENABLE_CAPNPROTO=OFF: disabling search save/load")
+  endif()
 endif()
 
 set(BUILD_SHARED_LIBS

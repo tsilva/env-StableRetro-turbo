@@ -1,28 +1,98 @@
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import sysconfig
+from pathlib import Path
 
 from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
 
-VERSION_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "stable_retro/VERSION.txt",
+VERSION_PATH = Path(__file__).resolve().parent / "stable_retro" / "VERSION.txt"
+SCRIPT_DIR = Path(__file__).resolve().parent
+README = (SCRIPT_DIR / "README.md").read_text(encoding="utf-8")
+
+PUBLIC_CORE_NAMES = tuple(
+    core.strip()
+    for core in os.environ.get(
+        "STABLE_RETRO_PUBLIC_CORES",
+        "gambatte,fceumm,snes9x,genesis_plus_gx",
+    ).split(",")
+    if core.strip()
 )
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-README = open(os.path.join(SCRIPT_DIR, "README.md")).read()
+DATA_PACKAGE_DIRS = {
+    "stable_retro.data.stable": SCRIPT_DIR / "stable_retro" / "data" / "stable",
+    "stable_retro.data.experimental": SCRIPT_DIR
+    / "stable_retro"
+    / "data"
+    / "experimental",
+    "stable_retro.data.contrib": SCRIPT_DIR / "stable_retro" / "data" / "contrib",
+}
+
+
+def is_rom_payload(path: Path):
+    return path.name.startswith("rom.") and path.name != "rom.sha"
+
+
+def package_files(root: Path, *, exclude=None):
+    files = []
+    exclude = exclude or (lambda _: False)
+    for path in sorted(root.rglob("*")):
+        if path.is_file() and not exclude(path):
+            files.append(path.relative_to(root).as_posix())
+    return files
+
+
+def stable_retro_package_data():
+    files = [
+        "VERSION.txt",
+        "README.md",
+        "LICENSES.md",
+    ]
+    for core in PUBLIC_CORE_NAMES:
+        files.append(f"cores/{core}.json")
+        files.append(f"cores/{core}_libretro.dylib")
+    return files
+
+
+def copy_public_core_assets(destination: Path):
+    destination.mkdir(parents=True, exist_ok=True)
+    for core in PUBLIC_CORE_NAMES:
+        for suffix in (".json", "_libretro.dylib"):
+            asset_name = f"{core}{suffix}"
+            asset = None
+            direct_candidates = [
+                destination / asset_name,
+                SCRIPT_DIR / "stable_retro" / "cores" / asset_name,
+            ]
+            for candidate in direct_candidates:
+                if candidate.exists():
+                    asset = candidate
+                    break
+            if asset is None:
+                for candidate in sorted((SCRIPT_DIR / "build").rglob(asset_name)):
+                    if candidate.is_file():
+                        asset = candidate
+                        break
+            if asset is None:
+                raise FileNotFoundError(f"Missing public core asset: {asset_name}")
+            target = destination / asset.name
+            if asset.resolve() != target.resolve():
+                shutil.copy2(asset, target)
 
 
 class CMakeBuild(build_ext):
     def run(self):
         suffix = super().get_ext_filename("")
         pyext_suffix = f"-DPYEXT_SUFFIX={suffix}"
+        package_dir = None
         pylib_dir = ""
         if not self.inplace:
-            pylib_dir = f"-DPYLIB_DIRECTORY={self.build_lib}"
+            ext_path = Path(self.get_ext_fullpath("stable_retro._retro"))
+            package_dir = ext_path.parent
+            pylib_dir = f"-DPYLIB_DIRECTORY={package_dir.parent}"
         if self.debug:
             build_type = "-DCMAKE_BUILD_TYPE=Debug"
         else:
@@ -70,54 +140,25 @@ class CMakeBuild(build_ext):
 
             jobs = f"-j{multiprocessing.cpu_count():d}"
 
-        subprocess.check_call(["make", jobs, "stable_retro"])
-
-
-platforms = [
-    "Nes",
-    "Snes",
-    "Genesis",
-    "Atari2600",
-    "GameBoy",
-    "Sms",
-    "GameGear",
-    "PCEngine",
-    "GbColor",
-    "GbAdvance",
-    "32x",
-    "Saturn",
-    "N64",
-    "Arcade",
-]
-
-# Data folders are named both with and without a version suffix, e.g.
-#   Pong-Atari2600/
-#   Pong-Atari2600-v0/
-platform_globs = [
-    pattern
-    for plat in platforms
-    for pattern in (
-        "*-%s/*" % plat,
-        "*-%s-v*/*" % plat,
-    )
-]
-
+        subprocess.check_call(["make", jobs, "all"])
+        if package_dir is not None:
+            copy_public_core_assets(package_dir / "cores")
 
 setup(
-    name="stable-retro",
+    name="stable-retro-apple-silicon",
+    description="Apple Silicon wheels for stable-retro without bundled ROM payloads",
     long_description=README,
     long_description_content_type="text/markdown",
-    author="Farama Foundation",
-    author_email="contact@farama.org",
-    url="https://github.com/farama-foundation/stable-retro",
-    version=open(VERSION_PATH).read().strip(),
+    author="tsilva",
+    url="https://github.com/tsilva/stable-retro-apple-silicon",
+    version=VERSION_PATH.read_text(encoding="utf-8").strip(),
     license="MIT",
     install_requires=[
         "gymnasium>=0.27.1",
         "pyglet>=1.3.2,==1.*",
         "farama-notifications>=0.0.1",
     ],
-    python_requires=">=3.8.0,<3.13",
+    python_requires=">=3.9.0,<3.13",
     ext_modules=[Extension("stable_retro._retro", ["CMakeLists.txt", "src/*.cpp"])],
     cmdclass={"build_ext": CMakeBuild},
     packages=[
@@ -133,15 +174,10 @@ setup(
         "stable_retro.testing",
     ],
     package_data={
-        "stable_retro": [
-            "cores/*.json",
-            "cores/*_libretro*",
-            "VERSION.txt",
-            "README.md",
-            "LICENSES.md",
-        ],
-        "stable_retro.data.stable": platform_globs,
-        "stable_retro.data.experimental": platform_globs,
-        "stable_retro.data.contrib": platform_globs,
+        "stable_retro": stable_retro_package_data(),
+        **{
+            package_name: package_files(package_root, exclude=is_rom_payload)
+            for package_name, package_root in DATA_PACKAGE_DIRS.items()
+        },
     },
 )

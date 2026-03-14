@@ -106,6 +106,10 @@ tramp
 *.idea
 
 .DS_Store
+.venv/
+gameboy/
+roms/
+*.png
 
 # CMake
 CMakeFiles
@@ -131,6 +135,8 @@ lib*.a
 *.capnp.*
 stable_retro/cores/*-version
 stable_retro/cores/*.json
+stable_retro/data/**/rom.*
+!stable_retro/data/**/rom.sha
 
 # FBNeo build artifacts (only ignore actual build outputs, not source dependencies)
 cores/fbneo/src/obj/

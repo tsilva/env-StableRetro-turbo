@@ -42,12 +42,14 @@ sys.modules["retro._retro"] = stable_retro._retro
 sys.modules["retro.enums"] = stable_retro.enums
 sys.modules["retro.retro_env"] = stable_retro.retro_env
 
-# Try to import rendering if it exists
+# Try to import rendering if it exists.
+# In headless environments pyglet can fail during module import even though the
+# rest of the compatibility layer is usable (for example `python -m retro.import`).
 try:
     import stable_retro.rendering
 
     sys.modules["retro.rendering"] = stable_retro.rendering
-except (ImportError, AttributeError):
+except Exception:
     pass
 
 # Re-export commonly used items

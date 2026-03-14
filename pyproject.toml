@@ -1,21 +1,11 @@
 [build-system]
-requires = ["cmake>=3.2.0", "setuptools", "wheel", "build"]
+requires = ["cmake>=3.2.0", "setuptools>=68", "wheel", "build"]
 
 [tool.cibuildwheel]
-# We need to build for the following Python versions:
-build = "cp{38,39,310,311,312}-*"
-
-[tool.cibuildwheel.linux]
-# Only manylinux is supported (no musl)
-build = "cp{38,39,310,311,312}-manylinux*"
-
-# For manylinux_2_28 we need to install the following dependencies using yum:
-before-all = "yum install -y cmake git pkgconf-pkg-config zlib-devel libzip-devel bzip2-devel"
-
-# Only build for x86_64 and aarch64 are officially supported
-archs = "x86_64 aarch64"
-manylinux-x86_64-image = "manylinux_2_28"
-manylinux-aarch64-image = "manylinux_2_28"
+build = "cp{39,310,311,312}-macosx_arm64"
+build-verbosity = 1
 
 [tool.cibuildwheel.macos]
-before-all = "brew install pkg-config capnp lua@5.4 qt5"
+archs = "arm64"
+before-all = "brew install pkg-config lua@5.4 libzip"
+environment = "MACOSX_DEPLOYMENT_TARGET=14.0 ARCHFLAGS='-arch arm64' CMAKE_ARGS='-DBUILD_CORES=gb;nes;snes;genesis -DBUILD_TESTS=OFF -DENABLE_CAPNPROTO=OFF' STABLE_RETRO_PUBLIC_CORES='gambatte,fceumm,snes9x,genesis_plus_gx'"
