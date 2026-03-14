@@ -6,7 +6,7 @@
   [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
   [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://pre-commit.com/)
 
-  **🎮 Native Apple Silicon wheels for retro game reinforcement learning 🍎**
+  **🎮 Working Apple Silicon builds for stable-retro 🍎**
 
 </div>
 
