@@ -243,7 +243,7 @@ class CMakeBuild(build_ext):
 
 setup(
     name="stable-retro-apple-silicon",
-    description="Apple Silicon wheels for stable-retro without bundled ROM payloads",
+    description="🎮 Working Apple Silicon builds for stable-retro 🍎",
     long_description=README,
     long_description_content_type="text/markdown",
     author="tsilva",
