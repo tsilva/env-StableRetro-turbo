@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest  # todo, add more OS systems to see if they work as well
     strategy:
       matrix:
-        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+        python-version: ['3.9', '3.10', '3.11', '3.12']
 
     steps:
       - uses: actions/checkout@v6
@@ -22,7 +22,7 @@ jobs:
       - name: Install system packages
         run: |
           sudo apt-get update
-          sudo apt-get install git cmake capnproto zlib1g-dev build-essential pkg-config libzip-dev software-properties-common libbz2-dev xvfb python3-opengl
+          sudo apt-get install git cmake capnproto libcapnp-dev zlib1g-dev build-essential pkg-config libzip-dev software-properties-common libbz2-dev xvfb python3-opengl
 
       - name: Install pip packages
         run: |
