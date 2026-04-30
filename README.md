@@ -1,34 +1,20 @@
 <div align="center">
-  <img src="logo.png" alt="stable-retro-apple-silicon" width="512"/>
-
-  [![PyPI](https://img.shields.io/pypi/v/stable-retro-apple-silicon)](https://pypi.org/project/stable-retro-apple-silicon/)
-  [![Python](https://img.shields.io/pypi/pyversions/stable-retro-apple-silicon)](https://pypi.org/project/stable-retro-apple-silicon/)
-  [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-  [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://pre-commit.com/)
+  <img src="./logo.png" alt="stable-retro-apple-silicon" width="512" />
 
   **🎮 Working Apple Silicon builds for stable-retro 🍎**
-
 </div>
 
-## 🔍 Overview
+`stable-retro-apple-silicon` publishes installable macOS Apple Silicon wheels for the upstream [`stable-retro`](https://github.com/Farama-Foundation/stable-retro) API surface.
 
-**The Pain:** Installing [`stable-retro`](https://github.com/Farama-Foundation/stable-retro) on Apple Silicon means building from source — fighting CMake, missing dependencies, and wasted hours.
+Use it when you want `stable_retro` game environments on an M-series Mac without building the package and bundled public libretro cores from source yourself.
 
-**The Solution:** Pre-built `arm64` wheels published to PyPI. One `pip install` and you're running retro game environments natively.
-
-**The Result:** Go from zero to training in under 60 seconds on your M-series Mac.
-
-SNES note: on Apple Silicon, SNES uses an automatic Rosetta helper because the native arm64 `snes9x` path is not stable across the bundled integrations. If Rosetta is not installed yet, install it once with:
+## Install
 
 ```bash
-softwareupdate --install-rosetta --agree-to-license
+python -m pip install stable-retro-apple-silicon
 ```
 
-## 🚀 Quick Start
-
-```bash
-pip install stable-retro-apple-silicon
-```
+Use it from Python:
 
 ```python
 import stable_retro as retro
@@ -36,46 +22,54 @@ import stable_retro as retro
 env = retro.make("Alleyway-GameBoy-v0", render_mode="rgb_array")
 ```
 
-The deprecated compatibility alias still works:
+The deprecated compatibility import still works:
 
 ```python
 import retro
 ```
 
-## ✨ What You Get
+For local development:
 
-- Native Apple Silicon wheels published to PyPI
-- Matching downloadable wheel files attached to GitHub Releases
-- A maintained Apple Silicon packaging layer on top of upstream [`stable-retro`](https://github.com/Farama-Foundation/stable-retro)
-- The same `stable_retro` and `retro` import surface users expect
-- Automatic Rosetta fallback for SNES on Apple Silicon so bundled SNES integrations keep rendering correctly
+```bash
+git clone https://github.com/tsilva/stable-retro-apple-silicon.git
+cd stable-retro-apple-silicon
+brew install cmake pkg-config lua@5.4 libzip
+python -m pip install -U pip build cibuildwheel pytest pre-commit
+python -m pip install -e .
+```
 
-## 📦 Release Matrix
+## Commands
 
-| Item | Value |
-| --- | --- |
-| Package | `stable-retro-apple-silicon` |
-| CPU | Apple Silicon `arm64` |
-| macOS | `14.0+` |
-| Python | `3.9` to `3.12` |
-| Wheel contents | code, public cores, game metadata |
-| Public cores | Game Boy, NES, SNES, Sega Master System |
+```bash
+python -m pip install stable-retro-apple-silicon  # install the published package
+python -m pip install -e .                        # build and install this checkout
+python -m build --wheel                           # build a local wheel
+python -m cibuildwheel . --output-dir wheelhouse  # build release-style macOS arm64 wheels
+pytest                                            # run Python tests
+pre-commit run --all-files                        # run repository hooks
+cmake . && make -j2 && make -j2 -f tests/Makefile && ctest --progress --verbose
+```
 
-## 🔧 Build Notes
+## Notes
 
-- Apple Silicon wheel builds use a restricted public core set: `gambatte`, `fceumm`, `snes9x`, `genesis_plus_gx`
-- CapnProto is disabled in the public wheel build path
-- Release automation publishes wheels to PyPI and also attaches them to GitHub Releases
+- Published wheels target Apple Silicon `arm64`, macOS `14.0+`, and Python `3.9` through `3.12`.
+- The public wheel build includes Game Boy, NES, SNES, and Sega Master System cores: `gambatte`, `fceumm`, `snes9x`, and `genesis_plus_gx`.
+- CapnProto is disabled in the public wheel build path.
+- SNES on Apple Silicon uses an automatic Rosetta helper because the native arm64 `snes9x` path is not stable across the bundled integrations.
+- If Rosetta is not installed yet, install it once:
 
-## 📚 Upstream Docs
+```bash
+softwareupdate --install-rosetta --agree-to-license
+```
 
-The underlying project is `stable-retro`, so the upstream documentation remains relevant for APIs and integration metadata:
+- Release automation builds macOS arm64 wheels, publishes them to PyPI, and attaches matching wheel files to GitHub Releases.
+- See [`PUBLISHING.md`](PUBLISHING.md) for the release checklist.
+- Upstream API and integration docs are still useful: [`docs/supported_emulators.md`](docs/supported_emulators.md), [`docs/supported_games.md`](docs/supported_games.md), and [`docs/macos_installation.md`](docs/macos_installation.md).
 
-- [Supported emulators](docs/supported_emulators.md)
-- [Supported games/envs](docs/supported_games.md)
-- [macOS installation notes](docs/macos_installation.md)
-- [Linux installation notes](docs/linux_installation.md)
+## Architecture
 
-## 📋 Publishing
+![stable-retro-apple-silicon architecture diagram](./architecture.png)
 
-See [`PUBLISHING.md`](PUBLISHING.md) for the release checklist and local wheel verification commands.
+## License
+
+[MIT](LICENSE). Bundled third-party notices are listed in [`LICENSES.md`](LICENSES.md).

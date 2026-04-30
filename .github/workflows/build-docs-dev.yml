@@ -22,7 +22,7 @@ jobs:
       - name: Install system packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y git cmake capnproto zlib1g-dev build-essential pkg-config libzip-dev libbz2-dev python3-opengl
+          sudo apt-get install -y git cmake capnproto libcapnp-dev zlib1g-dev build-essential pkg-config libzip-dev libbz2-dev python3-opengl
 
       - name: Install dependencies
         run: pip install -r docs/requirements.txt

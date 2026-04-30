@@ -34,15 +34,17 @@ find_package(Git QUIET)
 file(READ "${CMAKE_SOURCE_DIR}/stable_retro/VERSION.txt" STABLE_RETRO_VERSION)
 string(REGEX REPLACE "\n$" "" STABLE_RETRO_VERSION "${STABLE_RETRO_VERSION}")
 string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" PROJECT_VERSION
-                     "${STABLE_RETRO_VERSION}")
+             "${STABLE_RETRO_VERSION}")
 if(NOT PROJECT_VERSION)
-  message(FATAL_ERROR
-          "Unable to derive a CMake project version from ${STABLE_RETRO_VERSION}")
+  message(
+    FATAL_ERROR
+      "Unable to derive a CMake project version from ${STABLE_RETRO_VERSION}")
 endif()
 set_property(
   DIRECTORY
   APPEND
-  PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/stable_retro/VERSION.txt")
+  PROPERTY CMAKE_CONFIGURE_DEPENDS
+           "${CMAKE_SOURCE_DIR}/stable_retro/VERSION.txt")
 
 project("Gym Retro" VERSION ${PROJECT_VERSION})
 set(CMAKE_CXX_STANDARD 14)
@@ -103,6 +105,9 @@ find_package(PkgConfig)
 if(ENABLE_CAPNPROTO AND NOT BUILD_MANYLINUX)
   # CapnProto requires a newer kernel than manylinux1 provides
   find_package(CapnProto QUIET)
+  if(CapnProto_FOUND)
+    set(CAPN_PROTO_FOUND ON)
+  endif()
 endif()
 
 pkg_search_module(LIBZIP QUIET libzip)

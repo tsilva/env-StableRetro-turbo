@@ -110,6 +110,7 @@ tramp
 gameboy/
 roms/
 *.png
+!architecture.png
 
 # CMake
 CMakeFiles
