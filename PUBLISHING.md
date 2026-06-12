@@ -7,7 +7,7 @@
 
 - PyPI package: `stable-retro-apple-silicon`
 - GitHub Releases: matching `.whl` assets for each tagged release
-- Target platform: Apple Silicon `arm64`
+- Target platforms: macOS Apple Silicon `arm64` and Linux `x86_64`
 - Supported macOS baseline: `14.0+`
 - Supported Python versions: `3.9` to `3.12`
 
@@ -38,5 +38,5 @@ artifact.
 2. Commit and push the release commit.
 3. Create a tag such as `v0.9.9.post1`.
 4. Publish a GitHub Release for that tag.
-5. Let GitHub Actions build the macOS arm64 wheels, publish them to PyPI, and
-   attach the `.whl` files to the GitHub Release.
+5. Let GitHub Actions build the macOS arm64 and Linux x86_64 wheels, publish
+   them to PyPI, and attach the `.whl` files to the GitHub Release.
