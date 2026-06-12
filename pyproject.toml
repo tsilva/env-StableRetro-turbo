@@ -8,11 +8,11 @@ build-verbosity = 1
 [tool.cibuildwheel.macos]
 archs = "arm64"
 before-all = "brew install pkg-config lua@5.4 libzip"
-environment = "MACOSX_DEPLOYMENT_TARGET=14.0 ARCHFLAGS='-arch arm64' CMAKE_ARGS='-DBUILD_CORES=gb;nes;snes;genesis -DBUILD_TESTS=OFF -DENABLE_CAPNPROTO=OFF' STABLE_RETRO_PUBLIC_CORES='gambatte,fceumm,snes9x,genesis_plus_gx'"
+environment = "MACOSX_DEPLOYMENT_TARGET=14.0 ARCHFLAGS='-arch arm64' CMAKE_ARGS='-DCMAKE_BUILD_TYPE=Release -DBUILD_CORES=gb;nes;snes;genesis -DBUILD_TESTS=OFF -DENABLE_CAPNPROTO=OFF' STABLE_RETRO_PUBLIC_CORES='gambatte,fceumm,snes9x,genesis_plus_gx'"
 
 [tool.cibuildwheel.linux]
 archs = "x86_64"
-environment = "CMAKE_ARGS='-DBUILD_MANYLINUX=ON -DBUILD_CORES=gb;nes;snes;genesis -DBUILD_TESTS=OFF -DENABLE_CAPNPROTO=OFF -DBUILD_N64=OFF' STABLE_RETRO_PUBLIC_CORES='gambatte,fceumm,snes9x,genesis_plus_gx'"
+environment = "CMAKE_ARGS='-DCMAKE_BUILD_TYPE=Release -DBUILD_MANYLINUX=ON -DBUILD_CORES=gb;nes;snes;genesis -DBUILD_TESTS=OFF -DENABLE_CAPNPROTO=OFF -DBUILD_N64=OFF' STABLE_RETRO_PUBLIC_CORES='gambatte,fceumm,snes9x,genesis_plus_gx'"
 
 [tool.uv]
 exclude-newer = "7 days"
