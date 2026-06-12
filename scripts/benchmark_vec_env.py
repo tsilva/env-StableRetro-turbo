@@ -95,6 +95,16 @@ def _build_shared(env_fns, start_method):
     return StableRetroSubprocVecEnv(env_fns, start_method=start_method)
 
 
+def _build_chunked(env_fns, start_method, chunk_size):
+    from stable_retro.vec_env import StableRetroChunkedSubprocVecEnv
+
+    return StableRetroChunkedSubprocVecEnv(
+        env_fns,
+        start_method=start_method,
+        chunk_size=chunk_size,
+    )
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--game", default="SuperMarioBros-Nes-v0")
@@ -111,6 +121,11 @@ def main(argv=None) -> int:
     parser.add_argument("--frame-skip", type=int, default=4)
     parser.add_argument("--frame-stack", type=int, default=4)
     parser.add_argument("--obs-crop", default=None)
+    parser.add_argument(
+        "--chunk-sizes",
+        default="2,4,8,16",
+        help="Comma-separated envs-per-worker sizes for chunked variants.",
+    )
     parser.add_argument(
         "--variants",
         default=None,
@@ -141,6 +156,9 @@ def main(argv=None) -> int:
         obs_crop = tuple(int(v) for v in args.obs_crop.split(","))
         if len(obs_crop) != 4:
             raise SystemExit("--obs-crop must be top,bottom,left,right")
+    chunk_sizes = [int(v) for v in args.chunk_sizes.split(",") if v.strip()]
+    if any(chunk_size <= 0 for chunk_size in chunk_sizes):
+        raise SystemExit("--chunk-sizes values must be positive")
 
     base_kwargs = {
         "render_mode": "rgb_array",
@@ -164,6 +182,33 @@ def main(argv=None) -> int:
         ("shared_native_preproc", _build_shared, preproc_kwargs, True, False),
         ("shared_native_fused", _build_shared, preproc_kwargs, True, True),
     ]
+    for chunk_size in chunk_sizes:
+        variants.extend(
+            [
+                (
+                    f"chunked_native_preproc_{chunk_size}",
+                    lambda env_fns, start_method, chunk_size=chunk_size: _build_chunked(
+                        env_fns,
+                        start_method,
+                        chunk_size,
+                    ),
+                    preproc_kwargs,
+                    True,
+                    False,
+                ),
+                (
+                    f"chunked_native_fused_{chunk_size}",
+                    lambda env_fns, start_method, chunk_size=chunk_size: _build_chunked(
+                        env_fns,
+                        start_method,
+                        chunk_size,
+                    ),
+                    preproc_kwargs,
+                    True,
+                    True,
+                ),
+            ],
+        )
     if args.variants:
         requested_variants = {name.strip() for name in args.variants.split(",")}
         known_variants = {name for name, *_ in variants}
@@ -204,8 +249,15 @@ def main(argv=None) -> int:
                 )
                 for _ in range(args.num_envs)
             ]
-            env = builder(env_fns, args.start_method)
-            result = _run_vec(name, env, args.seconds, args.warmup_steps)
+            try:
+                env = builder(env_fns, args.start_method)
+                result = _run_vec(name, env, args.seconds, args.warmup_steps)
+            except Exception as exc:
+                print(
+                    f"failed {name}: {type(exc).__name__}: {exc}",
+                    flush=True,
+                )
+                continue
             results.append(result)
             print(
                 f"finished {result.name}: "

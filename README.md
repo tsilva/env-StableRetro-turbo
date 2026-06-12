@@ -92,6 +92,50 @@ from stable_retro import StableRetroSubprocVecEnv
 env = StableRetroSubprocVecEnv([make_mario_env for _ in range(8)])
 ```
 
+The shared-memory vector env keeps observations in a parent-owned shared buffer,
+so workers only send rewards, done flags, and infos through pipes on each step.
+For Atari-style image rollouts this pairs well with env-local preprocessing:
+
+```python
+env = StableRetroSubprocVecEnv(
+    [
+        lambda: retro.make(
+            "SuperMarioBros-Nes-v0",
+            render_mode="rgb_array",
+            obs_resize=(84, 84),
+            obs_grayscale=True,
+            frame_skip=4,
+            frame_stack=4,
+            maxpool_last_two=True,
+        )
+        for _ in range(16)
+    ],
+)
+```
+
+When possible, image preprocessing and repeated-step processing use native C++
+helpers instead of Python image loops. The native path is selected automatically
+for single-player image observations with no rotation or movie recording. Set
+`STABLE_RETRO_DISABLE_NATIVE_IMAGEOPS=1` or
+`STABLE_RETRO_DISABLE_NATIVE_FUSED_STEP=1` to force the Python fallback while
+debugging or benchmarking.
+
+`StableRetroChunkedSubprocVecEnv` is also available as an experimental generic
+Gymnasium vector env that puts multiple envs in each worker process:
+
+```python
+from stable_retro import StableRetroChunkedSubprocVecEnv
+
+env = StableRetroChunkedSubprocVecEnv(env_fns, chunk_size=4)
+```
+
+This is useful for envs that support multiple instances per process. Current
+native stable-retro emulator instances do **not**: the C++ libretro frontend has
+one active emulator/core callback target per process, so stable-retro games must
+still use one emulator process per env. For stable-retro games, prefer
+`StableRetroSubprocVecEnv` until the native frontend is refactored for true
+multi-instance execution.
+
 If your agent does not use audio, set `STABLE_RETRO_DISABLE_AUDIO=1` before
 creating environments. This keeps RGB observations enabled while skipping audio
 capture and supported core-side audio generation.
