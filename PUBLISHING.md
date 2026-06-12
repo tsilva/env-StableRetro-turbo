@@ -9,7 +9,7 @@
 - GitHub Releases: matching `.whl` assets for each tagged release
 - Target platforms: macOS Apple Silicon `arm64` and Linux `x86_64`
 - Supported macOS baseline: `14.0+`
-- Supported Python versions: `3.9` to `3.12`
+- Supported Python version: `3.14`
 
 ## Why This Exists
 

@@ -262,7 +262,7 @@ setup(
         "pyglet>=1.3.2,==1.*",
         "farama-notifications>=0.0.1",
     ],
-    python_requires=">=3.9.0,<3.13",
+    python_requires=">=3.14.0,<3.15",
     ext_modules=[Extension("stable_retro._retro", ["CMakeLists.txt", "src/*.cpp"])],
     cmdclass={"build_ext": CMakeBuild},
     packages=[
