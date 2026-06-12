@@ -204,6 +204,7 @@ python scripts/benchmark_vec_env.py --game SuperMarioBros-Nes-v0 --num-envs 8
 ## Notes
 
 - Published wheels target Apple Silicon `arm64` on macOS `14.0+` and `x86_64` on Linux, for Python `3.14`.
+- Package versions follow the upstream `stable-retro` base version with this fork's patch number as a PEP 440 post-release suffix, for example `1.0.0.post20`.
 - The public wheel build includes Game Boy, NES, SNES, and Sega Master System cores: `gambatte`, `fceumm`, `snes9x`, and `genesis_plus_gx`.
 - CapnProto is disabled in the public wheel build path.
 - SNES on Apple Silicon uses an automatic Rosetta helper because the native arm64 `snes9x` path is not stable across the bundled integrations.
