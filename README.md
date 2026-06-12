@@ -8,6 +8,37 @@
 
 Use it when you want `stable_retro` game environments without building the package and bundled public libretro cores from source yourself.
 
+## What changed from upstream
+
+This fork keeps the upstream `stable_retro` API, but adds packaging and RL
+throughput work aimed at Atari-style PPO/A2C rollouts on macOS Apple Silicon and
+Linux:
+
+- Python `3.14` wheels are published for macOS `arm64` and Linux `x86_64`.
+- Public wheels bundle the Game Boy, NES, SNES, and Genesis/Master System cores
+  used by common training workloads.
+- Image preprocessing can run inside each environment worker: crop, resize,
+  grayscale, frame skip, frame stack, max-pool the last two skipped frames,
+  no-op reset, sticky actions, and reward clipping.
+- The hot image path has native C++ helpers for screen processing and fused
+  `step_repeat_and_process()` execution, avoiding Python image loops for the
+  common single-player RGB observation case.
+- `StableRetroSubprocVecEnv` uses shared memory for observations, so workers do
+  not pickle and pipe full image arrays back to the parent every step.
+- `STABLE_RETRO_DISABLE_AUDIO=1` skips audio capture/generation when the agent
+  only needs RGB observations.
+- Benchmark tooling in `scripts/benchmark_vec_env.py` compares baseline
+  `SubprocVecEnv`, worker-side preprocessing, native preprocessing, fused native
+  stepping, shared-memory vectorization, and experimental chunked workers.
+
+In local Mario benchmarks using `SuperMarioBros-Nes-v0`, the optimized path was
+materially faster than the baseline Python/SB3 vector setup. The best measured
+direct-ROM 8-env run was about `9,756 steps/s` versus about `4,076 steps/s` for
+the baseline, roughly `2.39x` faster. Broader sweeps showed fused native
+preprocessing helping most as env count rises, while true multi-env-per-process
+batching is still blocked by stable-retro's current one-emulator-instance-per-process
+native frontend.
+
 ## Install
 
 ```bash
@@ -28,7 +59,7 @@ For reinforcement-learning loops, image preprocessing can be done inside each
 environment worker before observations are returned to the caller. This is useful
 with `SubprocVecEnv`, where sending smaller observations across process
 boundaries can be much faster than returning full-size RGB frames and resizing
-later.
+later. This is the main speedup this fork adds over the upstream wrapper stack.
 
 ```python
 import stable_retro as retro
@@ -94,7 +125,8 @@ env = StableRetroSubprocVecEnv([make_mario_env for _ in range(8)])
 
 The shared-memory vector env keeps observations in a parent-owned shared buffer,
 so workers only send rewards, done flags, and infos through pipes on each step.
-For Atari-style image rollouts this pairs well with env-local preprocessing:
+For Atari-style image rollouts this pairs well with env-local preprocessing and
+fused native frame skipping:
 
 ```python
 env = StableRetroSubprocVecEnv(
@@ -162,7 +194,7 @@ python -m pip install -e .
 python -m pip install stable-retro-apple-silicon  # install the published package
 python -m pip install -e .                        # build and install this checkout
 python -m build --wheel                           # build a local wheel
-python -m cibuildwheel . --output-dir wheelhouse  # build release-style macOS arm64 wheels
+python -m cibuildwheel . --output-dir wheelhouse  # build release-style wheels
 pytest                                            # run Python tests
 pre-commit run --all-files                        # run repository hooks
 cmake . && make -j2 && make -j2 -f tests/Makefile && ctest --progress --verbose
@@ -181,7 +213,7 @@ python scripts/benchmark_vec_env.py --game SuperMarioBros-Nes-v0 --num-envs 8
 softwareupdate --install-rosetta --agree-to-license
 ```
 
-- Release automation builds macOS arm64 wheels, publishes them to PyPI, and attaches matching wheel files to GitHub Releases.
+- Release automation builds macOS arm64 and Linux x86_64 wheels, publishes them to PyPI, and attaches matching wheel files to GitHub Releases.
 - See [`PUBLISHING.md`](PUBLISHING.md) for the release checklist.
 - Upstream API and integration docs are still useful: [`docs/supported_emulators.md`](docs/supported_emulators.md), [`docs/supported_games.md`](docs/supported_games.md), and [`docs/macos_installation.md`](docs/macos_installation.md).
 
