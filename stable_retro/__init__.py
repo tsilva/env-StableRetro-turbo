@@ -29,9 +29,18 @@ __all__ = [
     "is_fbneo_game",
     "make",
     "RetroEnv",
+    "StableRetroSubprocVecEnv",
 ]
 
 stable_retro.data.init_core_info(core_path())
+
+
+def __getattr__(name):
+    if name == "StableRetroSubprocVecEnv":
+        from stable_retro.vec_env import StableRetroSubprocVecEnv
+
+        return StableRetroSubprocVecEnv
+    raise AttributeError(name)
 
 
 class RetroEmulator:

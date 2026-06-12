@@ -38,6 +38,12 @@ class RetroEnv(gym.Env, EzPickle):
         obs_crop=None,
         obs_grayscale=False,
         obs_resize_algorithm="nearest",
+        frame_skip=1,
+        frame_stack=1,
+        maxpool_last_two=False,
+        noop_reset_max=0,
+        sticky_action_prob=0.0,
+        reward_clip=False,
     ):
         """Initialize a Retro environment for a specific game/state configuration."""
         if inttype is retro.data.Integrations.DEFAULT or isinstance(
@@ -63,6 +69,12 @@ class RetroEnv(gym.Env, EzPickle):
             obs_crop,
             obs_grayscale,
             obs_resize_algorithm,
+            frame_skip,
+            frame_stack,
+            maxpool_last_two,
+            noop_reset_max,
+            sticky_action_prob,
+            reward_clip,
         )
         if not hasattr(self, "spec"):
             self.spec = None
@@ -74,6 +86,19 @@ class RetroEnv(gym.Env, EzPickle):
             obs_resize_algorithm,
         )
         self._obs_resize_cache = {}
+        self._frame_skip = self._normalize_positive_int(frame_skip, "frame_skip")
+        self._frame_stack = self._normalize_positive_int(frame_stack, "frame_stack")
+        self._maxpool_last_two = bool(maxpool_last_two)
+        self._noop_reset_max = self._normalize_nonnegative_int(
+            noop_reset_max,
+            "noop_reset_max",
+        )
+        self._sticky_action_prob = float(sticky_action_prob)
+        if not 0.0 <= self._sticky_action_prob <= 1.0:
+            raise ValueError("sticky_action_prob must be between 0.0 and 1.0")
+        self._reward_clip = reward_clip
+        self._frame_stack_buffer = []
+        self._last_action = None
         self.img = None
         self.ram = None
         self.viewer = None
@@ -174,6 +199,7 @@ class RetroEnv(gym.Env, EzPickle):
         else:
             img = [self.get_screen(p, apply_rotation=True) for p in range(players)]
             shape = img[0].shape
+        shape = self._stacked_obs_shape(shape)
         self.observation_space = gym.spaces.Box(
             low=0,
             high=255,
@@ -195,10 +221,10 @@ class RetroEnv(gym.Env, EzPickle):
     def _update_obs(self):
         if self._obs_type == retro.Observations.RAM:
             self.ram = self.get_ram()
-            return self.ram
+            return self._update_frame_stack(self.ram)
         elif self._obs_type == retro.Observations.IMAGE:
             self.img = self.get_screen(apply_rotation=True)
-            return self.img
+            return self._update_frame_stack(self.img)
         else:
             raise ValueError(f"Unrecognized observation type: {self._obs_type}")
 
@@ -257,6 +283,78 @@ class RetroEnv(gym.Env, EzPickle):
             )
         return algorithm
 
+    @staticmethod
+    def _normalize_positive_int(value, name):
+        value = int(value)
+        if value <= 0:
+            raise ValueError(f"{name} must be positive")
+        return value
+
+    @staticmethod
+    def _normalize_nonnegative_int(value, name):
+        value = int(value)
+        if value < 0:
+            raise ValueError(f"{name} must be non-negative")
+        return value
+
+    def _stacked_obs_shape(self, shape):
+        if self._frame_stack == 1:
+            return shape
+        if len(shape) == 1:
+            return (shape[0] * self._frame_stack,)
+        return (*shape[:-1], shape[-1] * self._frame_stack)
+
+    def _stack_frames(self):
+        if len(self._frame_stack_buffer) != self._frame_stack:
+            raise RuntimeError("frame stack buffer is not initialized")
+        if self._frame_stack == 1:
+            return self._frame_stack_buffer[-1]
+        if self._frame_stack_buffer[-1].ndim == 1:
+            return np.concatenate(self._frame_stack_buffer, axis=0)
+        return np.concatenate(self._frame_stack_buffer, axis=-1)
+
+    def _update_frame_stack(self, obs):
+        if self._frame_stack == 1:
+            return obs
+        obs = np.asarray(obs, dtype=np.uint8)
+        if not self._frame_stack_buffer:
+            self._frame_stack_buffer = [obs.copy() for _ in range(self._frame_stack)]
+        else:
+            self._frame_stack_buffer.append(obs.copy())
+            del self._frame_stack_buffer[: -self._frame_stack]
+        return self._stack_frames()
+
+    def _reset_frame_stack(self, obs):
+        obs = np.asarray(obs, dtype=np.uint8)
+        if self._frame_stack == 1:
+            return obs
+        self._frame_stack_buffer = [obs.copy() for _ in range(self._frame_stack)]
+        return self._stack_frames()
+
+    def _clip_reward(self, reward):
+        if not self._reward_clip:
+            return reward
+        if self._reward_clip is True:
+            low, high = -1.0, 1.0
+        else:
+            low, high = self._reward_clip
+        if isinstance(reward, (list, tuple, np.ndarray)):
+            return np.clip(reward, low, high).tolist()
+        return float(np.clip(reward, low, high))
+
+    @staticmethod
+    def _add_reward(left, right):
+        if left is None:
+            return right
+        if isinstance(left, (list, tuple, np.ndarray)) or isinstance(
+            right,
+            (list, tuple, np.ndarray),
+        ):
+            return (
+                np.asarray(left, dtype=np.float32) + np.asarray(right, dtype=np.float32)
+            ).tolist()
+        return left + right
+
     def _apply_obs_crop(self, image):
         if self._obs_crop is None:
             return image
@@ -267,6 +365,49 @@ class RetroEnv(gym.Env, EzPickle):
         if top >= y2 or left >= x2:
             raise ValueError("obs_crop removes the entire observation")
         return image[top:y2, left:x2]
+
+    def _effective_crop(self, player, raw_height, raw_width):
+        x, y, w, h = self.data.crop_info(player)
+        if not w or x + w > raw_width:
+            right_edge = raw_width
+        else:
+            right_edge = x + w
+        if not h or y + h > raw_height:
+            bottom_edge = raw_height
+        else:
+            bottom_edge = y + h
+        top = y
+        left = x
+        if self._obs_crop is not None:
+            obs_top, obs_bottom, obs_left, obs_right = self._obs_crop
+            top += obs_top
+            left += obs_left
+            bottom_edge -= obs_bottom
+            right_edge -= obs_right
+        if top >= bottom_edge or left >= right_edge:
+            raise ValueError("obs_crop removes the entire observation")
+        return (
+            int(top),
+            int(raw_height - bottom_edge),
+            int(left),
+            int(raw_width - right_edge),
+        )
+
+    def _native_processed_screen(self, player):
+        if player != 0 or self._rotation_steps() != 0:
+            return None
+        if os.environ.get("STABLE_RETRO_DISABLE_NATIVE_IMAGEOPS"):
+            return None
+        if not hasattr(self.em, "get_processed_screen"):
+            return None
+        width, height = self.em.get_resolution()
+        crop = self._effective_crop(player, height, width)
+        return self.em.get_processed_screen(
+            crop,
+            self._obs_resize,
+            self._obs_grayscale,
+            self._obs_resize_algorithm,
+        )
 
     def _apply_obs_grayscale(self, image):
         if not self._obs_grayscale:
@@ -371,23 +512,68 @@ class RetroEnv(gym.Env, EzPickle):
             actions.append(ap)
         return actions
 
-    def step(self, a):
-        """Advance one emulator frame and return Gymnasium step outputs."""
-        if self.img is None and self.ram is None:
-            raise RuntimeError("Please call env.reset() before env.step()")
+    def _noop_action(self):
+        if self.use_restricted_actions == retro.Actions.DISCRETE:
+            return 0
+        if self.use_restricted_actions == retro.Actions.MULTI_DISCRETE:
+            return np.zeros([len(self.button_combos) * self.players], dtype=np.int64)
+        return np.zeros([self.num_buttons * self.players], dtype=np.uint8)
 
+    def _select_step_action(self, a):
+        if (
+            self._last_action is not None
+            and self._sticky_action_prob > 0.0
+            and self.np_random.random() < self._sticky_action_prob
+        ):
+            return self._last_action
+        self._last_action = np.array(a, copy=True) if isinstance(a, np.ndarray) else a
+        return a
+
+    def _set_action(self, a):
         for p, ap in enumerate(self.action_to_array(a)):
             if self.movie:
                 for i in range(self.num_buttons):
                     self.movie.set_key(i, ap[i], p)
             self.em.set_button_mask(ap, p)
 
+    def _advance_one_frame(self):
         if self.movie:
             self.movie.step()
         self.em.step()
         self.data.update_ram()
-        ob = self._update_obs()
-        rew, done, info = self.compute_step()
+        return self.compute_step()
+
+    def step(self, a):
+        """Advance one emulator frame and return Gymnasium step outputs."""
+        if self.img is None and self.ram is None:
+            raise RuntimeError("Please call env.reset() before env.step()")
+
+        action = self._select_step_action(a)
+        self._set_action(action)
+
+        total_rew = None
+        done = False
+        info = {}
+        recent_obs = []
+        for _ in range(self._frame_skip):
+            rew, done, info = self._advance_one_frame()
+            total_rew = self._add_reward(total_rew, rew)
+            if self._maxpool_last_two and self._obs_type == retro.Observations.IMAGE:
+                recent_obs.append(self.get_screen(apply_rotation=True))
+                del recent_obs[:-2]
+            if done:
+                break
+
+        if (
+            self._maxpool_last_two
+            and self._obs_type == retro.Observations.IMAGE
+            and len(recent_obs) == 2
+        ):
+            self.img = np.maximum(recent_obs[0], recent_obs[1])
+            ob = self._update_frame_stack(self.img)
+        else:
+            ob = self._update_obs()
+        rew = self._clip_reward(total_rew if total_rew is not None else 0.0)
 
         if self.render_mode == "human":
             self.render()
@@ -400,6 +586,8 @@ class RetroEnv(gym.Env, EzPickle):
 
         if self.initial_state:
             self.em.set_state(self.initial_state)
+        self._last_action = None
+        self._frame_stack_buffer = []
         for p in range(self.players):
             self.em.set_button_mask(np.zeros([self.num_buttons], np.uint8), p)
         self.em.step()
@@ -417,10 +605,25 @@ class RetroEnv(gym.Env, EzPickle):
         self.data.reset()
         self.data.update_ram()
 
+        if self._noop_reset_max:
+            noop_action = self._noop_action()
+            noop_count = int(self.np_random.integers(0, self._noop_reset_max + 1))
+            self._set_action(noop_action)
+            for _ in range(noop_count):
+                _rew, done, _info = self._advance_one_frame()
+                if done:
+                    break
+
         if self.render_mode == "human":
             self.render()
 
-        return self._update_obs(), {}
+        if self._obs_type == retro.Observations.RAM:
+            self.ram = self.get_ram()
+            ob = self.ram
+        else:
+            self.img = self.get_screen(apply_rotation=True)
+            ob = self.img
+        return self._reset_frame_stack(ob), {}
 
     def render(self):
         """Render the current frame in human mode or return an RGB array."""
@@ -470,6 +673,10 @@ class RetroEnv(gym.Env, EzPickle):
 
     def get_screen(self, player=0, apply_rotation=False):
         """Return the current screen, optionally cropped and rotation-corrected."""
+        if apply_rotation:
+            native = self._native_processed_screen(player)
+            if native is not None:
+                return native
         img = self.em.get_screen()
         x, y, w, h = self.data.crop_info(player)
         if not w or x + w > img.shape[1]:
