@@ -48,6 +48,12 @@ Available image kwargs:
 - `obs_resize_algorithm="nearest"`: choose `nearest`, `bilinear`, or `area`; `nearest` is fastest, while `area` is downscale-only and does more averaging work.
 - `obs_grayscale=True`: return grayscale observations with shape `(height, width, 1)`.
 - `obs_crop=(top, bottom, left, right)`: crop pixels before grayscale and resize.
+- `frame_skip=4`: repeat each selected action inside the worker and sum rewards.
+- `frame_stack=4`: stack recent observations inside the worker before IPC.
+- `maxpool_last_two=True`: max-pool the last two skipped image frames.
+- `noop_reset_max=30`: apply a random number of no-op reset steps.
+- `sticky_action_prob=0.25`: probabilistically repeat the previous action.
+- `reward_clip=True`: clip rewards to `[-1, 1]`.
 
 Pass the same options through Stable-Baselines3 with `env_kwargs`:
 
@@ -76,6 +82,14 @@ env = make_vec_env(
     },
 )
 env = VecTransposeImage(env)  # (n_envs, 1, 84, 84) for grayscale
+```
+
+For lower IPC overhead than `SubprocVecEnv`, use the shared-memory vector env:
+
+```python
+from stable_retro import StableRetroSubprocVecEnv
+
+env = StableRetroSubprocVecEnv([make_mario_env for _ in range(8)])
 ```
 
 If your agent does not use audio, set `STABLE_RETRO_DISABLE_AUDIO=1` before
@@ -108,6 +122,7 @@ python -m cibuildwheel . --output-dir wheelhouse  # build release-style macOS ar
 pytest                                            # run Python tests
 pre-commit run --all-files                        # run repository hooks
 cmake . && make -j2 && make -j2 -f tests/Makefile && ctest --progress --verbose
+python scripts/benchmark_vec_env.py --game SuperMarioBros-Nes-v0 --num-envs 8
 ```
 
 ## Notes
