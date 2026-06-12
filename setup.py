@@ -54,18 +54,25 @@ def stable_retro_package_data():
         "README.md",
         "LICENSES.md",
     ]
+    core_suffix = ".dylib" if sys.platform == "darwin" else ".so"
+    if sys.platform == "win32":
+        core_suffix = ".dll"
     for core in PUBLIC_CORE_NAMES:
         files.append(f"cores/{core}.json")
-        files.append(f"cores/{core}_libretro.dylib")
-    files.append(f"helpers/{ROSETTA_HELPER_NAME}")
-    files.append(f"cores_rosetta/{ROSETTA_CORE_NAME}")
+        files.append(f"cores/{core}_libretro{core_suffix}")
+    if should_build_rosetta_snes():
+        files.append(f"helpers/{ROSETTA_HELPER_NAME}")
+        files.append(f"cores_rosetta/{ROSETTA_CORE_NAME}")
     return files
 
 
 def copy_public_core_assets(destination: Path):
     destination.mkdir(parents=True, exist_ok=True)
+    core_suffix = ".dylib" if sys.platform == "darwin" else ".so"
+    if sys.platform == "win32":
+        core_suffix = ".dll"
     for core in PUBLIC_CORE_NAMES:
-        for suffix in (".json", "_libretro.dylib"):
+        for suffix in (".json", f"_libretro{core_suffix}"):
             asset_name = f"{core}{suffix}"
             asset = None
             direct_candidates = [

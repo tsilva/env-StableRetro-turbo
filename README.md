@@ -4,9 +4,9 @@
   **🎮 Working Apple Silicon builds for stable-retro 🍎**
 </div>
 
-`stable-retro-apple-silicon` publishes installable macOS Apple Silicon wheels for the upstream [`stable-retro`](https://github.com/Farama-Foundation/stable-retro) API surface.
+`stable-retro-apple-silicon` publishes installable macOS Apple Silicon and Linux wheels for the upstream [`stable-retro`](https://github.com/Farama-Foundation/stable-retro) API surface.
 
-Use it when you want `stable_retro` game environments on an M-series Mac without building the package and bundled public libretro cores from source yourself.
+Use it when you want `stable_retro` game environments without building the package and bundled public libretro cores from source yourself.
 
 ## Install
 
@@ -171,7 +171,7 @@ python scripts/benchmark_vec_env.py --game SuperMarioBros-Nes-v0 --num-envs 8
 
 ## Notes
 
-- Published wheels target Apple Silicon `arm64`, macOS `14.0+`, and Python `3.9` through `3.12`.
+- Published wheels target Apple Silicon `arm64` on macOS `14.0+` and `x86_64` on Linux, for Python `3.9` through `3.12`.
 - The public wheel build includes Game Boy, NES, SNES, and Sega Master System cores: `gambatte`, `fceumm`, `snes9x`, and `genesis_plus_gx`.
 - CapnProto is disabled in the public wheel build path.
 - SNES on Apple Silicon uses an automatic Rosetta helper because the native arm64 `snes9x` path is not stable across the bundled integrations.
