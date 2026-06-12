@@ -26,6 +26,7 @@ static inline T _hypot(T x, T y) {
 #include <map>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace py = pybind11;
 
@@ -50,54 +51,10 @@ struct PyRetroEmulator {
 		m_re.run();
 	}
 
-	py::bytes getState() {
-		size_t size = m_re.serializeSize();
-		py::bytes bytes(NULL, size);
-		m_re.serialize(PyBytes_AsString(bytes.ptr()), size);
-		return bytes;
-	}
-
-	bool setState(py::bytes o) {
-		return m_re.unserialize(PyBytes_AsString(o.ptr()), PyBytes_Size(o.ptr()));
-	}
-
-	py::array_t<uint8_t> getScreen() {
+	void readRgbFrame(std::vector<uint8_t>& rgb) {
 		long w = m_re.getImageWidth();
 		long h = m_re.getImageHeight();
-		py::array_t<uint8_t> arr({ { h, w, 3 } });
-		uint8_t* data = arr.mutable_data();
-		Image out(Image::Format::RGB888, data, w, h, w);
-		const void* img = m_re.getImageData();
-		if (!img) {
-			// Some cores (notably N64) can take a number of frames before the first CPU framebuffer is produced.
-			for (int i = 0; i < 180 && !img; ++i) {
-				m_re.run();
-				img = m_re.getImageData();
-			}
-		}
-		if (!img) {
-			throw std::runtime_error(
-				"Core did not provide a CPU framebuffer. "
-				"This usually means the core is using hardware rendering, which stable-retro can't capture yet. "
-				"For N64/parallel_n64, try forcing a software renderer (parallel-n64-gfxplugin=angrylion)."
-			);
-		}
-		Image in;
-		if (m_re.getImageDepth() == 16) {
-			in = Image(Image::Format::RGB565, img, w, h, m_re.getImagePitch());
-		} else if (m_re.getImageDepth() == 32) {
-			in = Image(Image::Format::RGBX888, img, w, h, m_re.getImagePitch());
-		} else {
-			throw std::runtime_error("Unsupported image depth from core");
-		}
-		in.copyTo(&out);
-		return arr;
-	}
-
-	py::array_t<uint8_t> getProcessedScreen(py::object cropObj, py::object resizeObj, bool grayscale, const string& algorithm) {
-		long w = m_re.getImageWidth();
-		long h = m_re.getImageHeight();
-		std::vector<uint8_t> rgb(static_cast<size_t>(w) * static_cast<size_t>(h) * 3);
+		rgb.resize(static_cast<size_t>(w) * static_cast<size_t>(h) * 3);
 		Image out(Image::Format::RGB888, rgb.data(), w, h, w);
 		const void* img = m_re.getImageData();
 		if (!img) {
@@ -121,6 +78,11 @@ struct PyRetroEmulator {
 			throw std::runtime_error("Unsupported image depth from core");
 		}
 		in.copyTo(&out);
+	}
+
+	py::array_t<uint8_t> processRgbFrame(const std::vector<uint8_t>& rgb, py::object cropObj, py::object resizeObj, bool grayscale, const string& algorithm) {
+		long w = m_re.getImageWidth();
+		long h = m_re.getImageHeight();
 
 		long top = 0;
 		long bottom = 0;
@@ -248,6 +210,56 @@ struct PyRetroEmulator {
 		return arr;
 	}
 
+	py::bytes getState() {
+		size_t size = m_re.serializeSize();
+		py::bytes bytes(NULL, size);
+		m_re.serialize(PyBytes_AsString(bytes.ptr()), size);
+		return bytes;
+	}
+
+	bool setState(py::bytes o) {
+		return m_re.unserialize(PyBytes_AsString(o.ptr()), PyBytes_Size(o.ptr()));
+	}
+
+	py::array_t<uint8_t> getScreen() {
+		long w = m_re.getImageWidth();
+		long h = m_re.getImageHeight();
+		py::array_t<uint8_t> arr({ { h, w, 3 } });
+		uint8_t* data = arr.mutable_data();
+		Image out(Image::Format::RGB888, data, w, h, w);
+		const void* img = m_re.getImageData();
+		if (!img) {
+			// Some cores (notably N64) can take a number of frames before the first CPU framebuffer is produced.
+			for (int i = 0; i < 180 && !img; ++i) {
+				m_re.run();
+				img = m_re.getImageData();
+			}
+		}
+		if (!img) {
+			throw std::runtime_error(
+				"Core did not provide a CPU framebuffer. "
+				"This usually means the core is using hardware rendering, which stable-retro can't capture yet. "
+				"For N64/parallel_n64, try forcing a software renderer (parallel-n64-gfxplugin=angrylion)."
+			);
+		}
+		Image in;
+		if (m_re.getImageDepth() == 16) {
+			in = Image(Image::Format::RGB565, img, w, h, m_re.getImagePitch());
+		} else if (m_re.getImageDepth() == 32) {
+			in = Image(Image::Format::RGBX888, img, w, h, m_re.getImagePitch());
+		} else {
+			throw std::runtime_error("Unsupported image depth from core");
+		}
+		in.copyTo(&out);
+		return arr;
+	}
+
+	py::array_t<uint8_t> getProcessedScreen(py::object cropObj, py::object resizeObj, bool grayscale, const string& algorithm) {
+		std::vector<uint8_t> rgb;
+		readRgbFrame(rgb);
+		return processRgbFrame(rgb, cropObj, resizeObj, grayscale, algorithm);
+	}
+
 	double getScreenRate() {
 		return m_re.getFrameRate();
 	}
@@ -294,6 +306,7 @@ struct PyRetroEmulator {
 	}
 
 	void configureData(PyGameData& data);
+	py::tuple stepRepeatAndProcess(PyGameData& data, py::array_t<uint8_t> mask, int repeats, py::object cropObj, py::object resizeObj, bool grayscale, const string& algorithm, bool maxpoolLastTwo);
 	static bool loadCoreInfo(const string& json) {
 		return Retro::loadCoreInfo(json);
 	}
@@ -571,6 +584,51 @@ void PyRetroEmulator::configureData(PyGameData& data) {
 	m_re.configureData(&data.m_data);
 }
 
+py::tuple PyRetroEmulator::stepRepeatAndProcess(PyGameData& data, py::array_t<uint8_t> mask, int repeats, py::object cropObj, py::object resizeObj, bool grayscale, const string& algorithm, bool maxpoolLastTwo) {
+	if (repeats <= 0) {
+		throw std::runtime_error("repeats must be positive");
+	}
+	if (mask.size() > N_BUTTONS) {
+		throw std::runtime_error("mask.size() > N_BUTTONS");
+	}
+	for (int key = 0; key < mask.size(); ++key) {
+		m_re.setKey(0, key, mask.data()[key]);
+	}
+
+	float totalReward = 0.0f;
+	bool done = false;
+	bool sawFrame = false;
+	std::vector<uint8_t> prevRgb;
+	std::vector<uint8_t> currRgb;
+
+	for (int i = 0; i < repeats; ++i) {
+		m_re.run();
+		data.m_data.updateRam();
+		data.m_scen.update();
+		totalReward += data.m_scen.currentReward();
+		done = data.m_scen.isDone();
+		if (maxpoolLastTwo && (i >= repeats - 2 || done)) {
+			prevRgb.swap(currRgb);
+			readRgbFrame(currRgb);
+			sawFrame = true;
+		}
+		if (done) {
+			break;
+		}
+	}
+
+	if (!maxpoolLastTwo || !sawFrame) {
+		readRgbFrame(currRgb);
+	} else if (!prevRgb.empty()) {
+		for (size_t i = 0; i < currRgb.size(); ++i) {
+			currRgb[i] = std::max(currRgb[i], prevRgb[i]);
+		}
+	}
+
+	py::array_t<uint8_t> obs = processRgbFrame(currRgb, cropObj, resizeObj, grayscale, algorithm);
+	return py::make_tuple(obs, totalReward, done, data.lookupAll());
+}
+
 struct PyMovie {
 	std::unique_ptr<Retro::Movie> m_movie;
 	bool recording = false;
@@ -647,6 +705,7 @@ PYBIND11_MODULE(_retro, m) {
 		.def("set_state", &PyRetroEmulator::setState)
 		.def("get_screen", &PyRetroEmulator::getScreen)
 		.def("get_processed_screen", &PyRetroEmulator::getProcessedScreen)
+		.def("step_repeat_and_process", &PyRetroEmulator::stepRepeatAndProcess)
 		.def("get_rotation", &PyRetroEmulator::getRotation)
 		.def("get_screen_rate", &PyRetroEmulator::getScreenRate)
 		.def("get_audio", &PyRetroEmulator::getAudio)

@@ -111,6 +111,11 @@ def main(argv=None) -> int:
     parser.add_argument("--frame-skip", type=int, default=4)
     parser.add_argument("--frame-stack", type=int, default=4)
     parser.add_argument("--obs-crop", default=None)
+    parser.add_argument(
+        "--variants",
+        default=None,
+        help="Comma-separated variant names to run. Defaults to all variants.",
+    )
     args = parser.parse_args(argv)
 
     import stable_retro as retro
@@ -151,23 +156,42 @@ def main(argv=None) -> int:
     }
 
     variants = [
-        ("subproc_baseline", _build_subproc, base_kwargs, False),
-        ("subproc_worker_preproc", _build_subproc, preproc_kwargs, False),
-        ("subproc_native_preproc", _build_subproc, preproc_kwargs, True),
-        ("shared_worker_preproc", _build_shared, preproc_kwargs, False),
-        ("shared_native_preproc", _build_shared, preproc_kwargs, True),
+        ("subproc_baseline", _build_subproc, base_kwargs, False, False),
+        ("subproc_worker_preproc", _build_subproc, preproc_kwargs, False, False),
+        ("subproc_native_preproc", _build_subproc, preproc_kwargs, True, False),
+        ("subproc_native_fused", _build_subproc, preproc_kwargs, True, True),
+        ("shared_worker_preproc", _build_shared, preproc_kwargs, False, False),
+        ("shared_native_preproc", _build_shared, preproc_kwargs, True, False),
+        ("shared_native_fused", _build_shared, preproc_kwargs, True, True),
     ]
+    if args.variants:
+        requested_variants = {name.strip() for name in args.variants.split(",")}
+        known_variants = {name for name, *_ in variants}
+        unknown_variants = requested_variants - known_variants
+        if unknown_variants:
+            raise SystemExit(
+                "Unknown variants: "
+                + ", ".join(sorted(unknown_variants))
+                + ". Known variants: "
+                + ", ".join(name for name, *_ in variants),
+            )
+        variants = [variant for variant in variants if variant[0] in requested_variants]
 
     results = []
     old_disable_audio = os.environ.get("STABLE_RETRO_DISABLE_AUDIO")
     os.environ["STABLE_RETRO_DISABLE_AUDIO"] = "1"
     old_disable_native = os.environ.get("STABLE_RETRO_DISABLE_NATIVE_IMAGEOPS")
+    old_disable_fused = os.environ.get("STABLE_RETRO_DISABLE_NATIVE_FUSED_STEP")
     try:
-        for name, builder, kwargs, native in variants:
+        for name, builder, kwargs, native, fused in variants:
             if native:
                 os.environ.pop("STABLE_RETRO_DISABLE_NATIVE_IMAGEOPS", None)
             else:
                 os.environ["STABLE_RETRO_DISABLE_NATIVE_IMAGEOPS"] = "1"
+            if fused:
+                os.environ.pop("STABLE_RETRO_DISABLE_NATIVE_FUSED_STEP", None)
+            else:
+                os.environ["STABLE_RETRO_DISABLE_NATIVE_FUSED_STEP"] = "1"
             env_fns = [
                 _make_env_fn(
                     game,
@@ -181,7 +205,14 @@ def main(argv=None) -> int:
                 for _ in range(args.num_envs)
             ]
             env = builder(env_fns, args.start_method)
-            results.append(_run_vec(name, env, args.seconds, args.warmup_steps))
+            result = _run_vec(name, env, args.seconds, args.warmup_steps)
+            results.append(result)
+            print(
+                f"finished {result.name}: "
+                f"{result.steps_per_second:.1f} steps/s "
+                f"({result.steps} steps in {result.seconds:.2f}s)",
+                flush=True,
+            )
     finally:
         if old_disable_audio is None:
             os.environ.pop("STABLE_RETRO_DISABLE_AUDIO", None)
@@ -191,6 +222,10 @@ def main(argv=None) -> int:
             os.environ.pop("STABLE_RETRO_DISABLE_NATIVE_IMAGEOPS", None)
         else:
             os.environ["STABLE_RETRO_DISABLE_NATIVE_IMAGEOPS"] = old_disable_native
+        if old_disable_fused is None:
+            os.environ.pop("STABLE_RETRO_DISABLE_NATIVE_FUSED_STEP", None)
+        else:
+            os.environ["STABLE_RETRO_DISABLE_NATIVE_FUSED_STEP"] = old_disable_fused
 
     _print_results(results)
     if len(results) > 1:
