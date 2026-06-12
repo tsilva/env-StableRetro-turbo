@@ -1,4 +1,5 @@
 #include <cassert>
+#include <cstdlib>
 #ifndef _WIN32
 #include <dlfcn.h>
 #endif
@@ -86,7 +87,17 @@ static void (*retro_set_audio_sample_batch)(retro_audio_sample_batch_t);
 static void (*retro_set_input_poll)(retro_input_poll_t);
 static void (*retro_set_input_state)(retro_input_state_t);
 
+static bool envFlagEnabled(const char* name) {
+	const char* value = getenv(name);
+	if (!value || !*value) {
+		return false;
+	}
+	return strcmp(value, "0") && strcmp(value, "false") && strcmp(value, "False") && strcmp(value, "FALSE");
+}
+
 Emulator::Emulator() {
+	m_audioEnabled = !envFlagEnabled("STABLE_RETRO_DISABLE_AUDIO");
+	m_videoEnabled = !envFlagEnabled("STABLE_RETRO_DISABLE_VIDEO");
 }
 
 Emulator::~Emulator() {
@@ -212,7 +223,9 @@ bool Emulator::loadRom(const string& romPath) {
 
 void Emulator::run() {
 	assert(s_loadedEmulator == this);
-	m_audioData.clear();
+	if (m_audioEnabled) {
+		m_audioData.clear();
+	}
 	retro_run();
 	if (m_serializationQuirks & RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE) {
 		m_needsInitFrame = false;
@@ -615,6 +628,9 @@ void Emulator::cbVideoRefresh(const void* data, unsigned width, unsigned height,
 			s_loadedEmulator->m_avInfo.geometry.max_height = height;
 		}
 	}
+	if (!s_loadedEmulator->m_videoEnabled) {
+		return;
+	}
 	// Hardware rendering: the core is signaling that the framebuffer lives on the GPU.
 	if (data == RETRO_HW_FRAME_BUFFER_VALID) {
 #ifdef ENABLE_HW_RENDER
@@ -673,12 +689,18 @@ void Emulator::cbVideoRefresh(const void* data, unsigned width, unsigned height,
 
 void Emulator::cbAudioSample(int16_t left, int16_t right) {
 	assert(s_loadedEmulator);
+	if (!s_loadedEmulator->m_audioEnabled) {
+		return;
+	}
 	s_loadedEmulator->m_audioData.push_back(left);
 	s_loadedEmulator->m_audioData.push_back(right);
 }
 
 size_t Emulator::cbAudioSampleBatch(const int16_t* data, size_t frames) {
 	assert(s_loadedEmulator);
+	if (!s_loadedEmulator->m_audioEnabled) {
+		return frames;
+	}
 	s_loadedEmulator->m_audioData.insert(s_loadedEmulator->m_audioData.end(), data, &data[frames * 2]);
 	return frames;
 }

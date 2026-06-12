@@ -1,3 +1,4 @@
+-c constraints.txt
 # pip requirements for all cpythons
 # NOTE: pip has GPG signatures; could download and verify independently.
 pip==21.1 \

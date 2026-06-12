@@ -82,6 +82,30 @@ static uint32_t current_palette = 0;
 int PPUViewScanline=0;
 int PPUViewer=0;
 
+static bool stable_retro_audio_enabled(void)
+{
+   static int enabled = -1;
+   if (enabled != -1)
+      return enabled;
+   const char *value = getenv("STABLE_RETRO_DISABLE_AUDIO");
+   enabled = !value || !*value || !strcmp(value, "0") ||
+      !strcmp(value, "false") || !strcmp(value, "False") ||
+      !strcmp(value, "FALSE");
+   return enabled;
+}
+
+static bool stable_retro_video_enabled(void)
+{
+   static int enabled = -1;
+   if (enabled != -1)
+      return enabled;
+   const char *value = getenv("STABLE_RETRO_DISABLE_VIDEO");
+   enabled = !value || !*value || !strcmp(value, "0") ||
+      !strcmp(value, "false") || !strcmp(value, "False") ||
+      !strcmp(value, "FALSE");
+   return enabled;
+}
+
 /* extern forward decls.*/
 extern FCEUGI *GameInfo;
 extern uint8 *XBuf;
@@ -1305,14 +1329,15 @@ void retro_run(void)
       check_variables(false);
 
    FCEUD_UpdateInput();
-   FCEUI_Emulate(&gfx, &sound, &ssize, 0);
+   FCEUI_Emulate(&gfx, &sound, &ssize, stable_retro_video_enabled() ? 0 : 1);
 
    for (i = 0; i < ssize; i++)
       sound[i] = (sound[i] << 16) | (sound[i] & 0xffff);
 
    audio_batch_cb((const int16_t*)sound, ssize);
 
-   retro_run_blit(gfx);
+   if (stable_retro_video_enabled())
+      retro_run_blit(gfx);
 }
 
 static unsigned serialize_size = 0;
@@ -1725,7 +1750,7 @@ bool retro_load_game(const struct retro_game_info *game)
    FCEUI_Initialize();
 
    FCEUI_SetSoundVolume(256);
-   FCEUI_Sound(32050);
+   FCEUI_Sound(stable_retro_audio_enabled() ? 32050 : 0);
 
    GameInfo = (FCEUGI*)FCEUI_LoadGame(game->path, (uint8_t*)game->data, game->size);
    if (!GameInfo)
