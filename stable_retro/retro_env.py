@@ -409,6 +409,31 @@ class RetroEnv(gym.Env, EzPickle):
             self._obs_resize_algorithm,
         )
 
+    def _native_step_repeat_and_process(self, action):
+        if (
+            self.players != 1
+            or self.movie
+            or self._obs_type != retro.Observations.IMAGE
+            or self._rotation_steps() != 0
+            or os.environ.get("STABLE_RETRO_DISABLE_NATIVE_IMAGEOPS")
+            or os.environ.get("STABLE_RETRO_DISABLE_NATIVE_FUSED_STEP")
+            or not hasattr(self.em, "step_repeat_and_process")
+        ):
+            return None
+        width, height = self.em.get_resolution()
+        crop = self._effective_crop(0, height, width)
+        action_mask = self.action_to_array(action)[0]
+        return self.em.step_repeat_and_process(
+            self.data,
+            action_mask,
+            self._frame_skip,
+            crop,
+            self._obs_resize,
+            self._obs_grayscale,
+            self._obs_resize_algorithm,
+            self._maxpool_last_two,
+        )
+
     def _apply_obs_grayscale(self, image):
         if not self._obs_grayscale:
             return image
@@ -549,6 +574,15 @@ class RetroEnv(gym.Env, EzPickle):
             raise RuntimeError("Please call env.reset() before env.step()")
 
         action = self._select_step_action(a)
+        native_step = self._native_step_repeat_and_process(action)
+        if native_step is not None:
+            self.img, rew, done, info = native_step
+            ob = self._update_frame_stack(self.img)
+            rew = self._clip_reward(rew)
+            if self.render_mode == "human":
+                self.render()
+            return ob, rew, bool(done), False, dict(info)
+
         self._set_action(action)
 
         total_rew = None

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import multiprocessing as mp
-from multiprocessing import resource_tracker
 from multiprocessing import shared_memory
 from typing import Any
 
@@ -53,10 +52,8 @@ def _worker(remote, parent_remote, env_fn_wrapper):
         while True:
             cmd, data = remote.recv()
             if cmd == "set_shm":
-                name, shape, dtype, obs_index, unregister_resource = data
+                name, shape, dtype, obs_index = data
                 shm = shared_memory.SharedMemory(name=name)
-                if unregister_resource:
-                    resource_tracker.unregister(shm._name, "shared_memory")
                 obs_array = np.ndarray(shape, dtype=np.dtype(dtype), buffer=shm.buf)
                 remote.send(None)
             elif cmd == "step":
@@ -178,7 +175,6 @@ class StableRetroSubprocVecEnv(VecEnv):
                         self.observations.shape,
                         self.obs_dtype.str,
                         i,
-                        start_method == "fork",
                     ),
                 ),
             )
@@ -229,7 +225,10 @@ class StableRetroSubprocVecEnv(VecEnv):
         for process in self.processes:
             process.join()
         self.shm.close()
-        self.shm.unlink()
+        try:
+            self.shm.unlink()
+        except FileNotFoundError:
+            pass
         self.closed = True
 
     def get_images(self):
