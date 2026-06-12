@@ -22,6 +22,66 @@ import stable_retro as retro
 env = retro.make("Alleyway-GameBoy-v0", render_mode="rgb_array")
 ```
 
+## RL preprocessing and SB3
+
+For reinforcement-learning loops, image preprocessing can be done inside each
+environment worker before observations are returned to the caller. This is useful
+with `SubprocVecEnv`, where sending smaller observations across process
+boundaries can be much faster than returning full-size RGB frames and resizing
+later.
+
+```python
+import stable_retro as retro
+
+env = retro.make(
+    "SuperMarioBros-Nes-v0",
+    render_mode="rgb_array",
+    obs_resize=(84, 84),
+    obs_resize_algorithm="nearest",  # nearest, bilinear, or area
+    obs_grayscale=True,
+)
+```
+
+Available image kwargs:
+
+- `obs_resize=(height, width)`: resize image observations before they leave the env.
+- `obs_resize_algorithm="nearest"`: choose `nearest`, `bilinear`, or `area`; `nearest` is fastest, while `area` is downscale-only and does more averaging work.
+- `obs_grayscale=True`: return grayscale observations with shape `(height, width, 1)`.
+- `obs_crop=(top, bottom, left, right)`: crop pixels before grayscale and resize.
+
+Pass the same options through Stable-Baselines3 with `env_kwargs`:
+
+```python
+from stable_baselines3.common.env_util import make_vec_env
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecTransposeImage
+
+
+def make_mario_env(**kwargs):
+    return retro.make(
+        "SuperMarioBros-Nes-v0",
+        render_mode="rgb_array",
+        **kwargs,
+    )
+
+
+env = make_vec_env(
+    make_mario_env,
+    n_envs=8,
+    vec_env_cls=SubprocVecEnv,
+    vec_env_kwargs={"start_method": "spawn"},
+    env_kwargs={
+        "obs_resize": (84, 84),
+        "obs_resize_algorithm": "nearest",
+        "obs_grayscale": True,
+    },
+)
+env = VecTransposeImage(env)  # (n_envs, 1, 84, 84) for grayscale
+```
+
+If your agent does not use audio, set `STABLE_RETRO_DISABLE_AUDIO=1` before
+creating environments. This keeps RGB observations enabled while skipping audio
+capture and supported core-side audio generation.
+
 The deprecated compatibility import still works:
 
 ```python

@@ -34,6 +34,10 @@ class RetroEnv(gym.Env, EzPickle):
         inttype=retro.data.Integrations.STABLE,
         obs_type=retro.Observations.IMAGE,
         render_mode="human",
+        obs_resize=None,
+        obs_crop=None,
+        obs_grayscale=False,
+        obs_resize_algorithm="nearest",
     ):
         """Initialize a Retro environment for a specific game/state configuration."""
         if inttype is retro.data.Integrations.DEFAULT or isinstance(
@@ -55,10 +59,21 @@ class RetroEnv(gym.Env, EzPickle):
             inttype,
             obs_type,
             render_mode,
+            obs_resize,
+            obs_crop,
+            obs_grayscale,
+            obs_resize_algorithm,
         )
         if not hasattr(self, "spec"):
             self.spec = None
         self._obs_type = obs_type
+        self._obs_resize = self._normalize_obs_resize(obs_resize)
+        self._obs_crop = self._normalize_obs_crop(obs_crop)
+        self._obs_grayscale = bool(obs_grayscale)
+        self._obs_resize_algorithm = self._normalize_obs_resize_algorithm(
+            obs_resize_algorithm,
+        )
+        self._obs_resize_cache = {}
         self.img = None
         self.ram = None
         self.viewer = None
@@ -206,6 +221,129 @@ class RetroEnv(gym.Env, EzPickle):
             return np.fliplr(np.swapaxes(image, 0, 1))
         return image
 
+    @staticmethod
+    def _normalize_obs_resize(obs_resize):
+        if obs_resize is None:
+            return None
+        if len(obs_resize) != 2:
+            raise ValueError("obs_resize must be a (height, width) pair")
+        height, width = (int(obs_resize[0]), int(obs_resize[1]))
+        if height <= 0 or width <= 0:
+            raise ValueError("obs_resize height and width must be positive")
+        return height, width
+
+    @staticmethod
+    def _normalize_obs_crop(obs_crop):
+        if obs_crop is None:
+            return None
+        if len(obs_crop) != 4:
+            raise ValueError("obs_crop must be a (top, bottom, left, right) tuple")
+        top, bottom, left, right = (int(v) for v in obs_crop)
+        if min(top, bottom, left, right) < 0:
+            raise ValueError("obs_crop values must be non-negative")
+        return top, bottom, left, right
+
+    @staticmethod
+    def _normalize_obs_resize_algorithm(obs_resize_algorithm):
+        algorithm = str(obs_resize_algorithm).lower()
+        aliases = {
+            "linear": "bilinear",
+            "box": "area",
+        }
+        algorithm = aliases.get(algorithm, algorithm)
+        if algorithm not in {"nearest", "bilinear", "area"}:
+            raise ValueError(
+                "obs_resize_algorithm must be one of: nearest, bilinear, area",
+            )
+        return algorithm
+
+    def _apply_obs_crop(self, image):
+        if self._obs_crop is None:
+            return image
+        top, bottom, left, right = self._obs_crop
+        height, width = image.shape[:2]
+        y2 = height - bottom if bottom else height
+        x2 = width - right if right else width
+        if top >= y2 or left >= x2:
+            raise ValueError("obs_crop removes the entire observation")
+        return image[top:y2, left:x2]
+
+    def _apply_obs_grayscale(self, image):
+        if not self._obs_grayscale:
+            return image
+        if image.ndim == 2:
+            return image[:, :, None]
+        gray = (
+            image[:, :, 0].astype(np.uint16) * 77
+            + image[:, :, 1].astype(np.uint16) * 150
+            + image[:, :, 2].astype(np.uint16) * 29
+            + 128
+        ) >> 8
+        return gray.astype(np.uint8)[:, :, None]
+
+    def _resize_obs(self, image):
+        if self._obs_resize is None:
+            return image
+        height, width = self._obs_resize
+        src_height, src_width = image.shape[:2]
+        key = (src_height, src_width, height, width, self._obs_resize_algorithm)
+        indices = self._obs_resize_cache.get(key)
+        if indices is None:
+            if self._obs_resize_algorithm == "nearest":
+                y_idx = np.linspace(0, src_height - 1, height).astype(np.intp)
+                x_idx = np.linspace(0, src_width - 1, width).astype(np.intp)
+                indices = (y_idx, x_idx)
+            elif self._obs_resize_algorithm == "bilinear":
+                y = np.linspace(0, src_height - 1, height, dtype=np.float32)
+                x = np.linspace(0, src_width - 1, width, dtype=np.float32)
+                y0 = np.floor(y).astype(np.intp)
+                x0 = np.floor(x).astype(np.intp)
+                y1 = np.minimum(y0 + 1, src_height - 1)
+                x1 = np.minimum(x0 + 1, src_width - 1)
+                wy = (y - y0).astype(np.float32)[:, None, None]
+                wx = (x - x0).astype(np.float32)[None, :, None]
+                indices = (y0, y1, x0, x1, wy, wx)
+            else:
+                if height > src_height or width > src_width:
+                    raise ValueError("area resize only supports downscaling")
+                y_edges = np.linspace(0, src_height, height + 1).astype(np.intp)
+                x_edges = np.linspace(0, src_width, width + 1).astype(np.intp)
+                y_edges[1:] = np.maximum(y_edges[1:], y_edges[:-1] + 1)
+                x_edges[1:] = np.maximum(x_edges[1:], x_edges[:-1] + 1)
+                y_edges[-1] = src_height
+                x_edges[-1] = src_width
+                indices = (y_edges, x_edges)
+            self._obs_resize_cache[key] = indices
+        if self._obs_resize_algorithm == "nearest":
+            y_idx, x_idx = indices
+            return image[y_idx][:, x_idx]
+        if self._obs_resize_algorithm == "bilinear":
+            y0, y1, x0, x1, wy, wx = indices
+            top = (
+                image[y0][:, x0].astype(np.float32) * (1.0 - wx)
+                + image[y0][:, x1].astype(np.float32) * wx
+            )
+            bottom = (
+                image[y1][:, x0].astype(np.float32) * (1.0 - wx)
+                + image[y1][:, x1].astype(np.float32) * wx
+            )
+            return np.clip(top * (1.0 - wy) + bottom * wy, 0, 255).astype(np.uint8)
+        y_edges, x_edges = indices
+        integral = image.astype(np.uint32).cumsum(axis=0).cumsum(axis=1)
+        integral = np.pad(integral, ((1, 0), (1, 0), (0, 0)), mode="constant")
+        y0 = y_edges[:-1]
+        y1 = y_edges[1:]
+        x0 = x_edges[:-1]
+        x1 = x_edges[1:]
+        sums = (
+            integral[y1[:, None], x1[None, :]]
+            - integral[y0[:, None], x1[None, :]]
+            - integral[y1[:, None], x0[None, :]]
+            + integral[y0[:, None], x0[None, :]]
+        )
+        pixels = ((y1 - y0)[:, None] * (x1 - x0)[None, :])[:, :, None]
+        return (sums // pixels).astype(np.uint8)
+
     def action_to_array(self, a):
         """Convert an action-space value into per-player button-mask arrays."""
         actions = []
@@ -348,6 +486,9 @@ class RetroEnv(gym.Env, EzPickle):
             result = img[y:h, x:w]
         if apply_rotation:
             result = self._apply_rotation(result)
+        result = self._apply_obs_crop(result)
+        result = self._apply_obs_grayscale(result)
+        result = self._resize_obs(result)
         return result
 
     def load_state(self, statename, inttype=retro.data.Integrations.DEFAULT):

@@ -9,3 +9,10 @@ build-verbosity = 1
 archs = "arm64"
 before-all = "brew install pkg-config lua@5.4 libzip"
 environment = "MACOSX_DEPLOYMENT_TARGET=14.0 ARCHFLAGS='-arch arm64' CMAKE_ARGS='-DBUILD_CORES=gb;nes;snes;genesis -DBUILD_TESTS=OFF -DENABLE_CAPNPROTO=OFF' STABLE_RETRO_PUBLIC_CORES='gambatte,fceumm,snes9x,genesis_plus_gx'"
+
+[tool.uv]
+exclude-newer = "7 days"
+constraint-dependencies = [
+  "mistralai!=2.4.6",
+  "guardrails-ai!=0.10.1",
+]
