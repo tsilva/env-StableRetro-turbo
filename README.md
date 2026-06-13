@@ -19,16 +19,41 @@ RL-throughput features:
   no-op reset, sticky actions, and reward clipping.
 - Native C++ screen processing and fused `step_repeat_and_process()`.
 - `StableRetroSubprocVecEnv` shared-memory observations to reduce IPC copying.
+- Multi-emulator native frontend support inside one process, using per-instance
+  libretro function tables, thread-local callback routing, and isolated core
+  copies when several emulator instances load the same core.
+- `StableRetroThreadedVecEnv`, an experimental same-process SB3 VecEnv that can
+  run fused emulator steps in Python worker threads or through the native C++
+  batch stepping entry point.
+- Native C++ `step_repeat_and_process_batch()` with a persistent worker pool for
+  batched emulator stepping.
+- `StableRetroNativeVecEnv`, a same-process SB3 VecEnv where C++ owns the
+  emulator pool, frame skip, preprocessing, frame stacking, autoreset, reward
+  and done evaluation, and one contiguous batched observation buffer.
 - `STABLE_RETRO_DISABLE_AUDIO=1` for RGB-only agents.
 - `scripts/benchmark_vec_env.py` for baseline versus optimized throughput runs.
 
-In local Mario benchmarks using `SuperMarioBros-Nes-v0`, the optimized path was
-materially faster than the baseline Python/SB3 vector setup. The best measured
-direct-ROM 8-env run was about `9,756 steps/s` versus about `4,076 steps/s` for
-the baseline, roughly `2.39x` faster. Broader sweeps showed fused native
-preprocessing helping most as env count rises, while true multi-env-per-process
-batching is still blocked by stable-retro's current one-emulator-instance-per-process
-native frontend.
+In local Mario benchmarks using `SuperMarioBros-Nes-v0`, the optimized
+native vector path is now the fastest measured runtime. The earlier
+same-process threaded implementation validated multi-emulator execution and
+removed the old one-emulator-per-process restriction; `StableRetroNativeVecEnv`
+moves the remaining hot vector-env state machine into C++ so rollout steps no
+longer cross Python once per environment.
+
+Recent local direct-ROM fused-preprocessing results on
+`SuperMarioBros-Nes-v0`:
+
+| envs | shared_native_fused | native_vec_fused | speedup |
+| ---: | ------------------: | ---------------: | ------: |
+| 8 | 4,037 steps/s | 7,797 steps/s | 1.93x |
+| 16 | 4,518 steps/s | 8,295 steps/s | 1.84x |
+| 32 | 5,029 steps/s | 8,632 steps/s | 1.72x |
+| 32, 16 native threads | 5,029 steps/s | 8,910 steps/s | 1.77x |
+| 64, 16 native threads | not sampled cleanly | 7,662 steps/s | n/a |
+
+The 64-env shared subprocess run was previously interrupted after spending
+several minutes in worker startup/imports before producing a steady-state
+measurement; the native vector path avoids that Python worker startup cost.
 
 ## Install
 
@@ -106,7 +131,31 @@ env = make_vec_env(
 env = VecTransposeImage(env)  # (n_envs, 1, 84, 84) for grayscale
 ```
 
-For lower IPC overhead than `SubprocVecEnv`, use the shared-memory vector env:
+For the fastest SB3-style Mario rollouts, use the native vector env directly:
+
+```python
+from stable_retro import StableRetroNativeVecEnv
+
+env = StableRetroNativeVecEnv(
+    "SuperMarioBros-Nes-v0",
+    num_envs=32,
+    num_threads=16,
+    render_mode="rgb_array",
+    obs_resize=(84, 84),
+    obs_grayscale=True,
+    frame_skip=4,
+    frame_stack=4,
+    maxpool_last_two=True,
+)
+```
+
+`StableRetroNativeVecEnv` currently targets homogeneous single-player image
+rollouts with no movie recording and no screen rotation. It keeps the hot
+rollout path in C++ and returns a contiguous NumPy observation batch shaped
+`(num_envs, height, width, channels * frame_stack)`.
+
+For lower IPC overhead than standard `SubprocVecEnv`, use the shared-memory
+vector env:
 
 ```python
 from stable_retro import StableRetroSubprocVecEnv
@@ -152,12 +201,34 @@ from stable_retro import StableRetroChunkedSubprocVecEnv
 env = StableRetroChunkedSubprocVecEnv(env_fns, chunk_size=4)
 ```
 
-This is useful for envs that support multiple instances per process. Current
-native stable-retro emulator instances do **not**: the C++ libretro frontend has
-one active emulator/core callback target per process, so stable-retro games must
-still use one emulator process per env. For stable-retro games, prefer
-`StableRetroSubprocVecEnv` until the native frontend is refactored for true
-multi-instance execution.
+`StableRetroThreadedVecEnv` is still available for experimental same-process
+execution where you need Python `RetroEnv` objects:
+
+```python
+from stable_retro import StableRetroThreadedVecEnv
+
+env = StableRetroThreadedVecEnv(
+    [
+        lambda: retro.make(
+            "SuperMarioBros-Nes-v0",
+            render_mode="rgb_array",
+            obs_resize=(84, 84),
+            obs_grayscale=True,
+            frame_skip=4,
+            frame_stack=4,
+            maxpool_last_two=True,
+        )
+        for _ in range(8)
+    ],
+)
+```
+
+By default it uses the native C++ batch stepping entry point when the envs are
+single-player image observations with no movie playback or rotation. Set
+`STABLE_RETRO_DISABLE_NATIVE_BATCH_STEP=1` or pass
+`use_native_batch=False` to compare against the persistent Python thread-pool
+path. For current Mario/SB3-style rollouts, `StableRetroSubprocVecEnv` is still
+slower than `StableRetroNativeVecEnv` but remains more general.
 
 If your agent does not use audio, set `STABLE_RETRO_DISABLE_AUDIO=1` before
 creating environments. This keeps RGB observations enabled while skipping audio

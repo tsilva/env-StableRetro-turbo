@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Benchmark stable-retro vector rollout throughput variants."""
 
 from __future__ import annotations
@@ -29,7 +28,13 @@ class Result:
 
 
 def _make_env_fn(
-    game, state, inttype, env_kwargs, rom_path=None, info=None, scenario=None
+    game,
+    state,
+    inttype,
+    env_kwargs,
+    rom_path=None,
+    info=None,
+    scenario=None,
 ):
     def make_env():
         import stable_retro as retro
@@ -69,7 +74,7 @@ def _run_vec(name, env, seconds, warmup_steps) -> Result:
 def _print_results(results):
     baseline = results[0].steps_per_second if results else 0.0
     print(
-        f"{'variant':34} {'steps/s':>12} {'speedup':>10} {'steps':>10} {'seconds':>9}"
+        f"{'variant':34} {'steps/s':>12} {'speedup':>10} {'steps':>10} {'seconds':>9}",
     )
     print("-" * 81)
     for result in results:
@@ -93,6 +98,42 @@ def _build_shared(env_fns, start_method):
     from stable_retro.vec_env import StableRetroSubprocVecEnv
 
     return StableRetroSubprocVecEnv(env_fns, start_method=start_method)
+
+
+def _build_threaded(env_fns, _start_method, num_threads=None, use_native_batch=True):
+    from stable_retro.vec_env import StableRetroThreadedVecEnv
+
+    return StableRetroThreadedVecEnv(
+        env_fns,
+        num_threads=num_threads,
+        use_native_batch=use_native_batch,
+    )
+
+
+def _build_native_vec(
+    game,
+    state,
+    inttype,
+    num_envs,
+    env_kwargs,
+    rom_path=None,
+    info=None,
+    scenario=None,
+    num_threads=None,
+):
+    from stable_retro.vec_env import StableRetroNativeVecEnv
+
+    return StableRetroNativeVecEnv(
+        game,
+        num_envs,
+        state=state,
+        inttype=inttype,
+        rom_path=rom_path,
+        info=info,
+        scenario=scenario,
+        num_threads=num_threads,
+        **env_kwargs,
+    )
 
 
 def _build_chunked(env_fns, start_method, chunk_size):
@@ -121,6 +162,12 @@ def main(argv=None) -> int:
     parser.add_argument("--frame-skip", type=int, default=4)
     parser.add_argument("--frame-stack", type=int, default=4)
     parser.add_argument("--obs-crop", default=None)
+    parser.add_argument(
+        "--threaded-num-threads",
+        type=int,
+        default=None,
+        help="Worker count for StableRetroThreadedVecEnv variants.",
+    )
     parser.add_argument(
         "--chunk-sizes",
         default="2,4,8,16",
@@ -181,6 +228,71 @@ def main(argv=None) -> int:
         ("shared_worker_preproc", _build_shared, preproc_kwargs, False, False),
         ("shared_native_preproc", _build_shared, preproc_kwargs, True, False),
         ("shared_native_fused", _build_shared, preproc_kwargs, True, True),
+        (
+            "native_vec_fused",
+            lambda _env_fns, _start_method: _build_native_vec(
+                game,
+                state,
+                retro.data.Integrations.DEFAULT,
+                args.num_envs,
+                preproc_kwargs,
+                rom_path=rom_path,
+                info=info,
+                scenario=scenario,
+                num_threads=args.threaded_num_threads,
+            ),
+            preproc_kwargs,
+            True,
+            True,
+        ),
+        (
+            "threaded_pool_native_preproc",
+            lambda env_fns, start_method: _build_threaded(
+                env_fns,
+                start_method,
+                args.threaded_num_threads,
+                False,
+            ),
+            preproc_kwargs,
+            True,
+            False,
+        ),
+        (
+            "threaded_pool_native_fused",
+            lambda env_fns, start_method: _build_threaded(
+                env_fns,
+                start_method,
+                args.threaded_num_threads,
+                False,
+            ),
+            preproc_kwargs,
+            True,
+            True,
+        ),
+        (
+            "threaded_batch_native_preproc",
+            lambda env_fns, start_method: _build_threaded(
+                env_fns,
+                start_method,
+                args.threaded_num_threads,
+                True,
+            ),
+            preproc_kwargs,
+            True,
+            False,
+        ),
+        (
+            "threaded_batch_native_fused",
+            lambda env_fns, start_method: _build_threaded(
+                env_fns,
+                start_method,
+                args.threaded_num_threads,
+                True,
+            ),
+            preproc_kwargs,
+            True,
+            True,
+        ),
     ]
     for chunk_size in chunk_sizes:
         variants.extend(

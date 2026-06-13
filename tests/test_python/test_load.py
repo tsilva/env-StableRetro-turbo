@@ -1,7 +1,7 @@
 import gc
 import gzip
 import zlib
-from concurrent.futures import ProcessPoolExecutor, TimeoutError
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, TimeoutError
 from concurrent.futures.process import BrokenProcessPool
 
 import gymnasium as gym
@@ -69,6 +69,24 @@ def state(game, inttype):
     gc.collect()
 
     return [], errors
+
+
+def test_multiple_emulators_per_process_threaded():
+    rom = "tests/roms/Dr88-FamiconIntro.nes"
+    emulators = [retro.RetroEmulator(rom) for _ in range(4)]
+
+    def step_and_shape(emulator):
+        for _ in range(20):
+            emulator.step()
+        return emulator.get_screen().shape
+
+    try:
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            shapes = list(executor.map(step_and_shape, emulators))
+        assert shapes == [(224, 240, 3)] * 4
+    finally:
+        del emulators
+        gc.collect()
 
 
 @pytest.mark.parametrize("game_name, integration_type", all_games_with_roms)

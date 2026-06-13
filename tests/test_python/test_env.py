@@ -6,11 +6,18 @@ import pytest
 import stable_retro as retro
 
 
-@pytest.fixture(
-    params=[
+def supported_test_rom_names():
+    rom_dir = os.path.join(os.path.dirname(__file__), "../roms")
+    supported_extensions = set(retro.data.EMU_EXTENSIONS)
+    return [
         os.path.splitext(rom)[0]
-        for rom in os.listdir(os.path.join(os.path.dirname(__file__), "../roms"))
-    ],
+        for rom in os.listdir(rom_dir)
+        if os.path.splitext(rom)[1] in supported_extensions
+    ]
+
+
+@pytest.fixture(
+    params=supported_test_rom_names(),
 )
 def generate_test_env(request):
     import stable_retro.data
@@ -31,17 +38,19 @@ def generate_test_env(request):
     created_env = []
 
     def create(state=retro.State.NONE, *args, **kwargs):
+        kwargs.setdefault("render_mode", "rgb_array")
         env = retro.make(game=request.param, state=state, *args, **kwargs)
         created_env.append(env)  # noqa: F821
         return env
 
-    yield create
+    try:
+        yield create
+    finally:
+        for env in created_env:
+            env.close()
 
-    created_env[0].close()
-    del created_env
-
-    retro.data.get_file_path = get_file_path_fn
-    retro.data.get_romfile_path = get_romfile_path_fn
+        retro.data.get_file_path = get_file_path_fn
+        retro.data.get_romfile_path = get_romfile_path_fn
 
 
 def test_env_create(generate_test_env):

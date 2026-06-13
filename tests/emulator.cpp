@@ -6,9 +6,15 @@
 
 #include <sstream>
 #include <fstream>
+#include <vector>
 
 using namespace std;
 using namespace ::testing;
+
+static bool hasCoreInfo(const string& core) {
+	ifstream in("../stable_retro/cores/" + core + ".json");
+	return !!in;
+}
 
 struct EmulatorTestParam {
 	string system;
@@ -29,12 +35,16 @@ struct EmulatorTestParamName {
 void EmulatorTest::SetUp() {
 	for (const string& core : { "fceumm", "gambatte", "genesis_plus_gx", "mednafen_pce_fast", "mgba", "snes9x", "stella", "picodrive" }) {
 		ifstream in("../stable_retro/cores/" + core + ".json");
+		if (!in) {
+			continue;
+		}
 		ostringstream out;
 		Retro::corePath("../stable_retro/cores");
-		while (!in.eof()) {
+		while (in) {
 			string line;
-			in >> line;
-			out << line;
+			if (in >> line) {
+				out << line;
+			}
 		}
 		Retro::loadCoreInfo(out.str().c_str());
 	}
@@ -129,18 +139,38 @@ TEST_P(EmulatorTest, States) {
 	e.run();
 }
 
-vector<EmulatorTestParam> s_systems{
-	{ "Nes", "Dr88-FamiconIntro.nes" },
-	{ "Snes", "Anthrox-SineDotDemo.sfc" },
-	{ "Genesis", "Dekadence-Dekadrive.md" },
-	{ "Atari2600", "automaton.a26" },
-	{ "GameBoy", "dox-fire.gb" },
-	{ "GbAdvance", "Vantage-LostMarbles.gba" },
-	{ "PCEngine", "chrisc-512_Colours.pce" },
-	{ "GameGear", "benryves-SegaTween.gg" },
-	{ "Sms", "blind-happy10.sms" },
-	{ "32x", "Palette-Tech-1-Demo.32x" },
-};
+vector<EmulatorTestParam> availableSystems() {
+	vector<EmulatorTestParam> systems;
+	if (hasCoreInfo("fceumm")) {
+		systems.push_back({ "Nes", "Dr88-FamiconIntro.nes" });
+	}
+	if (hasCoreInfo("snes9x")) {
+		systems.push_back({ "Snes", "Anthrox-SineDotDemo.sfc" });
+	}
+	if (hasCoreInfo("genesis_plus_gx")) {
+		systems.push_back({ "Genesis", "Dekadence-Dekadrive.md" });
+		systems.push_back({ "GameGear", "benryves-SegaTween.gg" });
+		systems.push_back({ "Sms", "blind-happy10.sms" });
+	}
+	if (hasCoreInfo("stella")) {
+		systems.push_back({ "Atari2600", "automaton.a26" });
+	}
+	if (hasCoreInfo("gambatte")) {
+		systems.push_back({ "GameBoy", "dox-fire.gb" });
+	}
+	if (hasCoreInfo("mgba")) {
+		systems.push_back({ "GbAdvance", "Vantage-LostMarbles.gba" });
+	}
+	if (hasCoreInfo("mednafen_pce_fast")) {
+		systems.push_back({ "PCEngine", "chrisc-512_Colours.pce" });
+	}
+	if (hasCoreInfo("picodrive")) {
+		systems.push_back({ "32x", "Palette-Tech-1-Demo.32x" });
+	}
+	return systems;
+}
+
+vector<EmulatorTestParam> s_systems = availableSystems();
 
 INSTANTIATE_TEST_CASE_P(EmulatorCore, EmulatorTest, ValuesIn(s_systems), EmulatorTestParamName());
 
