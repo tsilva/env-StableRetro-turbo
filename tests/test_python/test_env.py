@@ -74,6 +74,66 @@ def test_env_basic(obs_type, generate_test_env):
     assert isinstance(info, dict)
 
 
+@pytest.mark.parametrize("algorithm", ["nearest", "bilinear", "area", "linear", "box"])
+def test_env_image_preprocessing(algorithm, generate_test_env):
+    json_path = os.path.join(os.path.dirname(__file__), "../dummy.json")
+
+    env = generate_test_env(
+        info=json_path,
+        scenario=json_path,
+        render_mode="rgb_array",
+        obs_crop=(1, 1, 1, 1),
+        obs_resize=(8, 8),
+        obs_resize_algorithm=algorithm,
+        obs_grayscale=True,
+    )
+
+    assert env.observation_space.shape == (8, 8, 1)
+
+    obs, info = env.reset()
+    assert obs in env.observation_space
+    assert isinstance(info, dict)
+
+    obs, rew, terminated, truncated, info = env.step(env.action_space.sample())
+    assert obs in env.observation_space
+    assert isinstance(rew, float)
+    assert isinstance(terminated, bool)
+    assert isinstance(truncated, bool)
+    assert isinstance(info, dict)
+
+
+def test_env_temporal_preprocessing(generate_test_env):
+    json_path = os.path.join(os.path.dirname(__file__), "../dummy.json")
+
+    env = generate_test_env(
+        info=json_path,
+        scenario=json_path,
+        render_mode="rgb_array",
+        obs_resize=(8, 8),
+        obs_grayscale=True,
+        frame_skip=4,
+        frame_stack=4,
+        maxpool_last_two=True,
+        noop_reset_max=2,
+        sticky_action_prob=0.25,
+        reward_clip=True,
+    )
+
+    assert env.observation_space.shape == (8, 8, 4)
+
+    obs, info = env.reset(seed=123)
+    assert obs in env.observation_space
+    assert isinstance(info, dict)
+
+    obs, rew, terminated, truncated, info = env.step(env.action_space.sample())
+    assert obs in env.observation_space
+    assert isinstance(rew, float)
+    assert -1.0 <= rew <= 1.0
+    assert isinstance(terminated, bool)
+    assert isinstance(truncated, bool)
+    assert isinstance(info, dict)
+
+
 def test_env_data(generate_test_env):
     json_path = os.path.join(os.path.dirname(__file__), "../dummy.json")
 

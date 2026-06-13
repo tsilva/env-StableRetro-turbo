@@ -54,18 +54,25 @@ def stable_retro_package_data():
         "README.md",
         "LICENSES.md",
     ]
+    core_suffix = ".dylib" if sys.platform == "darwin" else ".so"
+    if sys.platform == "win32":
+        core_suffix = ".dll"
     for core in PUBLIC_CORE_NAMES:
         files.append(f"cores/{core}.json")
-        files.append(f"cores/{core}_libretro.dylib")
-    files.append(f"helpers/{ROSETTA_HELPER_NAME}")
-    files.append(f"cores_rosetta/{ROSETTA_CORE_NAME}")
+        files.append(f"cores/{core}_libretro{core_suffix}")
+    if should_build_rosetta_snes():
+        files.append(f"helpers/{ROSETTA_HELPER_NAME}")
+        files.append(f"cores_rosetta/{ROSETTA_CORE_NAME}")
     return files
 
 
 def copy_public_core_assets(destination: Path):
     destination.mkdir(parents=True, exist_ok=True)
+    core_suffix = ".dylib" if sys.platform == "darwin" else ".so"
+    if sys.platform == "win32":
+        core_suffix = ".dll"
     for core in PUBLIC_CORE_NAMES:
-        for suffix in (".json", "_libretro.dylib"):
+        for suffix in (".json", f"_libretro{core_suffix}"):
             asset_name = f"{core}{suffix}"
             asset = None
             direct_candidates = [
@@ -242,12 +249,12 @@ class CMakeBuild(build_ext):
 
 
 setup(
-    name="stable-retro-apple-silicon",
-    description="🎮 Working Apple Silicon builds for stable-retro 🍎",
+    name="stable-retro-turbo",
+    description="Fast Python 3.14 wheels for stable-retro RL workloads",
     long_description=README,
     long_description_content_type="text/markdown",
     author="tsilva",
-    url="https://github.com/tsilva/stable-retro-apple-silicon",
+    url="https://github.com/tsilva/stable-retro-turbo",
     version=VERSION_PATH.read_text(encoding="utf-8").strip(),
     license="MIT",
     install_requires=[
@@ -255,7 +262,7 @@ setup(
         "pyglet>=1.3.2,==1.*",
         "farama-notifications>=0.0.1",
     ],
-    python_requires=">=3.9.0,<3.13",
+    python_requires=">=3.14.0,<3.15",
     ext_modules=[Extension("stable_retro._retro", ["CMakeLists.txt", "src/*.cpp"])],
     cmdclass={"build_ext": CMakeBuild},
     packages=[
