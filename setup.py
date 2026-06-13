@@ -249,12 +249,12 @@ class CMakeBuild(build_ext):
 
 
 setup(
-    name="stable-retro-apple-silicon",
-    description="🎮 Working Apple Silicon builds for stable-retro 🍎",
+    name="stable-retro-turbo",
+    description="Fast Python 3.14 wheels for stable-retro RL workloads",
     long_description=README,
     long_description_content_type="text/markdown",
     author="tsilva",
-    url="https://github.com/tsilva/stable-retro-apple-silicon",
+    url="https://github.com/tsilva/stable-retro-turbo",
     version=VERSION_PATH.read_text(encoding="utf-8").strip(),
     license="MIT",
     install_requires=[
