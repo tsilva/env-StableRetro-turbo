@@ -30,9 +30,6 @@ __all__ = [
     "make",
     "RetroEnv",
     "StableRetroNativeVecEnv",
-    "StableRetroThreadedVecEnv",
-    "StableRetroSubprocVecEnv",
-    "StableRetroChunkedSubprocVecEnv",
 ]
 
 stable_retro.data.init_core_info(core_path())
@@ -43,18 +40,6 @@ def __getattr__(name):
         from stable_retro.vec_env import StableRetroNativeVecEnv
 
         return StableRetroNativeVecEnv
-    if name == "StableRetroThreadedVecEnv":
-        from stable_retro.vec_env import StableRetroThreadedVecEnv
-
-        return StableRetroThreadedVecEnv
-    if name == "StableRetroSubprocVecEnv":
-        from stable_retro.vec_env import StableRetroSubprocVecEnv
-
-        return StableRetroSubprocVecEnv
-    if name == "StableRetroChunkedSubprocVecEnv":
-        from stable_retro.vec_env import StableRetroChunkedSubprocVecEnv
-
-        return StableRetroChunkedSubprocVecEnv
     raise AttributeError(name)
 
 

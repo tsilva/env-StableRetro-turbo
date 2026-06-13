@@ -19,15 +19,15 @@
 /* #undef HAVE__STRTOUI64 */
 /* #undef HAVE__UMASK */
 /* #undef HAVE__UNLINK */
-/* #undef HAVE_CLONEFILE */
+#define HAVE_CLONEFILE
 #define HAVE_FILENO
 #define HAVE_FSEEKO
 #define HAVE_FTELLO
-/* #undef HAVE_GETPROGNAME */
-/* #undef HAVE_LIBBZ2 */
+#define HAVE_GETPROGNAME
+#define HAVE_LIBBZ2
 #define HAVE_OPEN
 #define HAVE_MKSTEMP
-/* #undef HAVE_SETMODE */
+#define HAVE_SETMODE
 #define HAVE_SNPRINTF
 #define HAVE_SSIZE_T_LIBZIP
 #define HAVE_STRCASECMP
