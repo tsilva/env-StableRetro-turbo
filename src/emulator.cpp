@@ -5,9 +5,14 @@
 #endif
 #include <fstream>
 #include <map>
+#include <mutex>
 #include <sstream>
 #include <unordered_map>
 #include <vector>
+#ifndef _WIN32
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 #include "coreinfo.h"
 #include "data.h"
@@ -25,6 +30,9 @@ using namespace std;
 namespace Retro {
 
 static Emulator* s_loadedEmulator = nullptr;
+static thread_local Emulator* s_callbackEmulator = nullptr;
+static std::mutex s_emulatorMutex;
+static int s_loadedEmulatorCount = 0;
 
 static map<string, string> s_envVariables = {
 	{ "genesis_plus_gx_bram", "per game" },
@@ -64,35 +72,78 @@ static map<string, string> s_envVariables = {
 	{ "melonds_screen_layout", "Bottom Only" },
 };
 
-static void (*retro_init)(void);
-static void (*retro_deinit)(void);
-static unsigned (*retro_api_version)(void);
-static void (*retro_get_system_info)(struct retro_system_info* info);
-static void (*retro_get_system_av_info)(struct retro_system_av_info* info);
-static void (*retro_reset)(void);
-static void (*retro_run)(void);
-static size_t (*retro_serialize_size)(void);
-static bool (*retro_serialize)(void* data, size_t size);
-static bool (*retro_unserialize)(const void* data, size_t size);
-static bool (*retro_load_game)(const struct retro_game_info* game);
-static void (*retro_unload_game)(void);
-static void* (*retro_get_memory_data)(unsigned id);
-static size_t (*retro_get_memory_size)(unsigned id);
-static void (*retro_cheat_reset)(void);
-static void (*retro_cheat_set)(unsigned index, bool enabled, const char* code);
-static void (*retro_set_environment)(retro_environment_t);
-static void (*retro_set_video_refresh)(retro_video_refresh_t);
-static void (*retro_set_audio_sample)(retro_audio_sample_t);
-static void (*retro_set_audio_sample_batch)(retro_audio_sample_batch_t);
-static void (*retro_set_input_poll)(retro_input_poll_t);
-static void (*retro_set_input_state)(retro_input_state_t);
-
 static bool envFlagEnabled(const char* name) {
 	const char* value = getenv(name);
 	if (!value || !*value) {
 		return false;
 	}
 	return strcmp(value, "0") && strcmp(value, "false") && strcmp(value, "False") && strcmp(value, "FALSE");
+}
+
+class CallbackScope {
+public:
+	explicit CallbackScope(Emulator* emulator)
+		: m_previous(s_callbackEmulator) {
+		s_callbackEmulator = emulator;
+	}
+	~CallbackScope() {
+		s_callbackEmulator = m_previous;
+	}
+private:
+	Emulator* m_previous;
+};
+
+static Emulator* callbackEmulator() {
+	Emulator* emulator = s_callbackEmulator ? s_callbackEmulator : s_loadedEmulator;
+	assert(emulator);
+	return emulator;
+}
+
+static string copyCoreForIsolation(const string& corePath) {
+#ifdef _WIN32
+	return "";
+#else
+	string suffix;
+#ifdef __APPLE__
+	suffix = ".dylib";
+#else
+	suffix = ".so";
+#endif
+	string tmpl = "/tmp/stable-retro-core-XXXXXX" + suffix;
+	vector<char> path(tmpl.begin(), tmpl.end());
+	path.push_back('\0');
+	int fd = mkstemps(path.data(), static_cast<int>(suffix.size()));
+	if (fd < 0) {
+		return "";
+	}
+
+	ifstream in(corePath, ios::binary);
+	if (!in) {
+		close(fd);
+		unlink(path.data());
+		return "";
+	}
+	vector<char> buffer(1024 * 1024);
+	while (in) {
+		in.read(buffer.data(), buffer.size());
+		streamsize count = in.gcount();
+		if (count > 0) {
+			const char* data = buffer.data();
+			while (count > 0) {
+				ssize_t written = write(fd, data, static_cast<size_t>(count));
+				if (written <= 0) {
+					close(fd);
+					unlink(path.data());
+					return "";
+				}
+				data += written;
+				count -= written;
+			}
+		}
+	}
+	close(fd);
+	return string(path.data());
+#endif
 }
 
 Emulator::Emulator() {
@@ -118,12 +169,16 @@ Emulator::~Emulator() {
 }
 
 bool Emulator::isLoaded() {
-	return s_loadedEmulator;
+	std::lock_guard<std::mutex> lock(s_emulatorMutex);
+	return s_loadedEmulatorCount > 0;
 }
 
 bool Emulator::loadRom(const string& romPath) {
 	if (m_romLoaded) {
 		unloadRom();
+	}
+	if (romPath.empty()) {
+		return false;
 	}
 
 	auto core = coreForRom(romPath);
@@ -172,23 +227,24 @@ bool Emulator::loadRom(const string& romPath) {
 	in.close();
 
 	m_rotation = 0;
-	auto res = retro_load_game(&m_gameInfo);
+	CallbackScope callbackScope(this);
+	auto res = m_retro_load_game(&m_gameInfo);
 	if (!res) {
 		m_romData.clear();
 		return false;
 	}
 
 	retro_system_info systemInfo;
-	retro_get_system_info(&systemInfo);
+	m_retro_get_system_info(&systemInfo);
 	if (!strcmp(systemInfo.library_name, "Snes9x")) {
 		// Snes9x expects an explicit reset after load_game on Apple Silicon.
 		// Without it, cold boot never produces frames and savestates collapse
 		// after a few steps because core state is only partially initialized.
-		retro_reset();
+		m_retro_reset();
 	}
 
 #ifdef ENABLE_HW_RENDER
-	// If HW rendering was enabled during retro_load_game, now call context_reset
+	// If HW rendering was enabled during m_retro_load_game, now call context_reset
 	// This must be done after RETRO_ENVIRONMENT_SET_HW_RENDER has returned and
 	// the frontend callbacks are wired up
 	if (m_hwRender.isEnabled()) {
@@ -198,7 +254,7 @@ bool Emulator::loadRom(const string& romPath) {
 	}
 #endif
 
-	retro_get_system_av_info(&m_avInfo);
+	m_retro_get_system_av_info(&m_avInfo);
 	fixScreenSize(romPath);
 
 	// For some cores (notably some N64 cores), the initial AV info can be wrong.
@@ -222,23 +278,22 @@ bool Emulator::loadRom(const string& romPath) {
 }
 
 void Emulator::run() {
-	assert(s_loadedEmulator == this);
 	if (m_audioEnabled) {
 		m_audioData.clear();
 	}
-	retro_run();
+	CallbackScope callbackScope(this);
+	m_retro_run();
 	if (m_serializationQuirks & RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE) {
 		m_needsInitFrame = false;
 	}
 }
 
 void Emulator::reset() {
-	assert(s_loadedEmulator == this);
-
 	memset(m_buttonMask, 0, sizeof(m_buttonMask));
 
+	CallbackScope callbackScope(this);
 	retro_system_info systemInfo;
-	retro_get_system_info(&systemInfo);
+	m_retro_get_system_info(&systemInfo);
 	if (!strcmp(systemInfo.library_name, "Stella")) {
 		// Stella does not properly clear everything when reseting or loading a savestate
 		string romPath = m_romPath;
@@ -249,16 +304,24 @@ void Emulator::reset() {
 		dlclose(m_coreHandle);
 #endif
 		m_coreHandle = nullptr;
-		s_loadedEmulator = nullptr;
+		{
+			std::lock_guard<std::mutex> lock(s_emulatorMutex);
+			if (s_loadedEmulator == this) {
+				s_loadedEmulator = nullptr;
+			}
+			if (s_loadedEmulatorCount > 0) {
+				--s_loadedEmulatorCount;
+			}
+		}
 		m_romLoaded = false;
 		loadRom(m_romPath);
 		if (m_addressSpace) {
 			m_addressSpace->reset();
-			m_addressSpace->addBlock(Retro::ramBase(m_core), retro_get_memory_size(RETRO_MEMORY_SYSTEM_RAM), retro_get_memory_data(RETRO_MEMORY_SYSTEM_RAM));
+			m_addressSpace->addBlock(Retro::ramBase(m_core), m_retro_get_memory_size(RETRO_MEMORY_SYSTEM_RAM), m_retro_get_memory_data(RETRO_MEMORY_SYSTEM_RAM));
 		}
 	}
 
-	retro_reset();
+	m_retro_reset();
 
 	if (m_serializationQuirks & RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE) {
 		m_needsInitFrame = true;
@@ -272,21 +335,37 @@ void Emulator::unloadCore() {
 	if (m_romLoaded) {
 		unloadRom();
 	}
-	retro_deinit();
+	CallbackScope callbackScope(this);
+	m_retro_deinit();
 #ifdef _WIN32
 	FreeLibrary(m_coreHandle);
 #else
 	dlclose(m_coreHandle);
 #endif
 	m_coreHandle = nullptr;
-	s_loadedEmulator = nullptr;
+	{
+		std::lock_guard<std::mutex> lock(s_emulatorMutex);
+		if (s_loadedEmulator == this) {
+			s_loadedEmulator = nullptr;
+		}
+		if (s_loadedEmulatorCount > 0) {
+			--s_loadedEmulatorCount;
+		}
+	}
+	if (!m_coreCopyPath.empty()) {
+#ifndef _WIN32
+		unlink(m_coreCopyPath.c_str());
+#endif
+		m_coreCopyPath.clear();
+	}
 }
 
 void Emulator::unloadRom() {
 	if (!m_romLoaded) {
 		return;
 	}
-	retro_unload_game();
+	CallbackScope callbackScope(this);
+	m_retro_unload_game();
 	m_romLoaded = false;
 	m_romPath.clear();
 	m_romData.clear();
@@ -296,23 +375,23 @@ void Emulator::unloadRom() {
 }
 
 bool Emulator::serialize(void* data, size_t size) {
-	assert(s_loadedEmulator == this);
 	ensureInitializedForSerialization();
-	return retro_serialize(data, size);
+	CallbackScope callbackScope(this);
+	return m_retro_serialize(data, size);
 }
 
 bool Emulator::unserialize(const void* data, size_t size) {
-	assert(s_loadedEmulator == this);
 	try {
+		CallbackScope callbackScope(this);
 		retro_system_info systemInfo;
-		retro_get_system_info(&systemInfo);
+		m_retro_get_system_info(&systemInfo);
 		if (!strcmp(systemInfo.library_name, "Stella")) {
 			reset();
 		}
 
 
 			ensureInitializedForSerialization();
-			bool ok = retro_unserialize(data, size);
+			bool ok = m_retro_unserialize(data, size);
 			if (ok && (m_serializationQuirks & RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE)) {
 				m_needsInitFrame = false;
 			}
@@ -323,8 +402,8 @@ bool Emulator::unserialize(const void* data, size_t size) {
 }
 
 size_t Emulator::serializeSize() {
-	assert(s_loadedEmulator == this);
-	return retro_serialize_size();
+	CallbackScope callbackScope(this);
+	return m_retro_serialize_size();
 }
 
 void Emulator::ensureInitializedForSerialization() {
@@ -335,63 +414,83 @@ void Emulator::ensureInitializedForSerialization() {
 }
 
 void Emulator::clearCheats() {
-	assert(s_loadedEmulator == this);
-	retro_cheat_reset();
+	CallbackScope callbackScope(this);
+	m_retro_cheat_reset();
 }
 
 void Emulator::setCheat(unsigned index, bool enabled, const char* code) {
-	assert(s_loadedEmulator == this);
-	retro_cheat_set(index, enabled, code);
+	CallbackScope callbackScope(this);
+	m_retro_cheat_set(index, enabled, code);
 }
 
 bool Emulator::loadCore(const string& corePath) {
-	if (s_loadedEmulator) {
-		return false;
+	string loadPath = corePath;
+	{
+		std::lock_guard<std::mutex> lock(s_emulatorMutex);
+		if (s_loadedEmulatorCount > 0) {
+			m_coreCopyPath = copyCoreForIsolation(corePath);
+			if (!m_coreCopyPath.empty()) {
+				loadPath = m_coreCopyPath;
+			}
+		}
 	}
 
 #ifdef _WIN32
-	m_coreHandle = LoadLibrary(corePath.c_str());
+	m_coreHandle = LoadLibrary(loadPath.c_str());
 #else
-	m_coreHandle = dlopen(corePath.c_str(), RTLD_LAZY);
+	m_coreHandle = dlopen(loadPath.c_str(), RTLD_LAZY);
 #endif
 	if (!m_coreHandle) {
+		if (!m_coreCopyPath.empty()) {
+#ifndef _WIN32
+			unlink(m_coreCopyPath.c_str());
+#endif
+			m_coreCopyPath.clear();
+		}
 		return false;
 	}
 
-	retro_init = reinterpret_cast<void (*)()>(GETSYM(m_coreHandle, "retro_init"));
-	retro_deinit = reinterpret_cast<void (*)()>(GETSYM(m_coreHandle, "retro_deinit"));
-	retro_api_version = reinterpret_cast<unsigned int (*)()>(GETSYM(m_coreHandle, "retro_api_version"));
-	retro_get_system_info = reinterpret_cast<void (*)(struct retro_system_info*)>(GETSYM(m_coreHandle, "retro_get_system_info"));
-	retro_get_system_av_info = reinterpret_cast<void (*)(struct retro_system_av_info*)>(GETSYM(m_coreHandle, "retro_get_system_av_info"));
-	retro_reset = reinterpret_cast<void (*)()>(GETSYM(m_coreHandle, "retro_reset"));
-	retro_run = reinterpret_cast<void (*)()>(GETSYM(m_coreHandle, "retro_run"));
-	retro_serialize_size = reinterpret_cast<size_t (*)()>(GETSYM(m_coreHandle, "retro_serialize_size"));
-	retro_serialize = reinterpret_cast<bool (*)(void*, size_t)>(GETSYM(m_coreHandle, "retro_serialize"));
-	retro_unserialize = reinterpret_cast<bool (*)(const void*, size_t)>(GETSYM(m_coreHandle, "retro_unserialize"));
-	retro_load_game = reinterpret_cast<bool (*)(const struct retro_game_info*)>(GETSYM(m_coreHandle, "retro_load_game"));
-	retro_unload_game = reinterpret_cast<void (*)()>(GETSYM(m_coreHandle, "retro_unload_game"));
-	retro_get_memory_data = reinterpret_cast<void* (*) (unsigned int)>(GETSYM(m_coreHandle, "retro_get_memory_data"));
-	retro_get_memory_size = reinterpret_cast<size_t (*)(unsigned int)>(GETSYM(m_coreHandle, "retro_get_memory_size"));
-	retro_cheat_reset = reinterpret_cast<void (*)()>(GETSYM(m_coreHandle, "retro_cheat_reset"));
-	retro_cheat_set = reinterpret_cast<void (*)(unsigned int, bool, const char*)>(GETSYM(m_coreHandle, "retro_cheat_set"));
-	retro_set_environment = reinterpret_cast<void (*)(retro_environment_t)>(GETSYM(m_coreHandle, "retro_set_environment"));
-	retro_set_video_refresh = reinterpret_cast<void (*)(retro_video_refresh_t)>(GETSYM(m_coreHandle, "retro_set_video_refresh"));
-	retro_set_audio_sample = reinterpret_cast<void (*)(retro_audio_sample_t)>(GETSYM(m_coreHandle, "retro_set_audio_sample"));
-	retro_set_audio_sample_batch = reinterpret_cast<void (*)(retro_audio_sample_batch_t)>(GETSYM(m_coreHandle, "retro_set_audio_sample_batch"));
-	retro_set_input_poll = reinterpret_cast<void (*)(retro_input_poll_t)>(GETSYM(m_coreHandle, "retro_set_input_poll"));
-	retro_set_input_state = reinterpret_cast<void (*)(short (*)(unsigned int, unsigned int, unsigned int, unsigned int))>(GETSYM(m_coreHandle, "retro_set_input_state"));
+	m_retro_init = reinterpret_cast<void (*)()>(GETSYM(m_coreHandle, "retro_init"));
+	m_retro_deinit = reinterpret_cast<void (*)()>(GETSYM(m_coreHandle, "retro_deinit"));
+	m_retro_api_version = reinterpret_cast<unsigned int (*)()>(GETSYM(m_coreHandle, "retro_api_version"));
+	m_retro_get_system_info = reinterpret_cast<void (*)(struct retro_system_info*)>(GETSYM(m_coreHandle, "retro_get_system_info"));
+	m_retro_get_system_av_info = reinterpret_cast<void (*)(struct retro_system_av_info*)>(GETSYM(m_coreHandle, "retro_get_system_av_info"));
+	m_retro_reset = reinterpret_cast<void (*)()>(GETSYM(m_coreHandle, "retro_reset"));
+	m_retro_run = reinterpret_cast<void (*)()>(GETSYM(m_coreHandle, "retro_run"));
+	m_retro_serialize_size = reinterpret_cast<size_t (*)()>(GETSYM(m_coreHandle, "retro_serialize_size"));
+	m_retro_serialize = reinterpret_cast<bool (*)(void*, size_t)>(GETSYM(m_coreHandle, "retro_serialize"));
+	m_retro_unserialize = reinterpret_cast<bool (*)(const void*, size_t)>(GETSYM(m_coreHandle, "retro_unserialize"));
+	m_retro_load_game = reinterpret_cast<bool (*)(const struct retro_game_info*)>(GETSYM(m_coreHandle, "retro_load_game"));
+	m_retro_unload_game = reinterpret_cast<void (*)()>(GETSYM(m_coreHandle, "retro_unload_game"));
+	m_retro_get_memory_data = reinterpret_cast<void* (*) (unsigned int)>(GETSYM(m_coreHandle, "retro_get_memory_data"));
+	m_retro_get_memory_size = reinterpret_cast<size_t (*)(unsigned int)>(GETSYM(m_coreHandle, "retro_get_memory_size"));
+	m_retro_cheat_reset = reinterpret_cast<void (*)()>(GETSYM(m_coreHandle, "retro_cheat_reset"));
+	m_retro_cheat_set = reinterpret_cast<void (*)(unsigned int, bool, const char*)>(GETSYM(m_coreHandle, "retro_cheat_set"));
+	m_retro_set_environment = reinterpret_cast<void (*)(retro_environment_t)>(GETSYM(m_coreHandle, "retro_set_environment"));
+	m_retro_set_video_refresh = reinterpret_cast<void (*)(retro_video_refresh_t)>(GETSYM(m_coreHandle, "retro_set_video_refresh"));
+	m_retro_set_audio_sample = reinterpret_cast<void (*)(retro_audio_sample_t)>(GETSYM(m_coreHandle, "retro_set_audio_sample"));
+	m_retro_set_audio_sample_batch = reinterpret_cast<void (*)(retro_audio_sample_batch_t)>(GETSYM(m_coreHandle, "retro_set_audio_sample_batch"));
+	m_retro_set_input_poll = reinterpret_cast<void (*)(retro_input_poll_t)>(GETSYM(m_coreHandle, "retro_set_input_poll"));
+	m_retro_set_input_state = reinterpret_cast<void (*)(short (*)(unsigned int, unsigned int, unsigned int, unsigned int))>(GETSYM(m_coreHandle, "retro_set_input_state"));
 
 	// The default according to the docs
 	m_imgDepth = 15;
-	s_loadedEmulator = this;
+	{
+		std::lock_guard<std::mutex> lock(s_emulatorMutex);
+		if (!s_loadedEmulator) {
+			s_loadedEmulator = this;
+		}
+		++s_loadedEmulatorCount;
+	}
 
-	retro_set_environment(cbEnvironment);
-	retro_set_video_refresh(cbVideoRefresh);
-	retro_set_audio_sample(cbAudioSample);
-	retro_set_audio_sample_batch(cbAudioSampleBatch);
-	retro_set_input_poll(cbInputPoll);
-	retro_set_input_state(cbInputState);
-	retro_init();
+	CallbackScope callbackScope(this);
+	m_retro_set_environment(cbEnvironment);
+	m_retro_set_video_refresh(cbVideoRefresh);
+	m_retro_set_audio_sample(cbAudioSample);
+	m_retro_set_audio_sample_batch(cbAudioSampleBatch);
+	m_retro_set_input_poll(cbInputPoll);
+	m_retro_set_input_state(cbInputState);
+	m_retro_init();
 
 		if (m_serializationQuirks & RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE) {
 			m_needsInitFrame = true;
@@ -401,8 +500,9 @@ bool Emulator::loadCore(const string& corePath) {
 }
 
 void Emulator::fixScreenSize(const string& romName) {
+	CallbackScope callbackScope(this);
 	retro_system_info systemInfo;
-	retro_get_system_info(&systemInfo);
+	m_retro_get_system_info(&systemInfo);
 	if (!strcmp(systemInfo.library_name, "Genesis Plus GX")) {
 		switch (romName.back()) {
 		case 'd': // Mega Drive
@@ -486,22 +586,22 @@ static void cbLog(enum retro_log_level level, const char *fmt, ...) {
 }
 
 bool Emulator::cbEnvironment(unsigned cmd, void* data) {
-	assert(s_loadedEmulator);
+	Emulator* emulator = callbackEmulator();
 
 	switch (cmd) {
 	case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT:
 		switch (*reinterpret_cast<retro_pixel_format*>(data)) {
 		case RETRO_PIXEL_FORMAT_XRGB8888:
-			s_loadedEmulator->m_imgDepth = 32;
+			emulator->m_imgDepth = 32;
 			break;
 		case RETRO_PIXEL_FORMAT_RGB565:
-			s_loadedEmulator->m_imgDepth = 16;
+			emulator->m_imgDepth = 16;
 			break;
 		case RETRO_PIXEL_FORMAT_0RGB1555:
-			s_loadedEmulator->m_imgDepth = 15;
+			emulator->m_imgDepth = 15;
 			break;
 		default:
-			s_loadedEmulator->m_imgDepth = 0;
+			emulator->m_imgDepth = 0;
 			break;
 		}
 		return true;
@@ -541,26 +641,26 @@ bool Emulator::cbEnvironment(unsigned cmd, void* data) {
 		return true;
 	case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY:
 	case RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY:
-		if (!s_loadedEmulator->m_corePath) {
-			s_loadedEmulator->m_corePath = strdup(corePath().c_str());
+		if (!emulator->m_corePath) {
+			emulator->m_corePath = strdup(corePath().c_str());
 		}
-		*reinterpret_cast<const char**>(data) = s_loadedEmulator->m_corePath;
+		*reinterpret_cast<const char**>(data) = emulator->m_corePath;
 		return true;
 	case RETRO_ENVIRONMENT_GET_CAN_DUPE:
 		*reinterpret_cast<bool*>(data) = true;
 		return true;
 	case RETRO_ENVIRONMENT_SET_MEMORY_MAPS:
-		s_loadedEmulator->m_map.clear();
+		emulator->m_map.clear();
 		for (size_t i = 0; i < static_cast<const retro_memory_map*>(data)->num_descriptors; ++i) {
-			s_loadedEmulator->m_map.emplace_back(static_cast<const retro_memory_map*>(data)->descriptors[i]);
+			emulator->m_map.emplace_back(static_cast<const retro_memory_map*>(data)->descriptors[i]);
 		}
-		s_loadedEmulator->reconfigureAddressSpace();
+		emulator->reconfigureAddressSpace();
 		return true;
 	case RETRO_ENVIRONMENT_SET_GEOMETRY: {
 		auto* geom = reinterpret_cast<const retro_system_av_info*>(data);
 		if (geom) {
-			s_loadedEmulator->m_avInfo.geometry = geom->geometry;
-			s_loadedEmulator->m_avInfo.timing = geom->timing;
+			emulator->m_avInfo.geometry = geom->geometry;
+			emulator->m_avInfo.timing = geom->timing;
 		}
 		return true;
 	}
@@ -573,10 +673,10 @@ bool Emulator::cbEnvironment(unsigned cmd, void* data) {
 		const unsigned* rotation = reinterpret_cast<const unsigned*>(data);
 		if (rotation) {
 			unsigned raw = *rotation % 4;
-			if (s_loadedEmulator->m_core == "FBNeo") {
+			if (emulator->m_core == "FBNeo") {
 				raw = (4 - raw) % 4;
 			}
-			s_loadedEmulator->m_rotation = static_cast<int>(raw);
+			emulator->m_rotation = static_cast<int>(raw);
 		}
 		return true;
 	}
@@ -588,16 +688,16 @@ bool Emulator::cbEnvironment(unsigned cmd, void* data) {
 		return true;
 	}
 	case RETRO_ENVIRONMENT_SET_SERIALIZATION_QUIRKS: {
-		s_loadedEmulator->m_serializationQuirks = *reinterpret_cast<const uint64_t*>(data);
-		if (s_loadedEmulator->m_serializationQuirks & RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE) {
-			s_loadedEmulator->m_needsInitFrame = true;
+		emulator->m_serializationQuirks = *reinterpret_cast<const uint64_t*>(data);
+		if (emulator->m_serializationQuirks & RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE) {
+			emulator->m_needsInitFrame = true;
 		}
 		return true;
 	}
 #ifdef ENABLE_HW_RENDER
 	case RETRO_ENVIRONMENT_SET_HW_RENDER: {
 		auto* cb = static_cast<retro_hw_render_callback*>(data);
-		if (!s_loadedEmulator->m_hwRender.init(*cb)) {
+		if (!emulator->m_hwRender.init(*cb)) {
 			return false;
 		}
 		// Provide frontend callbacks to the core
@@ -613,34 +713,34 @@ bool Emulator::cbEnvironment(unsigned cmd, void* data) {
 }
 
 void Emulator::cbVideoRefresh(const void* data, unsigned width, unsigned height, size_t pitch) {
-	assert(s_loadedEmulator);
-	if (s_loadedEmulator->m_updateGeometryFromVideoRefresh && width && height) {
-		s_loadedEmulator->m_avInfo.geometry.base_width = width;
-		s_loadedEmulator->m_avInfo.geometry.base_height = height;
+	Emulator* emulator = callbackEmulator();
+	if (emulator->m_updateGeometryFromVideoRefresh && width && height) {
+		emulator->m_avInfo.geometry.base_width = width;
+		emulator->m_avInfo.geometry.base_height = height;
 
-		s_loadedEmulator->m_avInfo.geometry.aspect_ratio =
+		emulator->m_avInfo.geometry.aspect_ratio =
 			static_cast<float>(width) / static_cast<float>(height);
 
-		if (s_loadedEmulator->m_avInfo.geometry.max_width < width) {
-			s_loadedEmulator->m_avInfo.geometry.max_width = width;
+		if (emulator->m_avInfo.geometry.max_width < width) {
+			emulator->m_avInfo.geometry.max_width = width;
 		}
-		if (s_loadedEmulator->m_avInfo.geometry.max_height < height) {
-			s_loadedEmulator->m_avInfo.geometry.max_height = height;
+		if (emulator->m_avInfo.geometry.max_height < height) {
+			emulator->m_avInfo.geometry.max_height = height;
 		}
 	}
-	if (!s_loadedEmulator->m_videoEnabled) {
+	if (!emulator->m_videoEnabled) {
 		return;
 	}
 	// Hardware rendering: the core is signaling that the framebuffer lives on the GPU.
 	if (data == RETRO_HW_FRAME_BUFFER_VALID) {
 #ifdef ENABLE_HW_RENDER
-		if (s_loadedEmulator->m_hwRender.isEnabled()) {
+		if (emulator->m_hwRender.isEnabled()) {
 			// Read pixels from GPU framebuffer to CPU
-			const void* pixels = s_loadedEmulator->m_hwRender.readbackFramebuffer(width, height);
+			const void* pixels = emulator->m_hwRender.readbackFramebuffer(width, height);
 			if (pixels) {
-				s_loadedEmulator->m_imgDepth = 32;  // RGBA8888
+				emulator->m_imgDepth = 32;  // RGBA8888
 				data = pixels;
-				pitch = s_loadedEmulator->m_hwRender.getReadbackPitch();
+				pitch = emulator->m_hwRender.getReadbackPitch();
 			} else {
 				return;
 			}
@@ -656,7 +756,7 @@ void Emulator::cbVideoRefresh(const void* data, unsigned width, unsigned height,
 	}
 
 	size_t bytes_per_pixel = 0;
-	switch (s_loadedEmulator->m_imgDepth) {
+	switch (emulator->m_imgDepth) {
 	case 15:
 	case 16:
 		bytes_per_pixel = 2;
@@ -676,42 +776,42 @@ void Emulator::cbVideoRefresh(const void* data, unsigned width, unsigned height,
 		return;
 	}
 
-	s_loadedEmulator->m_imgBuffer.resize(row_bytes * height);
-	auto* dst = s_loadedEmulator->m_imgBuffer.data();
+	emulator->m_imgBuffer.resize(row_bytes * height);
+	auto* dst = emulator->m_imgBuffer.data();
 	const auto* src = static_cast<const uint8_t*>(data);
 	for (unsigned y = 0; y < height; ++y) {
 		memcpy(dst + (y * row_bytes), src + (y * pitch), row_bytes);
 	}
 
-	s_loadedEmulator->m_imgData = dst;
-	s_loadedEmulator->m_imgPitch = row_bytes;
+	emulator->m_imgData = dst;
+	emulator->m_imgPitch = row_bytes;
 }
 
 void Emulator::cbAudioSample(int16_t left, int16_t right) {
-	assert(s_loadedEmulator);
-	if (!s_loadedEmulator->m_audioEnabled) {
+	Emulator* emulator = callbackEmulator();
+	if (!emulator->m_audioEnabled) {
 		return;
 	}
-	s_loadedEmulator->m_audioData.push_back(left);
-	s_loadedEmulator->m_audioData.push_back(right);
+	emulator->m_audioData.push_back(left);
+	emulator->m_audioData.push_back(right);
 }
 
 size_t Emulator::cbAudioSampleBatch(const int16_t* data, size_t frames) {
-	assert(s_loadedEmulator);
-	if (!s_loadedEmulator->m_audioEnabled) {
+	Emulator* emulator = callbackEmulator();
+	if (!emulator->m_audioEnabled) {
 		return frames;
 	}
-	s_loadedEmulator->m_audioData.insert(s_loadedEmulator->m_audioData.end(), data, &data[frames * 2]);
+	emulator->m_audioData.insert(emulator->m_audioData.end(), data, &data[frames * 2]);
 	return frames;
 }
 
 void Emulator::cbInputPoll() {
-	assert(s_loadedEmulator);
+	callbackEmulator();
 }
 
 int16_t Emulator::cbInputState(unsigned port, unsigned, unsigned, unsigned id) {
-	assert(s_loadedEmulator);
-	return s_loadedEmulator->m_buttonMask[port][id];
+	Emulator* emulator = callbackEmulator();
+	return emulator->m_buttonMask[port][id];
 }
 
 void Emulator::configureData(GameData* data) {
@@ -719,8 +819,8 @@ void Emulator::configureData(GameData* data) {
 	m_addressSpace->reset();
 	Retro::configureData(data, m_core);
 	reconfigureAddressSpace();
-	if (m_addressSpace->blocks().empty() && retro_get_memory_size(RETRO_MEMORY_SYSTEM_RAM)) {
-		m_addressSpace->addBlock(Retro::ramBase(m_core), retro_get_memory_size(RETRO_MEMORY_SYSTEM_RAM), retro_get_memory_data(RETRO_MEMORY_SYSTEM_RAM));
+	if (m_addressSpace->blocks().empty() && m_retro_get_memory_size(RETRO_MEMORY_SYSTEM_RAM)) {
+		m_addressSpace->addBlock(Retro::ramBase(m_core), m_retro_get_memory_size(RETRO_MEMORY_SYSTEM_RAM), m_retro_get_memory_data(RETRO_MEMORY_SYSTEM_RAM));
 	}
 }
 
@@ -742,13 +842,11 @@ bool Emulator::isHWRenderEnabled() const {
 
 #ifdef ENABLE_HW_RENDER
 uintptr_t Emulator::cbGetCurrentFramebuffer() {
-	assert(s_loadedEmulator);
-	return s_loadedEmulator->m_hwRender.getCurrentFramebuffer();
+	return callbackEmulator()->m_hwRender.getCurrentFramebuffer();
 }
 
 retro_proc_address_t Emulator::cbGetProcAddress(const char* sym) {
-	assert(s_loadedEmulator);
-	return s_loadedEmulator->m_hwRender.getProcAddress(sym);
+	return callbackEmulator()->m_hwRender.getProcAddress(sym);
 }
 #endif
 }

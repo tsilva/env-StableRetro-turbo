@@ -22,8 +22,15 @@ static inline T _hypot(T x, T y) {
 #include "movie-bk2.h"
 
 #include <algorithm>
+#include <atomic>
+#include <condition_variable>
+#include <functional>
 #include <cmath>
 #include <map>
+#include <memory>
+#include <mutex>
+#include <random>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -38,9 +45,6 @@ struct PyRetroEmulator {
 	Retro::Emulator m_re;
 	int m_cheats = 0;
 	PyRetroEmulator(const string& rom_path) {
-		if (Emulator::isLoaded()) {
-			throw std::runtime_error("Cannot create multiple emulator instances per process, make sure to call env.close() on each environment before creating a new one");
-		}
 		if (!m_re.loadRom(rom_path.c_str())) {
 			throw std::runtime_error("Could not load ROM");
 		}
@@ -584,6 +588,801 @@ void PyRetroEmulator::configureData(PyGameData& data) {
 	m_re.configureData(&data.m_data);
 }
 
+struct BatchStepResult {
+	std::vector<uint8_t> rgb;
+	float reward = 0.0f;
+	bool done = false;
+	bool sawFrame = false;
+	std::string error;
+};
+
+class BatchThreadPool {
+public:
+	explicit BatchThreadPool(int numThreads) {
+		for (int i = 0; i < numThreads; ++i) {
+			m_threads.emplace_back([this]() { worker(); });
+		}
+	}
+
+	~BatchThreadPool() {
+		{
+			std::lock_guard<std::mutex> lock(m_mutex);
+			m_stopping = true;
+			++m_generation;
+		}
+		m_work.notify_all();
+		for (auto& thread : m_threads) {
+			if (thread.joinable()) {
+				thread.join();
+			}
+		}
+	}
+
+	void parallelFor(size_t count, std::function<void(size_t)> task) {
+		if (count == 0) {
+			return;
+		}
+		if (m_threads.empty() || count == 1) {
+			for (size_t i = 0; i < count; ++i) {
+				task(i);
+			}
+			return;
+		}
+		std::unique_lock<std::mutex> lock(m_mutex);
+		m_task = std::move(task);
+		m_total = count;
+		m_next = 0;
+		m_remainingWorkers = m_threads.size();
+		const uint64_t generation = ++m_generation;
+		m_work.notify_all();
+		m_done.wait(lock, [&]() { return m_doneGeneration == generation; });
+		m_task = nullptr;
+	}
+
+private:
+	void worker() {
+		uint64_t seenGeneration = 0;
+		while (true) {
+			std::unique_lock<std::mutex> lock(m_mutex);
+			m_work.wait(lock, [&]() {
+				return m_stopping || m_generation != seenGeneration;
+			});
+			if (m_stopping) {
+				break;
+			}
+			seenGeneration = m_generation;
+			auto* task = &m_task;
+			while (true) {
+				const size_t index = m_next++;
+				if (index >= m_total) {
+					break;
+				}
+				lock.unlock();
+				(*task)(index);
+				lock.lock();
+			}
+			if (--m_remainingWorkers == 0) {
+				m_doneGeneration = seenGeneration;
+				m_done.notify_one();
+			}
+		}
+	}
+
+	std::vector<std::thread> m_threads;
+	std::mutex m_mutex;
+	std::condition_variable m_work;
+	std::condition_variable m_done;
+	std::function<void(size_t)> m_task;
+	size_t m_total = 0;
+	size_t m_next = 0;
+	size_t m_remainingWorkers = 0;
+	uint64_t m_generation = 0;
+	uint64_t m_doneGeneration = 0;
+	bool m_stopping = false;
+};
+
+BatchThreadPool& batchThreadPool(int numThreads) {
+	static std::mutex poolsMutex;
+	static std::unordered_map<int, std::unique_ptr<BatchThreadPool>> pools;
+	std::lock_guard<std::mutex> lock(poolsMutex);
+	auto it = pools.find(numThreads);
+	if (it == pools.end()) {
+		it = pools.emplace(numThreads, std::make_unique<BatchThreadPool>(numThreads)).first;
+	}
+	return *it->second;
+}
+
+struct NativeCrop {
+	long top = 0;
+	long bottom = 0;
+	long left = 0;
+	long right = 0;
+};
+
+struct NativeResize {
+	bool enabled = false;
+	long height = 0;
+	long width = 0;
+};
+
+NativeCrop parseNativeCrop(py::object cropObj) {
+	NativeCrop crop;
+	if (cropObj.is_none()) {
+		return crop;
+	}
+	auto tuple = py::tuple(cropObj);
+	if (tuple.size() != 4) {
+		throw std::runtime_error("crop must be a (top, bottom, left, right) tuple");
+	}
+	crop.top = py::int_(tuple[0]);
+	crop.bottom = py::int_(tuple[1]);
+	crop.left = py::int_(tuple[2]);
+	crop.right = py::int_(tuple[3]);
+	if (crop.top < 0 || crop.bottom < 0 || crop.left < 0 || crop.right < 0) {
+		throw std::runtime_error("crop values must be non-negative");
+	}
+	return crop;
+}
+
+NativeResize parseNativeResize(py::object resizeObj) {
+	NativeResize resize;
+	if (resizeObj.is_none()) {
+		return resize;
+	}
+	auto tuple = py::tuple(resizeObj);
+	if (tuple.size() != 2) {
+		throw std::runtime_error("resize must be a (height, width) tuple");
+	}
+	resize.enabled = true;
+	resize.height = py::int_(tuple[0]);
+	resize.width = py::int_(tuple[1]);
+	if (resize.height <= 0 || resize.width <= 0) {
+		throw std::runtime_error("resize height and width must be positive");
+	}
+	return resize;
+}
+
+void processRgbFrameToBuffer(
+	const std::vector<uint8_t>& rgb,
+	long rawW,
+	long rawH,
+	const NativeCrop& crop,
+	const NativeResize& resize,
+	bool grayscale,
+	const string& algorithm,
+	uint8_t* dst
+) {
+	if (crop.top + crop.bottom >= rawH || crop.left + crop.right >= rawW) {
+		throw std::runtime_error("crop removes the entire observation");
+	}
+	const long srcH = rawH - crop.top - crop.bottom;
+	const long srcW = rawW - crop.left - crop.right;
+	const long dstH = resize.enabled ? resize.height : srcH;
+	const long dstW = resize.enabled ? resize.width : srcW;
+	const int channels = grayscale ? 1 : 3;
+
+	auto srcPixel = [&](long y, long x, int c) -> uint8_t {
+		const size_t offset = (static_cast<size_t>(crop.top + y) * static_cast<size_t>(rawW) + static_cast<size_t>(crop.left + x)) * 3;
+		return rgb[offset + c];
+	};
+	auto srcGray = [&](long y, long x) -> uint8_t {
+		const size_t offset = (static_cast<size_t>(crop.top + y) * static_cast<size_t>(rawW) + static_cast<size_t>(crop.left + x)) * 3;
+		const uint32_t r = rgb[offset];
+		const uint32_t g = rgb[offset + 1];
+		const uint32_t b = rgb[offset + 2];
+		return static_cast<uint8_t>((r * 77 + g * 150 + b * 29 + 128) >> 8);
+	};
+	auto writePixel = [&](long y, long x, int c, uint8_t value) {
+		dst[(static_cast<size_t>(y) * static_cast<size_t>(dstW) + static_cast<size_t>(x)) * channels + c] = value;
+	};
+
+	if (algorithm == "area") {
+		if (dstH > srcH || dstW > srcW) {
+			throw std::runtime_error("area resize only supports downscaling");
+		}
+		for (long dy = 0; dy < dstH; ++dy) {
+			long y0 = (dy * srcH) / dstH;
+			long y1 = std::max<long>(((dy + 1) * srcH) / dstH, y0 + 1);
+			y1 = std::min(y1, srcH);
+			for (long dx = 0; dx < dstW; ++dx) {
+				long x0 = (dx * srcW) / dstW;
+				long x1 = std::max<long>(((dx + 1) * srcW) / dstW, x0 + 1);
+				x1 = std::min(x1, srcW);
+				const uint32_t count = static_cast<uint32_t>((y1 - y0) * (x1 - x0));
+				if (grayscale) {
+					uint32_t sum = 0;
+					for (long sy = y0; sy < y1; ++sy) {
+						for (long sx = x0; sx < x1; ++sx) {
+							sum += srcGray(sy, sx);
+						}
+					}
+					writePixel(dy, dx, 0, static_cast<uint8_t>(sum / count));
+				} else {
+					for (int c = 0; c < 3; ++c) {
+						uint32_t sum = 0;
+						for (long sy = y0; sy < y1; ++sy) {
+							for (long sx = x0; sx < x1; ++sx) {
+								sum += srcPixel(sy, sx, c);
+							}
+						}
+						writePixel(dy, dx, c, static_cast<uint8_t>(sum / count));
+					}
+				}
+			}
+		}
+		return;
+	}
+
+	const bool bilinear = algorithm == "bilinear";
+	for (long dy = 0; dy < dstH; ++dy) {
+		const float fy = dstH == 1 ? 0.0f : static_cast<float>(dy) * static_cast<float>(srcH - 1) / static_cast<float>(dstH - 1);
+		const long y0 = std::max<long>(0, std::min<long>(srcH - 1, static_cast<long>(std::floor(fy))));
+		const long y1 = std::min<long>(y0 + 1, srcH - 1);
+		const float wy = bilinear ? fy - static_cast<float>(y0) : 0.0f;
+		const long sy = bilinear ? y0 : static_cast<long>(fy);
+		for (long dx = 0; dx < dstW; ++dx) {
+			const float fx = dstW == 1 ? 0.0f : static_cast<float>(dx) * static_cast<float>(srcW - 1) / static_cast<float>(dstW - 1);
+			const long x0 = std::max<long>(0, std::min<long>(srcW - 1, static_cast<long>(std::floor(fx))));
+			const long x1 = std::min<long>(x0 + 1, srcW - 1);
+			const float wx = bilinear ? fx - static_cast<float>(x0) : 0.0f;
+			const long sx = bilinear ? x0 : static_cast<long>(fx);
+			if (!bilinear) {
+				if (grayscale) {
+					writePixel(dy, dx, 0, srcGray(sy, sx));
+				} else {
+					for (int c = 0; c < 3; ++c) {
+						writePixel(dy, dx, c, srcPixel(sy, sx, c));
+					}
+				}
+			} else if (grayscale) {
+				const float topPix = static_cast<float>(srcGray(y0, x0)) * (1.0f - wx) + static_cast<float>(srcGray(y0, x1)) * wx;
+				const float bottomPix = static_cast<float>(srcGray(y1, x0)) * (1.0f - wx) + static_cast<float>(srcGray(y1, x1)) * wx;
+				writePixel(dy, dx, 0, static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, topPix * (1.0f - wy) + bottomPix * wy))));
+			} else {
+				for (int c = 0; c < 3; ++c) {
+					const float topPix = static_cast<float>(srcPixel(y0, x0, c)) * (1.0f - wx) + static_cast<float>(srcPixel(y0, x1, c)) * wx;
+					const float bottomPix = static_cast<float>(srcPixel(y1, x0, c)) * (1.0f - wx) + static_cast<float>(srcPixel(y1, x1, c)) * wx;
+					writePixel(dy, dx, c, static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, topPix * (1.0f - wy) + bottomPix * wy))));
+				}
+			}
+		}
+	}
+}
+
+class PyNativeVectorEnv {
+public:
+	PyNativeVectorEnv(
+		size_t numEnvs,
+		const string& romPath,
+		const string& dataPath,
+		const string& scenarioPath,
+		py::object initialStateObj,
+		int numButtons,
+		int frameSkip,
+		int frameStack,
+		py::object cropObj,
+		py::object resizeObj,
+		bool grayscale,
+		const string& algorithm,
+		bool maxpoolLastTwo,
+		int noopResetMax,
+		double stickyActionProb,
+		bool filterActions,
+		bool rewardClip,
+		float rewardClipLow,
+		float rewardClipHigh,
+		int numThreads
+	)
+		: m_numButtons(numButtons)
+		, m_frameSkip(frameSkip)
+		, m_frameStack(frameStack)
+		, m_crop(parseNativeCrop(cropObj))
+		, m_resize(parseNativeResize(resizeObj))
+		, m_grayscale(grayscale)
+		, m_algorithm(algorithm)
+		, m_maxpoolLastTwo(maxpoolLastTwo)
+		, m_noopResetMax(noopResetMax)
+		, m_stickyActionProb(stickyActionProb)
+		, m_filterActions(filterActions)
+		, m_rewardClip(rewardClip)
+		, m_rewardClipLow(rewardClipLow)
+		, m_rewardClipHigh(rewardClipHigh)
+		, m_numThreads(numThreads) {
+		if (numEnvs == 0) {
+			throw std::runtime_error("num_envs must be positive");
+		}
+		if (numButtons <= 0 || numButtons > N_BUTTONS) {
+			throw std::runtime_error("num_buttons must be between 1 and 16");
+		}
+		if (frameSkip <= 0) {
+			throw std::runtime_error("frame_skip must be positive");
+		}
+		if (frameStack <= 0) {
+			throw std::runtime_error("frame_stack must be positive");
+		}
+		if (noopResetMax < 0) {
+			throw std::runtime_error("noop_reset_max must be non-negative");
+		}
+		if (stickyActionProb < 0.0 || stickyActionProb > 1.0) {
+			throw std::runtime_error("sticky_action_prob must be between 0.0 and 1.0");
+		}
+		if (algorithm != "nearest" && algorithm != "bilinear" && algorithm != "area") {
+			throw std::runtime_error("algorithm must be nearest, bilinear, or area");
+		}
+		if (!initialStateObj.is_none()) {
+			m_initialState = py::bytes(initialStateObj);
+		}
+		m_numThreads = std::max(1, std::min<int>(m_numThreads <= 0 ? static_cast<int>(numEnvs) : m_numThreads, static_cast<int>(numEnvs)));
+		m_slots.reserve(numEnvs);
+		for (size_t i = 0; i < numEnvs; ++i) {
+			auto slot = std::make_unique<Slot>(romPath, dataPath, scenarioPath, m_initialState, i);
+			if (i == 0) {
+				const long rawW = slot->emulator->m_re.getImageWidth();
+				const long rawH = slot->emulator->m_re.getImageHeight();
+				if (m_crop.top + m_crop.bottom >= rawH || m_crop.left + m_crop.right >= rawW) {
+					throw std::runtime_error("crop removes the entire observation");
+				}
+				const long srcH = rawH - m_crop.top - m_crop.bottom;
+				const long srcW = rawW - m_crop.left - m_crop.right;
+				m_obsHeight = m_resize.enabled ? m_resize.height : srcH;
+				m_obsWidth = m_resize.enabled ? m_resize.width : srcW;
+				m_obsChannels = m_grayscale ? 1 : 3;
+				m_singleObsSize = static_cast<size_t>(m_obsHeight) * static_cast<size_t>(m_obsWidth) * static_cast<size_t>(m_obsChannels);
+				m_stackedChannels = m_obsChannels * m_frameStack;
+				m_stackedObsSize = static_cast<size_t>(m_obsHeight) * static_cast<size_t>(m_obsWidth) * static_cast<size_t>(m_stackedChannels);
+			}
+			slot->frameStack.resize(static_cast<size_t>(m_frameStack) * m_singleObsSize);
+			slot->lastMask.assign(static_cast<size_t>(m_numButtons), 0);
+			m_slots.emplace_back(std::move(slot));
+		}
+	}
+
+	py::tuple reset(py::object seedObj = py::none()) {
+		if (!seedObj.is_none()) {
+			const uint64_t seed = py::int_(seedObj);
+			for (size_t i = 0; i < m_slots.size(); ++i) {
+				m_slots[i]->rng.seed(static_cast<uint32_t>(seed + i));
+			}
+		}
+		py::array_t<uint8_t> obs(py::array::ShapeContainer{
+			static_cast<py::ssize_t>(m_slots.size()),
+			static_cast<py::ssize_t>(m_obsHeight),
+			static_cast<py::ssize_t>(m_obsWidth),
+			static_cast<py::ssize_t>(m_stackedChannels),
+		});
+		uint8_t* obsData = obs.mutable_data();
+		std::vector<std::string> errors(m_slots.size());
+		{
+			py::gil_scoped_release release;
+			batchThreadPool(m_numThreads).parallelFor(m_slots.size(), [&](size_t index) {
+				try {
+					resetSlot(*m_slots[index], obsData + index * m_stackedObsSize);
+				} catch (const std::exception& exc) {
+					errors[index] = exc.what();
+				} catch (...) {
+					errors[index] = "unknown native vector reset error";
+				}
+			});
+		}
+		throwFirstError(errors);
+		py::list infos;
+		for (size_t i = 0; i < m_slots.size(); ++i) {
+			infos.append(py::dict());
+		}
+		return py::make_tuple(obs, infos);
+	}
+
+	py::tuple step(py::array_t<uint8_t> masks) {
+		auto mask = masks.unchecked<2>();
+		if (static_cast<size_t>(mask.shape(0)) != m_slots.size()) {
+			throw std::runtime_error("actions first dimension must match num_envs");
+		}
+		if (mask.shape(1) != m_numButtons) {
+			throw std::runtime_error("actions second dimension must match num_buttons");
+		}
+		py::array_t<uint8_t> obs(py::array::ShapeContainer{
+			static_cast<py::ssize_t>(m_slots.size()),
+			static_cast<py::ssize_t>(m_obsHeight),
+			static_cast<py::ssize_t>(m_obsWidth),
+			static_cast<py::ssize_t>(m_stackedChannels),
+		});
+		py::array_t<float> rewardArray({ static_cast<py::ssize_t>(m_slots.size()) });
+		py::array_t<uint8_t> doneArray({ static_cast<py::ssize_t>(m_slots.size()) });
+		uint8_t* obsData = obs.mutable_data();
+		auto rewards = rewardArray.mutable_unchecked<1>();
+		auto dones = doneArray.mutable_unchecked<1>();
+		std::vector<std::string> errors(m_slots.size());
+		std::vector<std::vector<uint8_t>> terminalObservations(m_slots.size());
+		{
+			py::gil_scoped_release release;
+			batchThreadPool(m_numThreads).parallelFor(m_slots.size(), [&](size_t index) {
+				try {
+					StepOutput output;
+					std::vector<uint8_t> action(static_cast<size_t>(m_numButtons));
+					for (int key = 0; key < m_numButtons; ++key) {
+						action[static_cast<size_t>(key)] = mask(static_cast<py::ssize_t>(index), key) ? 1 : 0;
+					}
+					stepSlot(*m_slots[index], action, obsData + index * m_stackedObsSize, output);
+					rewards(static_cast<py::ssize_t>(index)) = output.reward;
+					dones(static_cast<py::ssize_t>(index)) = output.done ? 1 : 0;
+					if (output.done) {
+						terminalObservations[index] = std::move(output.terminalObservation);
+					}
+				} catch (const std::exception& exc) {
+					errors[index] = exc.what();
+				} catch (...) {
+					errors[index] = "unknown native vector step error";
+				}
+			});
+		}
+		throwFirstError(errors);
+		py::list infos;
+		for (size_t i = 0; i < m_slots.size(); ++i) {
+			py::dict info = m_slots[i]->data.lookupAll();
+			if (!terminalObservations[i].empty()) {
+				py::array_t<uint8_t> terminal(py::array::ShapeContainer{
+					static_cast<py::ssize_t>(m_obsHeight),
+					static_cast<py::ssize_t>(m_obsWidth),
+					static_cast<py::ssize_t>(m_stackedChannels),
+				});
+				std::memcpy(terminal.mutable_data(), terminalObservations[i].data(), m_stackedObsSize);
+				info["terminal_observation"] = terminal;
+				info["reset_info"] = py::dict();
+				info["TimeLimit.truncated"] = false;
+			}
+			infos.append(info);
+		}
+		return py::make_tuple(obs, rewardArray, doneArray, infos);
+	}
+
+	py::tuple observationShape() const {
+		return py::make_tuple(m_obsHeight, m_obsWidth, m_stackedChannels);
+	}
+
+	size_t numEnvs() const {
+		return m_slots.size();
+	}
+
+private:
+	struct Slot {
+		Slot(const string& romPath, const string& dataPath, const string& scenarioPath, const std::string& initialState, size_t index)
+			: emulator(std::make_unique<PyRetroEmulator>(romPath))
+			, rng(static_cast<uint32_t>(0xC0D3u + index * 9973u)) {
+			emulator->configureData(data);
+			ScriptContext::reset();
+			if (!data.m_data.load(dataPath) || !data.m_scen.load(scenarioPath)) {
+				throw std::runtime_error("failed to load data or scenario");
+			}
+			if (!initialState.empty() && !emulator->m_re.unserialize(initialState.data(), initialState.size())) {
+				throw std::runtime_error("failed to load initial state");
+			}
+			emulator->m_re.run();
+			data.reset();
+			data.updateRam();
+		}
+
+		std::unique_ptr<PyRetroEmulator> emulator;
+		PyGameData data;
+		std::vector<uint8_t> frameStack;
+		std::vector<uint8_t> lastMask;
+		bool hasLastMask = false;
+		std::mt19937 rng;
+	};
+
+	struct StepOutput {
+		float reward = 0.0f;
+		bool done = false;
+		std::vector<uint8_t> terminalObservation;
+	};
+
+	void clearKeys(Slot& slot) {
+		for (int key = 0; key < m_numButtons; ++key) {
+			slot.emulator->m_re.setKey(0, key, false);
+		}
+	}
+
+	void setKeys(Slot& slot, const std::vector<uint8_t>& mask) {
+		uint16_t actionBits = 0;
+		for (int key = 0; key < m_numButtons; ++key) {
+			if (mask[static_cast<size_t>(key)]) {
+				actionBits |= static_cast<uint16_t>(1u << key);
+			}
+		}
+		if (m_filterActions) {
+			actionBits = slot.data.m_scen.filterAction(actionBits);
+		}
+		for (int key = 0; key < m_numButtons; ++key) {
+			slot.emulator->m_re.setKey(0, key, (actionBits >> key) & 1u);
+		}
+	}
+
+	void readProcessedFrame(Slot& slot, std::vector<uint8_t>& singleObs) {
+		std::vector<uint8_t> rgb;
+		slot.emulator->readRgbFrame(rgb);
+		singleObs.resize(m_singleObsSize);
+		processRgbFrameToBuffer(
+			rgb,
+			slot.emulator->m_re.getImageWidth(),
+			slot.emulator->m_re.getImageHeight(),
+			m_crop,
+			m_resize,
+			m_grayscale,
+			m_algorithm,
+			singleObs.data()
+		);
+	}
+
+	void resetFrameStack(Slot& slot, const std::vector<uint8_t>& singleObs) {
+		for (int frame = 0; frame < m_frameStack; ++frame) {
+			std::memcpy(slot.frameStack.data() + static_cast<size_t>(frame) * m_singleObsSize, singleObs.data(), m_singleObsSize);
+		}
+	}
+
+	void pushFrame(Slot& slot, const std::vector<uint8_t>& singleObs) {
+		if (m_frameStack == 1) {
+			std::memcpy(slot.frameStack.data(), singleObs.data(), m_singleObsSize);
+			return;
+		}
+		std::memmove(slot.frameStack.data(), slot.frameStack.data() + m_singleObsSize, static_cast<size_t>(m_frameStack - 1) * m_singleObsSize);
+		std::memcpy(slot.frameStack.data() + static_cast<size_t>(m_frameStack - 1) * m_singleObsSize, singleObs.data(), m_singleObsSize);
+	}
+
+	void writeStackedObservation(const Slot& slot, uint8_t* dst) const {
+		const size_t pixelCount = static_cast<size_t>(m_obsHeight) * static_cast<size_t>(m_obsWidth);
+		for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
+			for (int frame = 0; frame < m_frameStack; ++frame) {
+				const uint8_t* src = slot.frameStack.data() + static_cast<size_t>(frame) * m_singleObsSize + pixel * static_cast<size_t>(m_obsChannels);
+				uint8_t* out = dst + pixel * static_cast<size_t>(m_stackedChannels) + static_cast<size_t>(frame) * static_cast<size_t>(m_obsChannels);
+				std::memcpy(out, src, static_cast<size_t>(m_obsChannels));
+			}
+		}
+	}
+
+	float clipReward(float reward) const {
+		if (!m_rewardClip) {
+			return reward;
+		}
+		return std::max(m_rewardClipLow, std::min(m_rewardClipHigh, reward));
+	}
+
+	void resetSlot(Slot& slot, uint8_t* dst) {
+		if (!m_initialState.empty()) {
+			if (!slot.emulator->m_re.unserialize(m_initialState.data(), m_initialState.size())) {
+				throw std::runtime_error("failed to load initial state");
+			}
+		} else {
+			slot.emulator->m_re.reset();
+		}
+		slot.hasLastMask = false;
+		std::fill(slot.lastMask.begin(), slot.lastMask.end(), 0);
+		clearKeys(slot);
+		slot.emulator->m_re.run();
+		slot.data.reset();
+		slot.data.updateRam();
+		if (m_noopResetMax > 0) {
+			std::uniform_int_distribution<int> noopDist(0, m_noopResetMax);
+			const int noopCount = noopDist(slot.rng);
+			for (int i = 0; i < noopCount; ++i) {
+				slot.emulator->m_re.run();
+				slot.data.m_data.updateRam();
+				slot.data.m_scen.update();
+				if (slot.data.m_scen.isDone()) {
+					break;
+				}
+			}
+		}
+		std::vector<uint8_t> singleObs;
+		readProcessedFrame(slot, singleObs);
+		resetFrameStack(slot, singleObs);
+		writeStackedObservation(slot, dst);
+	}
+
+	void stepSlot(Slot& slot, const std::vector<uint8_t>& requestedAction, uint8_t* dst, StepOutput& output) {
+		std::vector<uint8_t> action = requestedAction;
+		if (slot.hasLastMask && m_stickyActionProb > 0.0) {
+			std::uniform_real_distribution<double> stickyDist(0.0, 1.0);
+			if (stickyDist(slot.rng) < m_stickyActionProb) {
+				action = slot.lastMask;
+			}
+		}
+		slot.lastMask = action;
+		slot.hasLastMask = true;
+		setKeys(slot, action);
+
+		bool done = false;
+		float totalReward = 0.0f;
+		bool sawFrame = false;
+		std::vector<uint8_t> prevRgb;
+		std::vector<uint8_t> currRgb;
+		for (int i = 0; i < m_frameSkip; ++i) {
+			slot.emulator->m_re.run();
+			slot.data.m_data.updateRam();
+			slot.data.m_scen.update();
+			totalReward += slot.data.m_scen.currentReward();
+			done = slot.data.m_scen.isDone();
+			if (m_maxpoolLastTwo && (i >= m_frameSkip - 2 || done)) {
+				prevRgb.swap(currRgb);
+				slot.emulator->readRgbFrame(currRgb);
+				sawFrame = true;
+			}
+			if (done) {
+				break;
+			}
+		}
+
+		std::vector<uint8_t> singleObs(m_singleObsSize);
+		if (!m_maxpoolLastTwo || !sawFrame) {
+			readProcessedFrame(slot, singleObs);
+		} else {
+			if (!prevRgb.empty()) {
+				for (size_t i = 0; i < currRgb.size(); ++i) {
+					currRgb[i] = std::max(currRgb[i], prevRgb[i]);
+				}
+			}
+			processRgbFrameToBuffer(
+				currRgb,
+				slot.emulator->m_re.getImageWidth(),
+				slot.emulator->m_re.getImageHeight(),
+				m_crop,
+				m_resize,
+				m_grayscale,
+				m_algorithm,
+				singleObs.data()
+			);
+		}
+		pushFrame(slot, singleObs);
+		output.reward = clipReward(totalReward);
+		output.done = done;
+		if (done) {
+			output.terminalObservation.resize(m_stackedObsSize);
+			writeStackedObservation(slot, output.terminalObservation.data());
+			resetSlot(slot, dst);
+		} else {
+			writeStackedObservation(slot, dst);
+		}
+	}
+
+	void throwFirstError(const std::vector<std::string>& errors) {
+		for (const auto& error : errors) {
+			if (!error.empty()) {
+				throw std::runtime_error(error);
+			}
+		}
+	}
+
+	std::vector<std::unique_ptr<Slot>> m_slots;
+	std::string m_initialState;
+	int m_numButtons = 0;
+	int m_frameSkip = 1;
+	int m_frameStack = 1;
+	NativeCrop m_crop;
+	NativeResize m_resize;
+	bool m_grayscale = false;
+	string m_algorithm;
+	bool m_maxpoolLastTwo = false;
+	int m_noopResetMax = 0;
+	double m_stickyActionProb = 0.0;
+	bool m_filterActions = false;
+	bool m_rewardClip = false;
+	float m_rewardClipLow = -1.0f;
+	float m_rewardClipHigh = 1.0f;
+	int m_numThreads = 1;
+	long m_obsHeight = 0;
+	long m_obsWidth = 0;
+	int m_obsChannels = 0;
+	int m_stackedChannels = 0;
+	size_t m_singleObsSize = 0;
+	size_t m_stackedObsSize = 0;
+};
+
+py::tuple stepRepeatAndProcessBatch(
+	py::list emulators,
+	py::list datas,
+	py::array_t<uint8_t> masks,
+	int repeats,
+	py::list crops,
+	py::object resizeObj,
+	bool grayscale,
+	const string& algorithm,
+	bool maxpoolLastTwo,
+	int numThreads
+) {
+	if (repeats <= 0) {
+		throw std::runtime_error("repeats must be positive");
+	}
+	const size_t n = py::len(emulators);
+	if (py::len(datas) != n || py::len(crops) != n) {
+		throw std::runtime_error("emulators, datas, and crops must have the same length");
+	}
+	auto mask = masks.unchecked<2>();
+	if (static_cast<size_t>(mask.shape(0)) != n) {
+		throw std::runtime_error("masks first dimension must match emulator count");
+	}
+	if (mask.shape(1) > N_BUTTONS) {
+		throw std::runtime_error("masks second dimension must be <= N_BUTTONS");
+	}
+	if (numThreads <= 0) {
+		numThreads = static_cast<int>(n);
+	}
+	numThreads = std::max(1, std::min<int>(numThreads, static_cast<int>(n)));
+
+	std::vector<PyRetroEmulator*> emulatorPtrs;
+	std::vector<PyGameData*> dataPtrs;
+	emulatorPtrs.reserve(n);
+	dataPtrs.reserve(n);
+	for (size_t i = 0; i < n; ++i) {
+		emulatorPtrs.push_back(&emulators[i].cast<PyRetroEmulator&>());
+		dataPtrs.push_back(&datas[i].cast<PyGameData&>());
+		for (ssize_t key = 0; key < mask.shape(1); ++key) {
+			emulatorPtrs.back()->m_re.setKey(0, static_cast<int>(key), mask(i, key));
+		}
+	}
+
+	std::vector<BatchStepResult> results(n);
+	{
+		py::gil_scoped_release release;
+		batchThreadPool(numThreads).parallelFor(n, [&](size_t index) {
+			auto* emulator = emulatorPtrs[index];
+			auto* data = dataPtrs[index];
+			auto& result = results[index];
+			try {
+				std::vector<uint8_t> prevRgb;
+				std::vector<uint8_t> currRgb;
+				for (int i = 0; i < repeats; ++i) {
+					emulator->m_re.run();
+					data->m_data.updateRam();
+					data->m_scen.update();
+					result.reward += data->m_scen.currentReward();
+					result.done = data->m_scen.isDone();
+					if (maxpoolLastTwo && (i >= repeats - 2 || result.done)) {
+						prevRgb.swap(currRgb);
+						emulator->readRgbFrame(currRgb);
+						result.sawFrame = true;
+					}
+					if (result.done) {
+						break;
+					}
+				}
+				if (!maxpoolLastTwo || !result.sawFrame) {
+					emulator->readRgbFrame(currRgb);
+				} else if (!prevRgb.empty()) {
+					for (size_t i = 0; i < currRgb.size(); ++i) {
+						currRgb[i] = std::max(currRgb[i], prevRgb[i]);
+					}
+				}
+				result.rgb.swap(currRgb);
+			} catch (const std::exception& exc) {
+				result.error = exc.what();
+			} catch (...) {
+				result.error = "unknown native batch step error";
+			}
+		});
+	}
+
+	py::list obsList;
+	py::array_t<float> rewardArray({ static_cast<py::ssize_t>(n) });
+	py::array_t<uint8_t> doneArray({ static_cast<py::ssize_t>(n) });
+	auto reward = rewardArray.mutable_unchecked<1>();
+	auto done = doneArray.mutable_unchecked<1>();
+	py::list infoList;
+	for (size_t i = 0; i < n; ++i) {
+		if (!results[i].error.empty()) {
+			throw std::runtime_error(results[i].error);
+		}
+		obsList.append(emulatorPtrs[i]->processRgbFrame(
+			results[i].rgb,
+			crops[i],
+			resizeObj,
+			grayscale,
+			algorithm
+		));
+		reward(static_cast<py::ssize_t>(i)) = results[i].reward;
+		done(static_cast<py::ssize_t>(i)) = results[i].done ? 1 : 0;
+		infoList.append(dataPtrs[i]->lookupAll());
+	}
+	return py::make_tuple(obsList, rewardArray, doneArray, infoList);
+}
+
 py::tuple PyRetroEmulator::stepRepeatAndProcess(PyGameData& data, py::array_t<uint8_t> mask, int repeats, py::object cropObj, py::object resizeObj, bool grayscale, const string& algorithm, bool maxpoolLastTwo) {
 	if (repeats <= 0) {
 		throw std::runtime_error("repeats must be positive");
@@ -601,27 +1400,30 @@ py::tuple PyRetroEmulator::stepRepeatAndProcess(PyGameData& data, py::array_t<ui
 	std::vector<uint8_t> prevRgb;
 	std::vector<uint8_t> currRgb;
 
-	for (int i = 0; i < repeats; ++i) {
-		m_re.run();
-		data.m_data.updateRam();
-		data.m_scen.update();
-		totalReward += data.m_scen.currentReward();
-		done = data.m_scen.isDone();
-		if (maxpoolLastTwo && (i >= repeats - 2 || done)) {
-			prevRgb.swap(currRgb);
-			readRgbFrame(currRgb);
-			sawFrame = true;
+	{
+		py::gil_scoped_release release;
+		for (int i = 0; i < repeats; ++i) {
+			m_re.run();
+			data.m_data.updateRam();
+			data.m_scen.update();
+			totalReward += data.m_scen.currentReward();
+			done = data.m_scen.isDone();
+			if (maxpoolLastTwo && (i >= repeats - 2 || done)) {
+				prevRgb.swap(currRgb);
+				readRgbFrame(currRgb);
+				sawFrame = true;
+			}
+			if (done) {
+				break;
+			}
 		}
-		if (done) {
-			break;
-		}
-	}
 
-	if (!maxpoolLastTwo || !sawFrame) {
-		readRgbFrame(currRgb);
-	} else if (!prevRgb.empty()) {
-		for (size_t i = 0; i < currRgb.size(); ++i) {
-			currRgb[i] = std::max(currRgb[i], prevRgb[i]);
+		if (!maxpoolLastTwo || !sawFrame) {
+			readRgbFrame(currRgb);
+		} else if (!prevRgb.empty()) {
+			for (size_t i = 0; i < currRgb.size(); ++i) {
+				currRgb[i] = std::max(currRgb[i], prevRgb[i]);
+			}
 		}
 	}
 
@@ -769,6 +1571,69 @@ PYBIND11_MODULE(_retro, m) {
 		.def("get_state", &PyMovie::getState)
 		.def("set_state", &PyMovie::setState);
 
+	py::class_<PyNativeVectorEnv>(m, "NativeVectorEnv")
+		.def(
+			py::init<
+				size_t,
+				const string&,
+				const string&,
+				const string&,
+				py::object,
+				int,
+				int,
+				int,
+				py::object,
+				py::object,
+				bool,
+				const string&,
+				bool,
+				int,
+				double,
+				bool,
+				bool,
+				float,
+				float,
+				int>(),
+			py::arg("num_envs"),
+			py::arg("rom_path"),
+			py::arg("data_path"),
+			py::arg("scenario_path"),
+			py::arg("initial_state"),
+			py::arg("num_buttons"),
+			py::arg("frame_skip"),
+			py::arg("frame_stack"),
+			py::arg("crop"),
+			py::arg("resize"),
+			py::arg("grayscale"),
+			py::arg("algorithm"),
+			py::arg("maxpool_last_two"),
+			py::arg("noop_reset_max"),
+			py::arg("sticky_action_prob"),
+			py::arg("filter_actions"),
+			py::arg("reward_clip"),
+			py::arg("reward_clip_low"),
+			py::arg("reward_clip_high"),
+			py::arg("num_threads") = 0
+		)
+		.def("reset", &PyNativeVectorEnv::reset, py::arg("seed") = py::none())
+		.def("step", &PyNativeVectorEnv::step)
+		.def("observation_shape", &PyNativeVectorEnv::observationShape)
+		.def_property_readonly("num_envs", &PyNativeVectorEnv::numEnvs);
+
 	m.def("core_path", &::corePath, py::arg("hint") = py::none());
 	m.def("data_path", &::dataPath, py::arg("hint") = py::none());
+	m.def(
+		"step_repeat_and_process_batch",
+		&stepRepeatAndProcessBatch,
+		py::arg("emulators"),
+		py::arg("datas"),
+		py::arg("masks"),
+		py::arg("repeats"),
+		py::arg("crops"),
+		py::arg("resize"),
+		py::arg("grayscale"),
+		py::arg("algorithm"),
+		py::arg("maxpool_last_two"),
+		py::arg("num_threads") = 0
+	);
 }

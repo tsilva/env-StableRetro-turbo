@@ -136,6 +136,7 @@ lib*.a
 *.capnp.*
 stable_retro/cores/*-version
 stable_retro/cores/*.json
+stable_retro/helpers/rosetta_snes_helper
 stable_retro/data/**/rom.*
 !stable_retro/data/**/rom.sha
 

@@ -29,6 +29,8 @@ __all__ = [
     "is_fbneo_game",
     "make",
     "RetroEnv",
+    "StableRetroNativeVecEnv",
+    "StableRetroThreadedVecEnv",
     "StableRetroSubprocVecEnv",
     "StableRetroChunkedSubprocVecEnv",
 ]
@@ -37,6 +39,14 @@ stable_retro.data.init_core_info(core_path())
 
 
 def __getattr__(name):
+    if name == "StableRetroNativeVecEnv":
+        from stable_retro.vec_env import StableRetroNativeVecEnv
+
+        return StableRetroNativeVecEnv
+    if name == "StableRetroThreadedVecEnv":
+        from stable_retro.vec_env import StableRetroThreadedVecEnv
+
+        return StableRetroThreadedVecEnv
     if name == "StableRetroSubprocVecEnv":
         from stable_retro.vec_env import StableRetroSubprocVecEnv
 

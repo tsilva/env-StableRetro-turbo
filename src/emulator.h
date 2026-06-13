@@ -106,12 +106,37 @@ private:
 	int m_rotation = 0;
 
 	char* m_corePath = nullptr;
+	std::string m_coreCopyPath;
 
 #ifdef _WIN32
 	HMODULE m_coreHandle = nullptr;
 #else
 	void* m_coreHandle = nullptr;
 #endif
+
+	void (*m_retro_init)(void) = nullptr;
+	void (*m_retro_deinit)(void) = nullptr;
+	unsigned (*m_retro_api_version)(void) = nullptr;
+	void (*m_retro_get_system_info)(struct retro_system_info* info) = nullptr;
+	void (*m_retro_get_system_av_info)(struct retro_system_av_info* info) = nullptr;
+	void (*m_retro_reset)(void) = nullptr;
+	void (*m_retro_run)(void) = nullptr;
+	size_t (*m_retro_serialize_size)(void) = nullptr;
+	bool (*m_retro_serialize)(void* data, size_t size) = nullptr;
+	bool (*m_retro_unserialize)(const void* data, size_t size) = nullptr;
+	bool (*m_retro_load_game)(const struct retro_game_info* game) = nullptr;
+	void (*m_retro_unload_game)(void) = nullptr;
+	void* (*m_retro_get_memory_data)(unsigned id) = nullptr;
+	size_t (*m_retro_get_memory_size)(unsigned id) = nullptr;
+	void (*m_retro_cheat_reset)(void) = nullptr;
+	void (*m_retro_cheat_set)(unsigned index, bool enabled, const char* code) = nullptr;
+	void (*m_retro_set_environment)(retro_environment_t) = nullptr;
+	void (*m_retro_set_video_refresh)(retro_video_refresh_t) = nullptr;
+	void (*m_retro_set_audio_sample)(retro_audio_sample_t) = nullptr;
+	void (*m_retro_set_audio_sample_batch)(retro_audio_sample_batch_t) = nullptr;
+	void (*m_retro_set_input_poll)(retro_input_poll_t) = nullptr;
+	void (*m_retro_set_input_state)(retro_input_state_t) = nullptr;
+
 	bool m_romLoaded = false;
 	std::string m_core;
 	std::string m_romPath;

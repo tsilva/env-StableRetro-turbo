@@ -158,8 +158,7 @@ class RetroEnv(gym.Env, EzPickle):
 
         self.system = retro.get_romfile_system(rom_path)
 
-        # We can't have more than one emulator per process. Before creating an
-        # emulator, ensure that unused ones are garbage-collected
+        # Clean up unused emulators promptly before opening another native core.
         gc.collect()
         self.em = retro.RetroEmulator(rom_path)
         self.em.configure_data(self.data)
@@ -199,7 +198,8 @@ class RetroEnv(gym.Env, EzPickle):
         else:
             img = [self.get_screen(p, apply_rotation=True) for p in range(players)]
             shape = img[0].shape
-        shape = self._stacked_obs_shape(shape)
+        self._single_observation_shape = tuple(shape)
+        shape = self._stacked_obs_shape(self._single_observation_shape)
         self.observation_space = gym.spaces.Box(
             low=0,
             high=255,
@@ -221,6 +221,7 @@ class RetroEnv(gym.Env, EzPickle):
     def _update_obs(self):
         if self._obs_type == retro.Observations.RAM:
             self.ram = self.get_ram()
+            self.ram = self._normalize_single_observation(self.ram)
             return self._update_frame_stack(self.ram)
         elif self._obs_type == retro.Observations.IMAGE:
             self.img = self.get_screen(apply_rotation=True)
@@ -314,6 +315,7 @@ class RetroEnv(gym.Env, EzPickle):
         return np.concatenate(self._frame_stack_buffer, axis=-1)
 
     def _update_frame_stack(self, obs):
+        obs = self._normalize_single_observation(obs)
         if self._frame_stack == 1:
             return obs
         obs = np.asarray(obs, dtype=np.uint8)
@@ -325,11 +327,28 @@ class RetroEnv(gym.Env, EzPickle):
         return self._stack_frames()
 
     def _reset_frame_stack(self, obs):
+        obs = self._normalize_single_observation(obs)
         obs = np.asarray(obs, dtype=np.uint8)
         if self._frame_stack == 1:
             return obs
         self._frame_stack_buffer = [obs.copy() for _ in range(self._frame_stack)]
         return self._stack_frames()
+
+    def _normalize_single_observation(self, obs):
+        expected = getattr(self, "_single_observation_shape", None)
+        if expected is None:
+            return obs
+        obs = np.asarray(obs, dtype=np.uint8)
+        if tuple(obs.shape) == tuple(expected):
+            return obs
+        if obs.ndim != len(expected):
+            return obs
+        normalized = np.zeros(expected, dtype=np.uint8)
+        slices = tuple(
+            slice(0, min(actual, target)) for actual, target in zip(obs.shape, expected)
+        )
+        normalized[slices] = obs[slices]
+        return normalized
 
     def _clip_reward(self, reward):
         if not self._reward_clip:
@@ -402,11 +421,13 @@ class RetroEnv(gym.Env, EzPickle):
             return None
         width, height = self.em.get_resolution()
         crop = self._effective_crop(player, height, width)
-        return self.em.get_processed_screen(
-            crop,
-            self._obs_resize,
-            self._obs_grayscale,
-            self._obs_resize_algorithm,
+        return self._normalize_single_observation(
+            self.em.get_processed_screen(
+                crop,
+                self._obs_resize,
+                self._obs_grayscale,
+                self._obs_resize_algorithm,
+            ),
         )
 
     def _native_step_repeat_and_process(self, action):
@@ -577,6 +598,7 @@ class RetroEnv(gym.Env, EzPickle):
         native_step = self._native_step_repeat_and_process(action)
         if native_step is not None:
             self.img, rew, done, info = native_step
+            self.img = self._normalize_single_observation(self.img)
             ob = self._update_frame_stack(self.img)
             rew = self._clip_reward(rew)
             if self.render_mode == "human":
@@ -653,6 +675,7 @@ class RetroEnv(gym.Env, EzPickle):
 
         if self._obs_type == retro.Observations.RAM:
             self.ram = self.get_ram()
+            self.ram = self._normalize_single_observation(self.ram)
             ob = self.ram
         else:
             self.img = self.get_screen(apply_rotation=True)
