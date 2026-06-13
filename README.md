@@ -29,19 +29,21 @@ surface on the native multithreaded vector path:
 - `scripts/benchmark_vec_env.py` for native-vector throughput sweeps.
 
 In local Mario benchmarks using `SuperMarioBros-Nes-v0`, the native vector path
-is the supported and fastest measured runtime. It keeps the hot vector-env state
-machine in C++ so rollout steps no longer cross Python once per environment.
+is the supported runtime for SB3-style rollouts. It keeps the hot vector-env
+state machine in C++ so rollout steps no longer cross Python once per
+environment.
 
-Recent local direct-ROM fused-preprocessing results on
-`SuperMarioBros-Nes-v0`:
+Use `scripts/benchmark_vec_env.py` for standardized native-vector benchmarks.
+The default profile is `supermario-level1-1`, which uses the actual
+`Level1-1` game state from the stable integration instead of a power-on
+`State.NONE` direct-ROM run:
 
-| envs | native threads | native_vec_fused |
-| ---: | -------------: | ---------------: |
-| 8 | 8 | 7,797 steps/s |
-| 16 | 16 | 8,295 steps/s |
-| 32 | 32 | 8,632 steps/s |
-| 32 | 16 | 8,910 steps/s |
-| 64 | 16 | 7,662 steps/s |
+```bash
+python scripts/benchmark_vec_env.py --profile supermario-level1-1
+```
+
+Direct-ROM `State.NONE` benchmarks are only for low-level emulator diagnostics
+and require `--allow-state-none`.
 
 ## Install
 
@@ -147,7 +149,7 @@ python -m cibuildwheel . --output-dir wheelhouse  # build release-style wheels
 pytest                                            # run Python tests
 pre-commit run --all-files                        # run repository hooks
 cmake . && make -j2 && make -j2 -f tests/Makefile && ctest --progress --verbose
-python scripts/benchmark_vec_env.py --game SuperMarioBros-Nes-v0 --num-envs 8
+python scripts/benchmark_vec_env.py --profile supermario-level1-1
 ```
 
 ## Notes

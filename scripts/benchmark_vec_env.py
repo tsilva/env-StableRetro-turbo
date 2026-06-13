@@ -3,17 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
-import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-
-import numpy as np
-
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 
 @dataclass
@@ -27,7 +21,94 @@ class Result:
         return self.steps / self.seconds if self.seconds > 0 else 0.0
 
 
+@dataclass(frozen=True)
+class BenchmarkProfile:
+    name: str
+    game: str
+    state: str
+    resize: str = "84x84"
+    grayscale: bool = True
+    frame_skip: int = 4
+    frame_stack: int = 4
+    obs_crop: str | None = None
+    resize_algorithm: str = "area"
+    maxpool_last_two: bool = True
+    num_envs: int = 32
+    num_threads: int | None = 16
+    description: str = ""
+
+
+def _default_profiles_json_path() -> Path:
+    return Path(__file__).resolve().with_name("benchmark_vec_env.json")
+
+
+def _load_profiles(path: Path) -> dict[str, BenchmarkProfile]:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as e:
+        raise SystemExit(
+            f"Benchmark profile file not found: {path} (create it or pass --profiles-json)",
+        ) from e
+
+    profiles = raw.get("profiles") if isinstance(raw, dict) else None
+    if not isinstance(profiles, list) or not profiles:
+        raise SystemExit(f"Benchmark profile file has no profiles: {path}")
+
+    out: dict[str, BenchmarkProfile] = {}
+    for i, item in enumerate(profiles):
+        if not isinstance(item, dict):
+            raise SystemExit(f"Invalid profile at index {i} in {path}")
+        try:
+            profile = BenchmarkProfile(
+                name=str(item["name"]),
+                game=str(item["game"]),
+                state=str(item["state"]),
+                resize=str(item.get("resize", "84x84")),
+                grayscale=bool(item.get("grayscale", True)),
+                frame_skip=int(item.get("frame_skip", 4)),
+                frame_stack=int(item.get("frame_stack", 4)),
+                obs_crop=(
+                    None
+                    if item.get("obs_crop") is None
+                    else str(item.get("obs_crop"))
+                ),
+                resize_algorithm=str(item.get("resize_algorithm", "area")),
+                maxpool_last_two=bool(item.get("maxpool_last_two", True)),
+                num_envs=int(item.get("num_envs", 32)),
+                num_threads=(
+                    None
+                    if item.get("num_threads") is None
+                    else int(item.get("num_threads"))
+                ),
+                description=str(item.get("description", "")),
+            )
+        except KeyError as e:
+            raise SystemExit(
+                f"Missing key {e} in benchmark profile at index {i} in {path}",
+            ) from e
+        if profile.name in out:
+            raise SystemExit(f"Duplicate benchmark profile name: {profile.name}")
+        out[profile.name] = profile
+    return out
+
+
+def _parse_state(value, retro, *, allow_state_none: bool):
+    normalized = str(value).strip()
+    if normalized.lower() in {"none", "state.none"}:
+        if not allow_state_none:
+            raise SystemExit(
+                "State.NONE benchmarks are disabled by default. Use an actual game state "
+                "or pass --allow-state-none for low-level direct-ROM diagnostics.",
+            )
+        return retro.State.NONE
+    if normalized.lower() in {"default", "state.default"}:
+        return retro.State.DEFAULT
+    return normalized
+
+
 def _sample_actions(env):
+    import numpy as np
+
     return np.asarray([env.action_space.sample() for _ in range(env.num_envs)])
 
 
@@ -78,29 +159,66 @@ def _build_native_vec(
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--game", default="SuperMarioBros-Nes-v0")
+    parser.add_argument("--profiles-json", default=str(_default_profiles_json_path()))
+    parser.add_argument("--profile", default="supermario-level1-1")
+    parser.add_argument("--list-profiles", action="store_true")
+    parser.add_argument("--game", default=None)
     parser.add_argument("--state", default=None)
     parser.add_argument("--rom-path", default=None)
     parser.add_argument("--info", default=None)
     parser.add_argument("--scenario", default=None)
-    parser.add_argument("--num-envs", type=int, default=8)
+    parser.add_argument("--num-envs", type=int, default=None)
     parser.add_argument("--num-threads", type=int, default=None)
     parser.add_argument("--seconds", type=float, default=10.0)
     parser.add_argument("--warmup-steps", type=int, default=16)
-    parser.add_argument("--resize", default="84x84")
-    parser.add_argument("--grayscale", action="store_true")
-    parser.add_argument("--frame-skip", type=int, default=4)
-    parser.add_argument("--frame-stack", type=int, default=4)
+    parser.add_argument("--resize", default=None)
+    parser.add_argument("--grayscale", action="store_true", default=None)
+    parser.add_argument("--rgb", action="store_false", dest="grayscale")
+    parser.add_argument("--frame-skip", type=int, default=None)
+    parser.add_argument("--frame-stack", type=int, default=None)
     parser.add_argument("--obs-crop", default=None)
+    parser.add_argument("--resize-algorithm", default=None)
+    parser.add_argument("--no-maxpool-last-two", action="store_true")
     parser.add_argument("--copy-observations", action="store_true")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the resolved benchmark profile/config without creating envs.",
+    )
+    parser.add_argument(
+        "--allow-state-none",
+        action="store_true",
+        help="Allow power-on/direct-ROM State.NONE benchmarks. Off by default.",
+    )
     args = parser.parse_args(argv)
+
+    profiles = _load_profiles(Path(args.profiles_json))
+    if args.list_profiles:
+        for name, profile in sorted(profiles.items()):
+            suffix = f" - {profile.description}" if profile.description else ""
+            print(f"{name}: {profile.game} state={profile.state}{suffix}")
+        return 0
+    try:
+        profile = profiles[args.profile]
+    except KeyError as e:
+        available = ", ".join(sorted(profiles))
+        raise SystemExit(
+            f"Unknown benchmark profile {args.profile!r}. Available profiles: {available}",
+        ) from e
 
     import stable_retro as retro
 
     os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-stable-retro")
-    state = retro.State.DEFAULT if args.state is None else args.state
-    game = args.game
+    state_value = profile.state if args.state is None else args.state
+    state = _parse_state(state_value, retro, allow_state_none=args.allow_state_none)
+    game = profile.game if args.game is None else args.game
     if args.rom_path is not None:
+        if not args.allow_state_none:
+            raise SystemExit(
+                "--rom-path implies a direct-ROM State.NONE benchmark. Pass "
+                "--allow-state-none only for low-level diagnostics; standardized "
+                "benchmarks should use integration game states.",
+            )
         rom_path = str(Path(args.rom_path).resolve())
         game = Path(rom_path).stem
         state = retro.State.NONE
@@ -113,22 +231,47 @@ def main(argv=None) -> int:
         info = None
         scenario = None
 
-    resize_h, resize_w = (int(v) for v in args.resize.lower().split("x", 1))
+    resize = profile.resize if args.resize is None else args.resize
+    resize_h, resize_w = (int(v) for v in resize.lower().split("x", 1))
+    obs_crop_value = profile.obs_crop if args.obs_crop is None else args.obs_crop
     obs_crop = None
-    if args.obs_crop:
-        obs_crop = tuple(int(v) for v in args.obs_crop.split(","))
+    if obs_crop_value:
+        obs_crop = tuple(int(v) for v in obs_crop_value.split(","))
         if len(obs_crop) != 4:
             raise SystemExit("--obs-crop must be top,bottom,left,right")
+    grayscale = profile.grayscale if args.grayscale is None else args.grayscale
+    frame_skip = profile.frame_skip if args.frame_skip is None else args.frame_skip
+    frame_stack = profile.frame_stack if args.frame_stack is None else args.frame_stack
+    num_envs = profile.num_envs if args.num_envs is None else args.num_envs
+    num_threads = profile.num_threads if args.num_threads is None else args.num_threads
+    resize_algorithm = (
+        profile.resize_algorithm
+        if args.resize_algorithm is None
+        else args.resize_algorithm
+    )
+    maxpool_last_two = profile.maxpool_last_two and not args.no_maxpool_last_two
 
     env_kwargs = {
         "render_mode": "rgb_array",
         "obs_resize": (resize_h, resize_w),
-        "obs_grayscale": args.grayscale,
+        "obs_grayscale": grayscale,
         "obs_crop": obs_crop,
-        "frame_skip": args.frame_skip,
-        "frame_stack": args.frame_stack,
-        "maxpool_last_two": True,
+        "obs_resize_algorithm": resize_algorithm,
+        "frame_skip": frame_skip,
+        "frame_stack": frame_stack,
+        "maxpool_last_two": maxpool_last_two,
     }
+
+    state_label = "State.NONE" if state is retro.State.NONE else str(state)
+    print(
+        f"profile={args.profile} game={game} state={state_label} "
+        f"envs={num_envs} threads={num_threads or num_envs} "
+        f"resize={resize} grayscale={grayscale} crop={obs_crop} "
+        f"resize_algorithm={resize_algorithm} frame_skip={frame_skip} "
+        f"frame_stack={frame_stack}",
+    )
+    if args.dry_run:
+        return 0
 
     old_disable_audio = os.environ.get("STABLE_RETRO_DISABLE_AUDIO")
     os.environ["STABLE_RETRO_DISABLE_AUDIO"] = "1"
@@ -137,12 +280,12 @@ def main(argv=None) -> int:
             game,
             state,
             retro.data.Integrations.DEFAULT,
-            args.num_envs,
+            num_envs,
             env_kwargs,
             rom_path=rom_path,
             info=info,
             scenario=scenario,
-            num_threads=args.num_threads,
+            num_threads=num_threads,
             copy_observations=args.copy_observations,
         )
         result = _run_vec(
