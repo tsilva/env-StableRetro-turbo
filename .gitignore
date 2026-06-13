@@ -111,6 +111,7 @@ gameboy/
 roms/
 *.png
 !architecture.png
+artifacts/*.mp4
 
 # CMake
 CMakeFiles

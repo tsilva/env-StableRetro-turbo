@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "profiles": [
+    {
+      "name": "supermario-level1-1",
+      "description": "Training-representative Super Mario Bros Level 1-1 state.",
+      "game": "SuperMarioBros-Nes-v0",
+      "state": "Level1-1",
+      "resize": "84x84",
+      "grayscale": true,
+      "frame_skip": 4,
+      "frame_stack": 4,
+      "obs_crop": "32,0,0,0",
+      "resize_algorithm": "area",
+      "maxpool_last_two": true,
+      "num_envs": 32,
+      "num_threads": 16
+    },
+    {
+      "name": "megaman-level1",
+      "description": "Mega Man NES Level 1 state with the standard frame-stack preprocessing.",
+      "game": "MegaMan-Nes-v0",
+      "state": "Level1",
+      "resize": "84x84",
+      "grayscale": true,
+      "frame_skip": 4,
+      "frame_stack": 4,
+      "obs_crop": "32,0,0,0",
+      "resize_algorithm": "area",
+      "maxpool_last_two": true,
+      "num_envs": 32,
+      "num_threads": 16
+    }
+  ]
+}
