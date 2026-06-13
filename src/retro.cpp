@@ -21,9 +21,12 @@ static inline T _hypot(T x, T y) {
 #include "movie.h"
 #include "movie-bk2.h"
 
+#include <algorithm>
+#include <cmath>
 #include <map>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace py = pybind11;
 
@@ -46,6 +49,165 @@ struct PyRetroEmulator {
 
 	void step() {
 		m_re.run();
+	}
+
+	void readRgbFrame(std::vector<uint8_t>& rgb) {
+		long w = m_re.getImageWidth();
+		long h = m_re.getImageHeight();
+		rgb.resize(static_cast<size_t>(w) * static_cast<size_t>(h) * 3);
+		Image out(Image::Format::RGB888, rgb.data(), w, h, w);
+		const void* img = m_re.getImageData();
+		if (!img) {
+			for (int i = 0; i < 180 && !img; ++i) {
+				m_re.run();
+				img = m_re.getImageData();
+			}
+		}
+		if (!img) {
+			throw std::runtime_error(
+				"Core did not provide a CPU framebuffer. "
+				"This usually means the core is using hardware rendering, which stable-retro can't capture yet."
+			);
+		}
+		Image in;
+		if (m_re.getImageDepth() == 16) {
+			in = Image(Image::Format::RGB565, img, w, h, m_re.getImagePitch());
+		} else if (m_re.getImageDepth() == 32) {
+			in = Image(Image::Format::RGBX888, img, w, h, m_re.getImagePitch());
+		} else {
+			throw std::runtime_error("Unsupported image depth from core");
+		}
+		in.copyTo(&out);
+	}
+
+	py::array_t<uint8_t> processRgbFrame(const std::vector<uint8_t>& rgb, py::object cropObj, py::object resizeObj, bool grayscale, const string& algorithm) {
+		long w = m_re.getImageWidth();
+		long h = m_re.getImageHeight();
+
+		long top = 0;
+		long bottom = 0;
+		long left = 0;
+		long right = 0;
+		if (!cropObj.is_none()) {
+			auto crop = py::tuple(cropObj);
+			if (crop.size() != 4) {
+				throw std::runtime_error("crop must be a (top, bottom, left, right) tuple");
+			}
+			top = py::int_(crop[0]);
+			bottom = py::int_(crop[1]);
+			left = py::int_(crop[2]);
+			right = py::int_(crop[3]);
+		}
+		if (top < 0 || bottom < 0 || left < 0 || right < 0 || top + bottom >= h || left + right >= w) {
+			throw std::runtime_error("crop removes the entire observation");
+		}
+		long srcH = h - top - bottom;
+		long srcW = w - left - right;
+		long dstH = srcH;
+		long dstW = srcW;
+		if (!resizeObj.is_none()) {
+			auto resize = py::tuple(resizeObj);
+			if (resize.size() != 2) {
+				throw std::runtime_error("resize must be a (height, width) tuple");
+			}
+			dstH = py::int_(resize[0]);
+			dstW = py::int_(resize[1]);
+			if (dstH <= 0 || dstW <= 0) {
+				throw std::runtime_error("resize height and width must be positive");
+			}
+		}
+
+		int channels = grayscale ? 1 : 3;
+		py::array_t<uint8_t> arr({ { dstH, dstW, channels } });
+		uint8_t* dst = arr.mutable_data();
+
+		auto srcPixel = [&](long y, long x, int c) -> uint8_t {
+			const size_t offset = (static_cast<size_t>(top + y) * static_cast<size_t>(w) + static_cast<size_t>(left + x)) * 3;
+			return rgb[offset + c];
+		};
+		auto srcGray = [&](long y, long x) -> uint8_t {
+			const size_t offset = (static_cast<size_t>(top + y) * static_cast<size_t>(w) + static_cast<size_t>(left + x)) * 3;
+			const uint32_t r = rgb[offset];
+			const uint32_t g = rgb[offset + 1];
+			const uint32_t b = rgb[offset + 2];
+			return static_cast<uint8_t>((r * 77 + g * 150 + b * 29 + 128) >> 8);
+		};
+		auto writePixel = [&](long y, long x, int c, uint8_t value) {
+			dst[(static_cast<size_t>(y) * static_cast<size_t>(dstW) + static_cast<size_t>(x)) * channels + c] = value;
+		};
+
+		if (algorithm == "area") {
+			if (dstH > srcH || dstW > srcW) {
+				throw std::runtime_error("area resize only supports downscaling");
+			}
+			for (long dy = 0; dy < dstH; ++dy) {
+				long y0 = (dy * srcH) / dstH;
+				long y1 = std::max<long>(((dy + 1) * srcH) / dstH, y0 + 1);
+				y1 = std::min(y1, srcH);
+				for (long dx = 0; dx < dstW; ++dx) {
+					long x0 = (dx * srcW) / dstW;
+					long x1 = std::max<long>(((dx + 1) * srcW) / dstW, x0 + 1);
+					x1 = std::min(x1, srcW);
+					const uint32_t count = static_cast<uint32_t>((y1 - y0) * (x1 - x0));
+					if (grayscale) {
+						uint32_t sum = 0;
+						for (long sy = y0; sy < y1; ++sy) {
+							for (long sx = x0; sx < x1; ++sx) {
+								sum += srcGray(sy, sx);
+							}
+						}
+						writePixel(dy, dx, 0, static_cast<uint8_t>(sum / count));
+					} else {
+						for (int c = 0; c < 3; ++c) {
+							uint32_t sum = 0;
+							for (long sy = y0; sy < y1; ++sy) {
+								for (long sx = x0; sx < x1; ++sx) {
+									sum += srcPixel(sy, sx, c);
+								}
+							}
+							writePixel(dy, dx, c, static_cast<uint8_t>(sum / count));
+						}
+					}
+				}
+			}
+			return arr;
+		}
+
+		const bool bilinear = algorithm == "bilinear";
+		for (long dy = 0; dy < dstH; ++dy) {
+			const float fy = dstH == 1 ? 0.0f : static_cast<float>(dy) * static_cast<float>(srcH - 1) / static_cast<float>(dstH - 1);
+			const long y0 = std::max<long>(0, std::min<long>(srcH - 1, static_cast<long>(std::floor(fy))));
+			const long y1 = std::min<long>(y0 + 1, srcH - 1);
+			const float wy = bilinear ? fy - static_cast<float>(y0) : 0.0f;
+			const long sy = bilinear ? y0 : static_cast<long>(fy);
+			for (long dx = 0; dx < dstW; ++dx) {
+				const float fx = dstW == 1 ? 0.0f : static_cast<float>(dx) * static_cast<float>(srcW - 1) / static_cast<float>(dstW - 1);
+				const long x0 = std::max<long>(0, std::min<long>(srcW - 1, static_cast<long>(std::floor(fx))));
+				const long x1 = std::min<long>(x0 + 1, srcW - 1);
+				const float wx = bilinear ? fx - static_cast<float>(x0) : 0.0f;
+				const long sx = bilinear ? x0 : static_cast<long>(fx);
+				if (!bilinear) {
+					if (grayscale) {
+						writePixel(dy, dx, 0, srcGray(sy, sx));
+					} else {
+						for (int c = 0; c < 3; ++c) {
+							writePixel(dy, dx, c, srcPixel(sy, sx, c));
+						}
+					}
+				} else if (grayscale) {
+					const float topPix = static_cast<float>(srcGray(y0, x0)) * (1.0f - wx) + static_cast<float>(srcGray(y0, x1)) * wx;
+					const float bottomPix = static_cast<float>(srcGray(y1, x0)) * (1.0f - wx) + static_cast<float>(srcGray(y1, x1)) * wx;
+					writePixel(dy, dx, 0, static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, topPix * (1.0f - wy) + bottomPix * wy))));
+				} else {
+					for (int c = 0; c < 3; ++c) {
+						const float topPix = static_cast<float>(srcPixel(y0, x0, c)) * (1.0f - wx) + static_cast<float>(srcPixel(y0, x1, c)) * wx;
+						const float bottomPix = static_cast<float>(srcPixel(y1, x0, c)) * (1.0f - wx) + static_cast<float>(srcPixel(y1, x1, c)) * wx;
+						writePixel(dy, dx, c, static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, topPix * (1.0f - wy) + bottomPix * wy))));
+					}
+				}
+			}
+		}
+		return arr;
 	}
 
 	py::bytes getState() {
@@ -90,6 +252,12 @@ struct PyRetroEmulator {
 		}
 		in.copyTo(&out);
 		return arr;
+	}
+
+	py::array_t<uint8_t> getProcessedScreen(py::object cropObj, py::object resizeObj, bool grayscale, const string& algorithm) {
+		std::vector<uint8_t> rgb;
+		readRgbFrame(rgb);
+		return processRgbFrame(rgb, cropObj, resizeObj, grayscale, algorithm);
 	}
 
 	double getScreenRate() {
@@ -138,6 +306,7 @@ struct PyRetroEmulator {
 	}
 
 	void configureData(PyGameData& data);
+	py::tuple stepRepeatAndProcess(PyGameData& data, py::array_t<uint8_t> mask, int repeats, py::object cropObj, py::object resizeObj, bool grayscale, const string& algorithm, bool maxpoolLastTwo);
 	static bool loadCoreInfo(const string& json) {
 		return Retro::loadCoreInfo(json);
 	}
@@ -415,6 +584,51 @@ void PyRetroEmulator::configureData(PyGameData& data) {
 	m_re.configureData(&data.m_data);
 }
 
+py::tuple PyRetroEmulator::stepRepeatAndProcess(PyGameData& data, py::array_t<uint8_t> mask, int repeats, py::object cropObj, py::object resizeObj, bool grayscale, const string& algorithm, bool maxpoolLastTwo) {
+	if (repeats <= 0) {
+		throw std::runtime_error("repeats must be positive");
+	}
+	if (mask.size() > N_BUTTONS) {
+		throw std::runtime_error("mask.size() > N_BUTTONS");
+	}
+	for (int key = 0; key < mask.size(); ++key) {
+		m_re.setKey(0, key, mask.data()[key]);
+	}
+
+	float totalReward = 0.0f;
+	bool done = false;
+	bool sawFrame = false;
+	std::vector<uint8_t> prevRgb;
+	std::vector<uint8_t> currRgb;
+
+	for (int i = 0; i < repeats; ++i) {
+		m_re.run();
+		data.m_data.updateRam();
+		data.m_scen.update();
+		totalReward += data.m_scen.currentReward();
+		done = data.m_scen.isDone();
+		if (maxpoolLastTwo && (i >= repeats - 2 || done)) {
+			prevRgb.swap(currRgb);
+			readRgbFrame(currRgb);
+			sawFrame = true;
+		}
+		if (done) {
+			break;
+		}
+	}
+
+	if (!maxpoolLastTwo || !sawFrame) {
+		readRgbFrame(currRgb);
+	} else if (!prevRgb.empty()) {
+		for (size_t i = 0; i < currRgb.size(); ++i) {
+			currRgb[i] = std::max(currRgb[i], prevRgb[i]);
+		}
+	}
+
+	py::array_t<uint8_t> obs = processRgbFrame(currRgb, cropObj, resizeObj, grayscale, algorithm);
+	return py::make_tuple(obs, totalReward, done, data.lookupAll());
+}
+
 struct PyMovie {
 	std::unique_ptr<Retro::Movie> m_movie;
 	bool recording = false;
@@ -485,11 +699,13 @@ PYBIND11_MODULE(_retro, m) {
 
 	py::class_<PyRetroEmulator>(m, "RetroEmulator")
 		.def(py::init<const string&>())
-		.def("step", &PyRetroEmulator::step)
+		.def("step", &PyRetroEmulator::step, py::call_guard<py::gil_scoped_release>())
 		.def("set_button_mask", &PyRetroEmulator::setButtonMask, py::arg("mask"), py::arg("player") = 0)
 		.def("get_state", &PyRetroEmulator::getState)
 		.def("set_state", &PyRetroEmulator::setState)
 		.def("get_screen", &PyRetroEmulator::getScreen)
+		.def("get_processed_screen", &PyRetroEmulator::getProcessedScreen)
+		.def("step_repeat_and_process", &PyRetroEmulator::stepRepeatAndProcess)
 		.def("get_rotation", &PyRetroEmulator::getRotation)
 		.def("get_screen_rate", &PyRetroEmulator::getScreenRate)
 		.def("get_audio", &PyRetroEmulator::getAudio)

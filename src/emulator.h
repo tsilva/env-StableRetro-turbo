@@ -97,6 +97,8 @@ private:
 
 	// Audio buffer; accumulated during run()
 	std::vector<int16_t> m_audioData;
+	bool m_audioEnabled = true;
+	bool m_videoEnabled = true;
 	AddressSpace* m_addressSpace = nullptr;
 
 	retro_system_av_info m_avInfo = {};

@@ -1,0 +1,92 @@
+import gymnasium as gym
+import numpy as np
+import pytest
+
+
+class CounterEnv(gym.Env):
+    observation_space = gym.spaces.Box(low=0, high=255, shape=(2, 2, 1), dtype=np.uint8)
+    action_space = gym.spaces.Discrete(2)
+
+    def __init__(self):
+        self.value = 0
+
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        self.value = 0
+        return np.full(self.observation_space.shape, self.value, dtype=np.uint8), {}
+
+    def step(self, action):
+        self.value += 1
+        obs = np.full(self.observation_space.shape, self.value, dtype=np.uint8)
+        return obs, float(action), self.value >= 2, False, {"value": self.value}
+
+    def value_plus(self, amount):
+        return self.value + amount
+
+
+def make_counter_env():
+    return CounterEnv()
+
+
+def test_stable_retro_subproc_vec_env_shared_memory():
+    pytest.importorskip("stable_baselines3")
+    from stable_retro.vec_env import StableRetroSubprocVecEnv
+
+    env = StableRetroSubprocVecEnv(
+        [make_counter_env, make_counter_env],
+        start_method="fork",
+    )
+    try:
+        obs = env.reset()
+        assert obs.shape == (2, 2, 2, 1)
+        assert np.all(obs == 0)
+
+        obs, rewards, dones, infos = env.step(np.asarray([0, 1]))
+        assert np.all(obs == 1)
+        assert rewards.tolist() == [0.0, 1.0]
+        assert dones.tolist() == [False, False]
+        assert infos == [{"value": 1}, {"value": 1}]
+
+        obs, rewards, dones, infos = env.step(np.asarray([1, 1]))
+        assert np.all(obs == 0)
+        assert rewards.tolist() == [1.0, 1.0]
+        assert dones.tolist() == [True, True]
+        assert "terminal_observation" in infos[0]
+    finally:
+        env.close()
+
+
+def test_stable_retro_chunked_subproc_vec_env_shared_memory():
+    pytest.importorskip("stable_baselines3")
+    from stable_retro.vec_env import StableRetroChunkedSubprocVecEnv
+
+    env = StableRetroChunkedSubprocVecEnv(
+        [make_counter_env for _ in range(5)],
+        start_method="fork",
+        chunk_size=2,
+    )
+    try:
+        obs = env.reset()
+        assert obs.shape == (5, 2, 2, 1)
+        assert np.all(obs == 0)
+
+        obs, rewards, dones, infos = env.step(np.asarray([0, 1, 0, 1, 1]))
+        assert np.all(obs == 1)
+        assert rewards.tolist() == [0.0, 1.0, 0.0, 1.0, 1.0]
+        assert dones.tolist() == [False, False, False, False, False]
+        assert infos == [{"value": 1}] * 5
+
+        assert env.get_attr("value", indices=[3, 0, 4]) == [1, 1, 1]
+        assert env.env_method("value_plus", 5, indices=[4, 1]) == [6, 6]
+        env.set_attr("value", 7, indices=[4, 0])
+        assert env.get_attr("value", indices=[0, 1, 4]) == [7, 1, 7]
+
+        obs, rewards, dones, infos = env.step(np.asarray([1, 1, 1, 1, 1]))
+        assert obs[0].max() == 0
+        assert obs[1].max() == 0
+        assert obs[4].max() == 0
+        assert rewards.tolist() == [1.0, 1.0, 1.0, 1.0, 1.0]
+        assert dones.tolist() == [True, True, True, True, True]
+        assert "terminal_observation" in infos[4]
+    finally:
+        env.close()
