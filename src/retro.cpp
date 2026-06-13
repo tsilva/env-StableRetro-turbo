@@ -588,15 +588,7 @@ void PyRetroEmulator::configureData(PyGameData& data) {
 	m_re.configureData(&data.m_data);
 }
 
-struct BatchStepResult {
-	std::vector<uint8_t> rgb;
-	float reward = 0.0f;
-	bool done = false;
-	bool sawFrame = false;
-	std::string error;
-};
-
-class BatchThreadPool {
+	class BatchThreadPool {
 public:
 	explicit BatchThreadPool(int numThreads) {
 		for (int i = 0; i < numThreads; ++i) {
@@ -1275,115 +1267,7 @@ private:
 	size_t m_stackedObsSize = 0;
 };
 
-py::tuple stepRepeatAndProcessBatch(
-	py::list emulators,
-	py::list datas,
-	py::array_t<uint8_t> masks,
-	int repeats,
-	py::list crops,
-	py::object resizeObj,
-	bool grayscale,
-	const string& algorithm,
-	bool maxpoolLastTwo,
-	int numThreads
-) {
-	if (repeats <= 0) {
-		throw std::runtime_error("repeats must be positive");
-	}
-	const size_t n = py::len(emulators);
-	if (py::len(datas) != n || py::len(crops) != n) {
-		throw std::runtime_error("emulators, datas, and crops must have the same length");
-	}
-	auto mask = masks.unchecked<2>();
-	if (static_cast<size_t>(mask.shape(0)) != n) {
-		throw std::runtime_error("masks first dimension must match emulator count");
-	}
-	if (mask.shape(1) > N_BUTTONS) {
-		throw std::runtime_error("masks second dimension must be <= N_BUTTONS");
-	}
-	if (numThreads <= 0) {
-		numThreads = static_cast<int>(n);
-	}
-	numThreads = std::max(1, std::min<int>(numThreads, static_cast<int>(n)));
-
-	std::vector<PyRetroEmulator*> emulatorPtrs;
-	std::vector<PyGameData*> dataPtrs;
-	emulatorPtrs.reserve(n);
-	dataPtrs.reserve(n);
-	for (size_t i = 0; i < n; ++i) {
-		emulatorPtrs.push_back(&emulators[i].cast<PyRetroEmulator&>());
-		dataPtrs.push_back(&datas[i].cast<PyGameData&>());
-		for (ssize_t key = 0; key < mask.shape(1); ++key) {
-			emulatorPtrs.back()->m_re.setKey(0, static_cast<int>(key), mask(i, key));
-		}
-	}
-
-	std::vector<BatchStepResult> results(n);
-	{
-		py::gil_scoped_release release;
-		batchThreadPool(numThreads).parallelFor(n, [&](size_t index) {
-			auto* emulator = emulatorPtrs[index];
-			auto* data = dataPtrs[index];
-			auto& result = results[index];
-			try {
-				std::vector<uint8_t> prevRgb;
-				std::vector<uint8_t> currRgb;
-				for (int i = 0; i < repeats; ++i) {
-					emulator->m_re.run();
-					data->m_data.updateRam();
-					data->m_scen.update();
-					result.reward += data->m_scen.currentReward();
-					result.done = data->m_scen.isDone();
-					if (maxpoolLastTwo && (i >= repeats - 2 || result.done)) {
-						prevRgb.swap(currRgb);
-						emulator->readRgbFrame(currRgb);
-						result.sawFrame = true;
-					}
-					if (result.done) {
-						break;
-					}
-				}
-				if (!maxpoolLastTwo || !result.sawFrame) {
-					emulator->readRgbFrame(currRgb);
-				} else if (!prevRgb.empty()) {
-					for (size_t i = 0; i < currRgb.size(); ++i) {
-						currRgb[i] = std::max(currRgb[i], prevRgb[i]);
-					}
-				}
-				result.rgb.swap(currRgb);
-			} catch (const std::exception& exc) {
-				result.error = exc.what();
-			} catch (...) {
-				result.error = "unknown native batch step error";
-			}
-		});
-	}
-
-	py::list obsList;
-	py::array_t<float> rewardArray({ static_cast<py::ssize_t>(n) });
-	py::array_t<uint8_t> doneArray({ static_cast<py::ssize_t>(n) });
-	auto reward = rewardArray.mutable_unchecked<1>();
-	auto done = doneArray.mutable_unchecked<1>();
-	py::list infoList;
-	for (size_t i = 0; i < n; ++i) {
-		if (!results[i].error.empty()) {
-			throw std::runtime_error(results[i].error);
-		}
-		obsList.append(emulatorPtrs[i]->processRgbFrame(
-			results[i].rgb,
-			crops[i],
-			resizeObj,
-			grayscale,
-			algorithm
-		));
-		reward(static_cast<py::ssize_t>(i)) = results[i].reward;
-		done(static_cast<py::ssize_t>(i)) = results[i].done ? 1 : 0;
-		infoList.append(dataPtrs[i]->lookupAll());
-	}
-	return py::make_tuple(obsList, rewardArray, doneArray, infoList);
-}
-
-py::tuple PyRetroEmulator::stepRepeatAndProcess(PyGameData& data, py::array_t<uint8_t> mask, int repeats, py::object cropObj, py::object resizeObj, bool grayscale, const string& algorithm, bool maxpoolLastTwo) {
+	py::tuple PyRetroEmulator::stepRepeatAndProcess(PyGameData& data, py::array_t<uint8_t> mask, int repeats, py::object cropObj, py::object resizeObj, bool grayscale, const string& algorithm, bool maxpoolLastTwo) {
 	if (repeats <= 0) {
 		throw std::runtime_error("repeats must be positive");
 	}
@@ -1622,18 +1506,4 @@ PYBIND11_MODULE(_retro, m) {
 
 	m.def("core_path", &::corePath, py::arg("hint") = py::none());
 	m.def("data_path", &::dataPath, py::arg("hint") = py::none());
-	m.def(
-		"step_repeat_and_process_batch",
-		&stepRepeatAndProcessBatch,
-		py::arg("emulators"),
-		py::arg("datas"),
-		py::arg("masks"),
-		py::arg("repeats"),
-		py::arg("crops"),
-		py::arg("resize"),
-		py::arg("grayscale"),
-		py::arg("algorithm"),
-		py::arg("maxpool_last_two"),
-		py::arg("num_threads") = 0
-	);
-}
+	}

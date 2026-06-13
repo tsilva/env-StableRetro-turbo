@@ -1,4 +1,4 @@
-"""Benchmark stable-retro vector rollout throughput variants."""
+"""Benchmark the supported native stable-retro vector rollout path."""
 
 from __future__ import annotations
 
@@ -27,29 +27,6 @@ class Result:
         return self.steps / self.seconds if self.seconds > 0 else 0.0
 
 
-def _make_env_fn(
-    game,
-    state,
-    inttype,
-    env_kwargs,
-    rom_path=None,
-    info=None,
-    scenario=None,
-):
-    def make_env():
-        import stable_retro as retro
-
-        if rom_path is not None:
-            retro.data.get_romfile_path = lambda *_args, **_kwargs: rom_path
-            retro.data.get_file_path = lambda _game, file, *_args, **_kwargs: {
-                "data.json": info,
-                "scenario.json": scenario,
-            }.get(file, file)
-        return retro.make(game, state=state, inttype=inttype, **env_kwargs)
-
-    return make_env
-
-
 def _sample_actions(env):
     return np.asarray([env.action_space.sample() for _ in range(env.num_envs)])
 
@@ -71,45 +48,6 @@ def _run_vec(name, env, seconds, warmup_steps) -> Result:
     return Result(name=name, steps=steps, seconds=elapsed)
 
 
-def _print_results(results):
-    baseline = results[0].steps_per_second if results else 0.0
-    print(
-        f"{'variant':34} {'steps/s':>12} {'speedup':>10} {'steps':>10} {'seconds':>9}",
-    )
-    print("-" * 81)
-    for result in results:
-        speedup = result.steps_per_second / baseline if baseline else 0.0
-        print(
-            f"{result.name:34} "
-            f"{result.steps_per_second:12.1f} "
-            f"{speedup:10.2f} "
-            f"{result.steps:10d} "
-            f"{result.seconds:9.2f}",
-        )
-
-
-def _build_subproc(env_fns, start_method):
-    from stable_baselines3.common.vec_env import SubprocVecEnv
-
-    return SubprocVecEnv(env_fns, start_method=start_method)
-
-
-def _build_shared(env_fns, start_method):
-    from stable_retro.vec_env import StableRetroSubprocVecEnv
-
-    return StableRetroSubprocVecEnv(env_fns, start_method=start_method)
-
-
-def _build_threaded(env_fns, _start_method, num_threads=None, use_native_batch=True):
-    from stable_retro.vec_env import StableRetroThreadedVecEnv
-
-    return StableRetroThreadedVecEnv(
-        env_fns,
-        num_threads=num_threads,
-        use_native_batch=use_native_batch,
-    )
-
-
 def _build_native_vec(
     game,
     state,
@@ -120,6 +58,7 @@ def _build_native_vec(
     info=None,
     scenario=None,
     num_threads=None,
+    copy_observations=True,
 ):
     from stable_retro.vec_env import StableRetroNativeVecEnv
 
@@ -132,17 +71,8 @@ def _build_native_vec(
         info=info,
         scenario=scenario,
         num_threads=num_threads,
+        copy_observations=copy_observations,
         **env_kwargs,
-    )
-
-
-def _build_chunked(env_fns, start_method, chunk_size):
-    from stable_retro.vec_env import StableRetroChunkedSubprocVecEnv
-
-    return StableRetroChunkedSubprocVecEnv(
-        env_fns,
-        start_method=start_method,
-        chunk_size=chunk_size,
     )
 
 
@@ -154,30 +84,15 @@ def main(argv=None) -> int:
     parser.add_argument("--info", default=None)
     parser.add_argument("--scenario", default=None)
     parser.add_argument("--num-envs", type=int, default=8)
+    parser.add_argument("--num-threads", type=int, default=None)
     parser.add_argument("--seconds", type=float, default=10.0)
     parser.add_argument("--warmup-steps", type=int, default=16)
-    parser.add_argument("--start-method", default="spawn")
     parser.add_argument("--resize", default="84x84")
     parser.add_argument("--grayscale", action="store_true")
     parser.add_argument("--frame-skip", type=int, default=4)
     parser.add_argument("--frame-stack", type=int, default=4)
     parser.add_argument("--obs-crop", default=None)
-    parser.add_argument(
-        "--threaded-num-threads",
-        type=int,
-        default=None,
-        help="Worker count for StableRetroThreadedVecEnv variants.",
-    )
-    parser.add_argument(
-        "--chunk-sizes",
-        default="2,4,8,16",
-        help="Comma-separated envs-per-worker sizes for chunked variants.",
-    )
-    parser.add_argument(
-        "--variants",
-        default=None,
-        help="Comma-separated variant names to run. Defaults to all variants.",
-    )
+    parser.add_argument("--copy-observations", action="store_true")
     args = parser.parse_args(argv)
 
     import stable_retro as retro
@@ -197,21 +112,16 @@ def main(argv=None) -> int:
         rom_path = None
         info = None
         scenario = None
+
     resize_h, resize_w = (int(v) for v in args.resize.lower().split("x", 1))
     obs_crop = None
     if args.obs_crop:
         obs_crop = tuple(int(v) for v in args.obs_crop.split(","))
         if len(obs_crop) != 4:
             raise SystemExit("--obs-crop must be top,bottom,left,right")
-    chunk_sizes = [int(v) for v in args.chunk_sizes.split(",") if v.strip()]
-    if any(chunk_size <= 0 for chunk_size in chunk_sizes):
-        raise SystemExit("--chunk-sizes values must be positive")
 
-    base_kwargs = {
+    env_kwargs = {
         "render_mode": "rgb_array",
-    }
-    preproc_kwargs = {
-        **base_kwargs,
         "obs_resize": (resize_h, resize_w),
         "obs_grayscale": args.grayscale,
         "obs_crop": obs_crop,
@@ -220,182 +130,37 @@ def main(argv=None) -> int:
         "maxpool_last_two": True,
     }
 
-    variants = [
-        ("subproc_baseline", _build_subproc, base_kwargs, False, False),
-        ("subproc_worker_preproc", _build_subproc, preproc_kwargs, False, False),
-        ("subproc_native_preproc", _build_subproc, preproc_kwargs, True, False),
-        ("subproc_native_fused", _build_subproc, preproc_kwargs, True, True),
-        ("shared_worker_preproc", _build_shared, preproc_kwargs, False, False),
-        ("shared_native_preproc", _build_shared, preproc_kwargs, True, False),
-        ("shared_native_fused", _build_shared, preproc_kwargs, True, True),
-        (
-            "native_vec_fused",
-            lambda _env_fns, _start_method: _build_native_vec(
-                game,
-                state,
-                retro.data.Integrations.DEFAULT,
-                args.num_envs,
-                preproc_kwargs,
-                rom_path=rom_path,
-                info=info,
-                scenario=scenario,
-                num_threads=args.threaded_num_threads,
-            ),
-            preproc_kwargs,
-            True,
-            True,
-        ),
-        (
-            "threaded_pool_native_preproc",
-            lambda env_fns, start_method: _build_threaded(
-                env_fns,
-                start_method,
-                args.threaded_num_threads,
-                False,
-            ),
-            preproc_kwargs,
-            True,
-            False,
-        ),
-        (
-            "threaded_pool_native_fused",
-            lambda env_fns, start_method: _build_threaded(
-                env_fns,
-                start_method,
-                args.threaded_num_threads,
-                False,
-            ),
-            preproc_kwargs,
-            True,
-            True,
-        ),
-        (
-            "threaded_batch_native_preproc",
-            lambda env_fns, start_method: _build_threaded(
-                env_fns,
-                start_method,
-                args.threaded_num_threads,
-                True,
-            ),
-            preproc_kwargs,
-            True,
-            False,
-        ),
-        (
-            "threaded_batch_native_fused",
-            lambda env_fns, start_method: _build_threaded(
-                env_fns,
-                start_method,
-                args.threaded_num_threads,
-                True,
-            ),
-            preproc_kwargs,
-            True,
-            True,
-        ),
-    ]
-    for chunk_size in chunk_sizes:
-        variants.extend(
-            [
-                (
-                    f"chunked_native_preproc_{chunk_size}",
-                    lambda env_fns, start_method, chunk_size=chunk_size: _build_chunked(
-                        env_fns,
-                        start_method,
-                        chunk_size,
-                    ),
-                    preproc_kwargs,
-                    True,
-                    False,
-                ),
-                (
-                    f"chunked_native_fused_{chunk_size}",
-                    lambda env_fns, start_method, chunk_size=chunk_size: _build_chunked(
-                        env_fns,
-                        start_method,
-                        chunk_size,
-                    ),
-                    preproc_kwargs,
-                    True,
-                    True,
-                ),
-            ],
-        )
-    if args.variants:
-        requested_variants = {name.strip() for name in args.variants.split(",")}
-        known_variants = {name for name, *_ in variants}
-        unknown_variants = requested_variants - known_variants
-        if unknown_variants:
-            raise SystemExit(
-                "Unknown variants: "
-                + ", ".join(sorted(unknown_variants))
-                + ". Known variants: "
-                + ", ".join(name for name, *_ in variants),
-            )
-        variants = [variant for variant in variants if variant[0] in requested_variants]
-
-    results = []
     old_disable_audio = os.environ.get("STABLE_RETRO_DISABLE_AUDIO")
     os.environ["STABLE_RETRO_DISABLE_AUDIO"] = "1"
-    old_disable_native = os.environ.get("STABLE_RETRO_DISABLE_NATIVE_IMAGEOPS")
-    old_disable_fused = os.environ.get("STABLE_RETRO_DISABLE_NATIVE_FUSED_STEP")
     try:
-        for name, builder, kwargs, native, fused in variants:
-            if native:
-                os.environ.pop("STABLE_RETRO_DISABLE_NATIVE_IMAGEOPS", None)
-            else:
-                os.environ["STABLE_RETRO_DISABLE_NATIVE_IMAGEOPS"] = "1"
-            if fused:
-                os.environ.pop("STABLE_RETRO_DISABLE_NATIVE_FUSED_STEP", None)
-            else:
-                os.environ["STABLE_RETRO_DISABLE_NATIVE_FUSED_STEP"] = "1"
-            env_fns = [
-                _make_env_fn(
-                    game,
-                    state,
-                    retro.data.Integrations.DEFAULT,
-                    kwargs,
-                    rom_path=rom_path,
-                    info=info,
-                    scenario=scenario,
-                )
-                for _ in range(args.num_envs)
-            ]
-            try:
-                env = builder(env_fns, args.start_method)
-                result = _run_vec(name, env, args.seconds, args.warmup_steps)
-            except Exception as exc:
-                print(
-                    f"failed {name}: {type(exc).__name__}: {exc}",
-                    flush=True,
-                )
-                continue
-            results.append(result)
-            print(
-                f"finished {result.name}: "
-                f"{result.steps_per_second:.1f} steps/s "
-                f"({result.steps} steps in {result.seconds:.2f}s)",
-                flush=True,
-            )
+        env = _build_native_vec(
+            game,
+            state,
+            retro.data.Integrations.DEFAULT,
+            args.num_envs,
+            env_kwargs,
+            rom_path=rom_path,
+            info=info,
+            scenario=scenario,
+            num_threads=args.num_threads,
+            copy_observations=args.copy_observations,
+        )
+        result = _run_vec(
+            "native_vec_fused",
+            env,
+            args.seconds,
+            args.warmup_steps,
+        )
     finally:
         if old_disable_audio is None:
             os.environ.pop("STABLE_RETRO_DISABLE_AUDIO", None)
         else:
             os.environ["STABLE_RETRO_DISABLE_AUDIO"] = old_disable_audio
-        if old_disable_native is None:
-            os.environ.pop("STABLE_RETRO_DISABLE_NATIVE_IMAGEOPS", None)
-        else:
-            os.environ["STABLE_RETRO_DISABLE_NATIVE_IMAGEOPS"] = old_disable_native
-        if old_disable_fused is None:
-            os.environ.pop("STABLE_RETRO_DISABLE_NATIVE_FUSED_STEP", None)
-        else:
-            os.environ["STABLE_RETRO_DISABLE_NATIVE_FUSED_STEP"] = old_disable_fused
 
-    _print_results(results)
-    if len(results) > 1:
-        best = max(results, key=lambda result: result.steps_per_second)
-        speedup = best.steps_per_second / results[0].steps_per_second
-        print(f"\nbest={best.name} speedup={speedup:.2f}x")
+    print(
+        f"{result.name}: {result.steps_per_second:.1f} steps/s "
+        f"({result.steps} steps in {result.seconds:.2f}s)",
+    )
     return 0
 
 
