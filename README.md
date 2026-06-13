@@ -1,35 +1,26 @@
 <div align="center">
-  <img src="./logo.png" alt="stable-retro-apple-silicon" width="512" />
+  <img src="./logo.png" alt="stable-retro-turbo" width="512" />
 
-  **🎮 Working Apple Silicon builds for stable-retro 🍎**
+  **Fast Python 3.14 wheels for stable-retro RL workloads**
 </div>
 
-`stable-retro-apple-silicon` publishes installable macOS Apple Silicon and Linux wheels for the upstream [`stable-retro`](https://github.com/Farama-Foundation/stable-retro) API surface.
+`stable-retro-turbo` publishes installable macOS Apple Silicon and Linux wheels for the upstream [`stable-retro`](https://github.com/Farama-Foundation/stable-retro) API surface.
 
 Use it when you want `stable_retro` game environments without building the package and bundled public libretro cores from source yourself.
 
 ## What changed from upstream
 
-This fork keeps the upstream `stable_retro` API, but adds packaging and RL
-throughput work aimed at Atari-style PPO/A2C rollouts on macOS Apple Silicon and
-Linux:
+This fork keeps the upstream `stable_retro` API and adds a small set of
+RL-throughput features:
 
-- Python `3.14` wheels are published for macOS `arm64` and Linux `x86_64`.
-- Public wheels bundle the Game Boy, NES, SNES, and Genesis/Master System cores
-  used by common training workloads.
-- Image preprocessing can run inside each environment worker: crop, resize,
-  grayscale, frame skip, frame stack, max-pool the last two skipped frames,
+- Python `3.14` wheels for macOS `arm64` and Linux `x86_64`.
+- Bundled Game Boy, NES, SNES, and Genesis/Master System public cores.
+- Worker-local crop, resize, grayscale, frame skip, frame stack, max-pool,
   no-op reset, sticky actions, and reward clipping.
-- The hot image path has native C++ helpers for screen processing and fused
-  `step_repeat_and_process()` execution, avoiding Python image loops for the
-  common single-player RGB observation case.
-- `StableRetroSubprocVecEnv` uses shared memory for observations, so workers do
-  not pickle and pipe full image arrays back to the parent every step.
-- `STABLE_RETRO_DISABLE_AUDIO=1` skips audio capture/generation when the agent
-  only needs RGB observations.
-- Benchmark tooling in `scripts/benchmark_vec_env.py` compares baseline
-  `SubprocVecEnv`, worker-side preprocessing, native preprocessing, fused native
-  stepping, shared-memory vectorization, and experimental chunked workers.
+- Native C++ screen processing and fused `step_repeat_and_process()`.
+- `StableRetroSubprocVecEnv` shared-memory observations to reduce IPC copying.
+- `STABLE_RETRO_DISABLE_AUDIO=1` for RGB-only agents.
+- `scripts/benchmark_vec_env.py` for baseline versus optimized throughput runs.
 
 In local Mario benchmarks using `SuperMarioBros-Nes-v0`, the optimized path was
 materially faster than the baseline Python/SB3 vector setup. The best measured
@@ -42,7 +33,7 @@ native frontend.
 ## Install
 
 ```bash
-python -m pip install stable-retro-apple-silicon
+python -m pip install stable-retro-turbo
 ```
 
 Use it from Python:
@@ -181,8 +172,8 @@ import retro
 For local development:
 
 ```bash
-git clone https://github.com/tsilva/stable-retro-apple-silicon.git
-cd stable-retro-apple-silicon
+git clone https://github.com/tsilva/stable-retro-turbo.git
+cd stable-retro-turbo
 brew install cmake pkg-config lua@5.4 libzip
 python -m pip install -U pip build cibuildwheel pytest pre-commit
 python -m pip install -e .
@@ -191,7 +182,7 @@ python -m pip install -e .
 ## Commands
 
 ```bash
-python -m pip install stable-retro-apple-silicon  # install the published package
+python -m pip install stable-retro-turbo          # install the published package
 python -m pip install -e .                        # build and install this checkout
 python -m build --wheel                           # build a local wheel
 python -m cibuildwheel . --output-dir wheelhouse  # build release-style wheels
@@ -204,7 +195,7 @@ python scripts/benchmark_vec_env.py --game SuperMarioBros-Nes-v0 --num-envs 8
 ## Notes
 
 - Published wheels target Apple Silicon `arm64` on macOS `14.0+` and `x86_64` on Linux, for Python `3.14`.
-- Package versions follow the upstream `stable-retro` base version with this fork's patch number as a PEP 440 post-release suffix, for example `1.0.0.post20`.
+- Package versions follow the upstream `stable-retro` base version with this fork's patch number as a PEP 440 post-release suffix, for example `1.0.0.post1`.
 - The public wheel build includes Game Boy, NES, SNES, and Sega Master System cores: `gambatte`, `fceumm`, `snes9x`, and `genesis_plus_gx`.
 - CapnProto is disabled in the public wheel build path.
 - SNES on Apple Silicon uses an automatic Rosetta helper because the native arm64 `snes9x` path is not stable across the bundled integrations.
@@ -220,7 +211,7 @@ softwareupdate --install-rosetta --agree-to-license
 
 ## Architecture
 
-![stable-retro-apple-silicon architecture diagram](./architecture.png)
+![stable-retro-turbo architecture diagram](./architecture.png)
 
 ## License
 
