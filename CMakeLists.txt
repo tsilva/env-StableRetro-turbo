@@ -153,6 +153,15 @@ else()
     WORKING_DIRECTORY "${LUA_INCLUDE_DIRS}")
 endif()
 
+set(LUA_LINK_LIBRARY ${LUA_LIBRARY})
+if(BUILD_LUAJIT AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  # LuaJIT's standard libraries are opened dynamically through luaopen_* entry
+  # points. Force the static archive into the Python extension so clean Linux
+  # environments do not need a separate Lua runtime preload.
+  set(LUA_LINK_LIBRARY -Wl,--whole-archive ${LUA_LIBRARY}
+                       -Wl,--no-whole-archive)
+endif()
+
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
   set(STATIC_LDFLAGS "-static-libstdc++ -Wl,--exclude-libs,ALL")
 endif()
@@ -464,7 +473,7 @@ add_library(
   ${HWRENDER_SOURCES}
   ${LUA_LIBRARY})
 target_link_libraries(retro-base ${ZLIB_LIBRARY} ${LIBZIP_LIBRARIES}
-                      ${LUA_LIBRARY} ${LUA_LIBRRAY} ${HWRENDER_LIBRARIES})
+                      ${LUA_LIBRARY} ${HWRENDER_LIBRARIES})
 if(CORE_TARGETS)
   add_dependencies(retro-base ${CORE_TARGETS})
 endif()
@@ -503,8 +512,8 @@ if(BUILD_PYTHON)
     set(PYBIND_LIBS "${Python_LIBRARY}")
   endif()
 
-  target_link_libraries(stable_retro retro-base ${PYBIND_LIBS}
-                        ${STATIC_LDFLAGS})
+  target_link_libraries(stable_retro retro-base ${LUA_LINK_LIBRARY}
+                        ${PYBIND_LIBS} ${STATIC_LDFLAGS})
 endif()
 
 if(BUILD_TESTS)
