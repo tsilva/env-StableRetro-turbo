@@ -413,6 +413,34 @@ void AddressSpace::clone() {
 	}
 }
 
+void AddressSpace::copyFrom(const AddressSpace& as) {
+	if (!as.ok()) {
+		reset();
+		return;
+	}
+	if (!m_overlay || !as.m_overlay || m_overlay->width != as.m_overlay->width || m_blocks.size() != as.m_blocks.size()) {
+		clone(as);
+		return;
+	}
+	auto dst = m_blocks.begin();
+	auto src = as.m_blocks.begin();
+	for (; src != as.m_blocks.end(); ++src, ++dst) {
+		if (dst == m_blocks.end() || dst->first != src->first || dst->second.size() != src->second.size()) {
+			clone(as);
+			return;
+		}
+	}
+	dst = m_blocks.begin();
+	for (src = as.m_blocks.begin(); src != as.m_blocks.end(); ++src, ++dst) {
+		dst->second.clone(src->second);
+	}
+}
+
+void AddressSpace::swapWith(AddressSpace& as) {
+	m_blocks.swap(as.m_blocks);
+	m_overlay.swap(as.m_overlay);
+}
+
 void AddressSpace::setOverlay(const MemoryOverlay& overlay) {
 	m_overlay = make_unique<MemoryOverlay>(overlay);
 }

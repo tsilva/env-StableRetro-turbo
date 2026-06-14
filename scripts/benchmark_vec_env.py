@@ -106,23 +106,25 @@ def _parse_state(value, retro, *, allow_state_none: bool):
     return normalized
 
 
-def _sample_actions(env):
+def _sample_actions(env, fixed_actions=None):
+    if fixed_actions is not None:
+        return fixed_actions
     import numpy as np
 
     return np.asarray([env.action_space.sample() for _ in range(env.num_envs)])
 
 
-def _run_vec(name, env, seconds, warmup_steps) -> Result:
+def _run_vec(name, env, seconds, warmup_steps, fixed_actions=None) -> Result:
     env.reset()
     for _ in range(warmup_steps):
-        env.step(_sample_actions(env))
+        env.step(_sample_actions(env, fixed_actions))
     steps = 0
     start = time.perf_counter()
     while True:
         elapsed = time.perf_counter() - start
         if elapsed >= seconds:
             break
-        env.step(_sample_actions(env))
+        env.step(_sample_actions(env, fixed_actions))
         steps += env.num_envs
     elapsed = time.perf_counter() - start
     env.close()
@@ -178,7 +180,13 @@ def main(argv=None) -> int:
     parser.add_argument("--frame-stack", type=int, default=None)
     parser.add_argument("--obs-crop", default=None)
     parser.add_argument("--resize-algorithm", default=None)
+    parser.add_argument(
+        "--info-mode",
+        choices=("terminal", "all", "none"),
+        default="terminal",
+    )
     parser.add_argument("--no-maxpool-last-two", action="store_true")
+    parser.add_argument("--fixed-actions", action="store_true")
     parser.add_argument("--copy-observations", action="store_true")
     parser.add_argument(
         "--dry-run",
@@ -213,19 +221,19 @@ def main(argv=None) -> int:
     state = _parse_state(state_value, retro, allow_state_none=args.allow_state_none)
     game = profile.game if args.game is None else args.game
     if args.rom_path is not None:
-        if not args.allow_state_none:
-            raise SystemExit(
-                "--rom-path implies a direct-ROM State.NONE benchmark. Pass "
-                "--allow-state-none only for low-level diagnostics; standardized "
-                "benchmarks should use integration game states.",
-            )
         rom_path = str(Path(args.rom_path).resolve())
-        game = Path(rom_path).stem
-        state = retro.State.NONE
-        if args.info is None or args.scenario is None:
+        if state is retro.State.NONE and not args.allow_state_none:
+            raise SystemExit(
+                "State.NONE benchmarks are disabled by default. Use an actual "
+                "game state or pass --allow-state-none for low-level direct-ROM "
+                "diagnostics.",
+            )
+        if state is retro.State.NONE and args.game is None:
+            game = Path(rom_path).stem
+        if state is retro.State.NONE and (args.info is None or args.scenario is None):
             raise SystemExit("--rom-path requires --info and --scenario")
-        info = str(Path(args.info).resolve())
-        scenario = str(Path(args.scenario).resolve())
+        info = None if args.info is None else str(Path(args.info).resolve())
+        scenario = None if args.scenario is None else str(Path(args.scenario).resolve())
     else:
         rom_path = None
         info = None
@@ -260,15 +268,18 @@ def main(argv=None) -> int:
         "frame_skip": frame_skip,
         "frame_stack": frame_stack,
         "maxpool_last_two": maxpool_last_two,
+        "info_mode": args.info_mode,
     }
 
     state_label = "State.NONE" if state is retro.State.NONE else str(state)
+    action_label = "fixed" if args.fixed_actions else "sampled"
     print(
         f"profile={args.profile} game={game} state={state_label} "
         f"envs={num_envs} threads={num_threads or num_envs} "
         f"resize={resize} grayscale={grayscale} crop={obs_crop} "
         f"resize_algorithm={resize_algorithm} frame_skip={frame_skip} "
-        f"frame_stack={frame_stack}",
+        f"frame_stack={frame_stack} info_mode={args.info_mode} "
+        f"actions={action_label}",
     )
     if args.dry_run:
         return 0
@@ -288,11 +299,15 @@ def main(argv=None) -> int:
             num_threads=num_threads,
             copy_observations=args.copy_observations,
         )
+        fixed_actions = None
+        if args.fixed_actions:
+            fixed_actions = _sample_actions(env)
         result = _run_vec(
             "native_vec_fused",
             env,
             args.seconds,
             args.warmup_steps,
+            fixed_actions=fixed_actions,
         )
     finally:
         if old_disable_audio is None:

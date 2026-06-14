@@ -39,6 +39,14 @@ static retro_input_poll_t poll_cb = NULL;
 static retro_input_state_t input_cb = NULL;
 static retro_audio_sample_batch_t audio_batch_cb = NULL;
 static retro_environment_t environ_cb = NULL;
+static bool stable_retro_indexed_video = false;
+static const uint8_t *stable_retro_indexed_data = NULL;
+static const uint16_t *stable_retro_indexed_palette = NULL;
+static unsigned stable_retro_indexed_width = 0;
+static unsigned stable_retro_indexed_height = 0;
+static size_t stable_retro_indexed_pitch = 0;
+static bool stable_retro_indexed_raw_palette = false;
+static int stable_retro_indexed_deemp = 0;
 static bool use_overscan;
 static bool use_raw_palette;
 static bool use_par;
@@ -88,18 +96,6 @@ static bool stable_retro_audio_enabled(void)
    if (enabled != -1)
       return enabled;
    const char *value = getenv("STABLE_RETRO_DISABLE_AUDIO");
-   enabled = !value || !*value || !strcmp(value, "0") ||
-      !strcmp(value, "false") || !strcmp(value, "False") ||
-      !strcmp(value, "FALSE");
-   return enabled;
-}
-
-static bool stable_retro_video_enabled(void)
-{
-   static int enabled = -1;
-   if (enabled != -1)
-      return enabled;
-   const char *value = getenv("STABLE_RETRO_DISABLE_VIDEO");
    enabled = !value || !*value || !strcmp(value, "0") ||
       !strcmp(value, "false") || !strcmp(value, "False") ||
       !strcmp(value, "FALSE");
@@ -1329,15 +1325,57 @@ void retro_run(void)
       check_variables(false);
 
    FCEUD_UpdateInput();
-   FCEUI_Emulate(&gfx, &sound, &ssize, stable_retro_video_enabled() ? 0 : 1);
+   FCEUI_Emulate(&gfx, &sound, &ssize, 0);
 
    for (i = 0; i < ssize; i++)
       sound[i] = (sound[i] << 16) | (sound[i] & 0xffff);
 
    audio_batch_cb((const int16_t*)sound, ssize);
 
-   if (stable_retro_video_enabled())
-      retro_run_blit(gfx);
+   if (stable_retro_indexed_video)
+   {
+      stable_retro_indexed_width = use_overscan ? 256 : 240;
+      stable_retro_indexed_height = use_overscan ? 240 : 224;
+      stable_retro_indexed_pitch = 256;
+      stable_retro_indexed_data = use_overscan ? gfx : gfx + 8 + 256 * 8;
+      stable_retro_indexed_palette = retro_palette;
+      stable_retro_indexed_raw_palette = use_raw_palette;
+      stable_retro_indexed_deemp = 0;
+      if (use_raw_palette)
+      {
+         extern uint8 PPU[4];
+         stable_retro_indexed_deemp = (PPU[1] >> 5) << 2;
+      }
+      return;
+   }
+
+   retro_run_blit(gfx);
+}
+
+RETRO_API void stable_retro_set_indexed_video(bool enabled)
+{
+   stable_retro_indexed_video = enabled;
+}
+
+RETRO_API bool stable_retro_get_indexed_video(
+   const uint8_t **data,
+   const uint16_t **palette,
+   unsigned *width,
+   unsigned *height,
+   size_t *pitch,
+   bool *raw_palette,
+   int *deemp)
+{
+   if (!stable_retro_indexed_video || !stable_retro_indexed_data || !stable_retro_indexed_palette)
+      return false;
+   *data = stable_retro_indexed_data;
+   *palette = stable_retro_indexed_palette;
+   *width = stable_retro_indexed_width;
+   *height = stable_retro_indexed_height;
+   *pitch = stable_retro_indexed_pitch;
+   *raw_palette = stable_retro_indexed_raw_palette;
+   *deemp = stable_retro_indexed_deemp;
+   return true;
 }
 
 static unsigned serialize_size = 0;

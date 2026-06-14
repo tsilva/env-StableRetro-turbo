@@ -22,6 +22,7 @@ static inline T _hypot(T x, T y) {
 #include "movie-bk2.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <functional>
@@ -39,6 +40,20 @@ namespace py = pybind11;
 
 using std::string;
 using namespace Retro;
+
+struct AreaResizeBin {
+	long y0 = 0;
+	long y1 = 0;
+	long x0 = 0;
+	long x1 = 0;
+	uint32_t count = 1;
+};
+
+struct AreaResizePlan {
+	long dstH = 0;
+	long dstW = 0;
+	std::vector<AreaResizeBin> bins;
+};
 
 struct PyGameData;
 struct PyRetroEmulator {
@@ -82,6 +97,29 @@ struct PyRetroEmulator {
 			throw std::runtime_error("Unsupported image depth from core");
 		}
 		in.copyTo(&out);
+	}
+
+	void readRawFrame(std::vector<uint8_t>& raw) {
+		long h = m_re.getImageHeight();
+		const size_t pitch = static_cast<size_t>(m_re.getImagePitch());
+		const void* img = m_re.getImageData();
+		if (!img) {
+			for (int i = 0; i < 180 && !img; ++i) {
+				m_re.run();
+				img = m_re.getImageData();
+			}
+		}
+		if (!img) {
+			throw std::runtime_error(
+				"Core did not provide a CPU framebuffer. "
+				"This usually means the core is using hardware rendering, which stable-retro can't capture yet."
+			);
+		}
+		if (m_re.getImageDepth() != 16 && m_re.getImageDepth() != 32) {
+			throw std::runtime_error("Unsupported image depth from core");
+		}
+		raw.resize(static_cast<size_t>(h) * pitch);
+		std::memcpy(raw.data(), img, raw.size());
 	}
 
 	py::array_t<uint8_t> processRgbFrame(const std::vector<uint8_t>& rgb, py::object cropObj, py::object resizeObj, bool grayscale, const string& algorithm) {
@@ -841,6 +879,362 @@ void processRgbFrameToBuffer(
 	}
 }
 
+static inline void nativePixelChannels(
+	const uint8_t* raw,
+	size_t pitch,
+	int depth,
+	long y,
+	long x,
+	uint8_t& r,
+	uint8_t& g,
+	uint8_t& b
+) {
+	const uint8_t* row = raw + static_cast<size_t>(y) * pitch;
+	if (depth == 16) {
+		uint16_t rgb;
+		std::memcpy(&rgb, row + static_cast<size_t>(x) * 2, sizeof(rgb));
+		r = static_cast<uint8_t>((rgb & 0xF800) >> 8);
+		g = static_cast<uint8_t>((rgb & 0x07E0) >> 3);
+		b = static_cast<uint8_t>((rgb & 0x001F) << 3);
+		return;
+	}
+	uint32_t xrgb;
+	std::memcpy(&xrgb, row + static_cast<size_t>(x) * 4, sizeof(xrgb));
+	r = static_cast<uint8_t>(xrgb);
+	g = static_cast<uint8_t>(xrgb >> 8);
+	b = static_cast<uint8_t>(xrgb >> 16);
+}
+
+static inline uint8_t nativeGray(
+	const uint8_t* raw,
+	const uint8_t* maxRaw,
+	size_t pitch,
+	int depth,
+	long y,
+	long x
+) {
+	uint8_t r;
+	uint8_t g;
+	uint8_t b;
+	nativePixelChannels(raw, pitch, depth, y, x, r, g, b);
+	if (maxRaw) {
+		uint8_t r2;
+		uint8_t g2;
+		uint8_t b2;
+		nativePixelChannels(maxRaw, pitch, depth, y, x, r2, g2, b2);
+		r = std::max(r, r2);
+		g = std::max(g, g2);
+		b = std::max(b, b2);
+	}
+	return static_cast<uint8_t>((static_cast<uint32_t>(r) * 77 + static_cast<uint32_t>(g) * 150 + static_cast<uint32_t>(b) * 29 + 128) >> 8);
+}
+
+static inline uint8_t rgb565Gray(uint16_t rgb) {
+	const uint32_t r = (rgb & 0xF800) >> 8;
+	const uint32_t g = (rgb & 0x07E0) >> 3;
+	const uint32_t b = (rgb & 0x001F) << 3;
+	return static_cast<uint8_t>((r * 77 + g * 150 + b * 29 + 128) >> 8);
+}
+
+static inline uint8_t rgb565MaxGray(uint16_t rgb, uint16_t maxRgb) {
+	const uint32_t r = std::max<uint32_t>((rgb & 0xF800) >> 8, (maxRgb & 0xF800) >> 8);
+	const uint32_t g = std::max<uint32_t>((rgb & 0x07E0) >> 3, (maxRgb & 0x07E0) >> 3);
+	const uint32_t b = std::max<uint32_t>((rgb & 0x001F) << 3, (maxRgb & 0x001F) << 3);
+	return static_cast<uint8_t>((r * 77 + g * 150 + b * 29 + 128) >> 8);
+}
+
+static inline uint16_t indexedRgb565(const IndexedVideoFrame& frame, uint8_t pixel) {
+	if (frame.rawPalette) {
+		return static_cast<uint16_t>(frame.palette[pixel & 0x3F] | frame.deemp);
+	}
+	return frame.palette[pixel];
+}
+
+struct IndexedPaletteCache {
+	bool valid = false;
+	bool rawPalette = false;
+	int deemp = 0;
+	std::array<uint16_t, 256> palette{};
+	std::array<uint8_t, 256> gray{};
+	std::array<uint8_t, 65536> maxGray{};
+};
+
+void updateIndexedPaletteCache(const IndexedVideoFrame& frame, IndexedPaletteCache& cache) {
+	bool changed = !cache.valid || cache.rawPalette != frame.rawPalette || cache.deemp != frame.deemp;
+	if (!changed) {
+		for (size_t i = 0; i < cache.palette.size(); ++i) {
+			if (cache.palette[i] != frame.palette[i]) {
+				changed = true;
+				break;
+			}
+		}
+	}
+	if (!changed) {
+		return;
+	}
+	cache.valid = true;
+	cache.rawPalette = frame.rawPalette;
+	cache.deemp = frame.deemp;
+	for (size_t i = 0; i < cache.palette.size(); ++i) {
+		const uint16_t rgb = frame.rawPalette
+			? static_cast<uint16_t>(frame.palette[i & 0x3F] | frame.deemp)
+			: frame.palette[i];
+		cache.palette[i] = frame.palette[i];
+		cache.gray[i] = rgb565Gray(rgb);
+	}
+	for (size_t curr = 0; curr < 256; ++curr) {
+		const uint16_t currRgb = frame.rawPalette
+			? static_cast<uint16_t>(frame.palette[curr & 0x3F] | frame.deemp)
+			: frame.palette[curr];
+		uint8_t* row = cache.maxGray.data() + curr * 256;
+		for (size_t prev = 0; prev < 256; ++prev) {
+			const uint16_t prevRgb = frame.rawPalette
+				? static_cast<uint16_t>(frame.palette[prev & 0x3F] | frame.deemp)
+				: frame.palette[prev];
+			row[prev] = rgb565MaxGray(currRgb, prevRgb);
+		}
+	}
+}
+
+static inline uint8_t indexedGray(
+	const IndexedVideoFrame& frame,
+	const uint8_t* maxRaw,
+	long y,
+	long x
+) {
+	const uint8_t pixel = frame.data[static_cast<size_t>(y) * frame.pitch + static_cast<size_t>(x)];
+	if (maxRaw) {
+		const uint8_t maxPixel = maxRaw[static_cast<size_t>(y) * frame.pitch + static_cast<size_t>(x)];
+		const uint16_t curr = indexedRgb565(frame, pixel);
+		const uint16_t prev = indexedRgb565(frame, maxPixel);
+		return rgb565MaxGray(curr, prev);
+	}
+	return rgb565Gray(indexedRgb565(frame, pixel));
+}
+
+static inline uint8_t xrgb8888Gray(uint32_t xrgb) {
+	const uint32_t r = xrgb & 0xFF;
+	const uint32_t g = (xrgb >> 8) & 0xFF;
+	const uint32_t b = (xrgb >> 16) & 0xFF;
+	return static_cast<uint8_t>((r * 77 + g * 150 + b * 29 + 128) >> 8);
+}
+
+static inline uint8_t xrgb8888MaxGray(uint32_t xrgb, uint32_t maxXrgb) {
+	const uint32_t r = std::max<uint32_t>(xrgb & 0xFF, maxXrgb & 0xFF);
+	const uint32_t g = std::max<uint32_t>((xrgb >> 8) & 0xFF, (maxXrgb >> 8) & 0xFF);
+	const uint32_t b = std::max<uint32_t>((xrgb >> 16) & 0xFF, (maxXrgb >> 16) & 0xFF);
+	return static_cast<uint8_t>((r * 77 + g * 150 + b * 29 + 128) >> 8);
+}
+
+AreaResizePlan buildAreaResizePlan(long rawW, long rawH, const NativeCrop& crop, const NativeResize& resize) {
+	if (crop.top + crop.bottom >= rawH || crop.left + crop.right >= rawW) {
+		throw std::runtime_error("crop removes the entire observation");
+	}
+	const long srcH = rawH - crop.top - crop.bottom;
+	const long srcW = rawW - crop.left - crop.right;
+	const long dstH = resize.enabled ? resize.height : srcH;
+	const long dstW = resize.enabled ? resize.width : srcW;
+	if (dstH > srcH || dstW > srcW) {
+		throw std::runtime_error("area resize only supports downscaling");
+	}
+	AreaResizePlan plan;
+	plan.dstH = dstH;
+	plan.dstW = dstW;
+	plan.bins.reserve(static_cast<size_t>(dstH) * static_cast<size_t>(dstW));
+	for (long dy = 0; dy < dstH; ++dy) {
+		long y0 = (dy * srcH) / dstH;
+		long y1 = std::max<long>(((dy + 1) * srcH) / dstH, y0 + 1);
+		y1 = std::min(y1, srcH);
+		for (long dx = 0; dx < dstW; ++dx) {
+			long x0 = (dx * srcW) / dstW;
+			long x1 = std::max<long>(((dx + 1) * srcW) / dstW, x0 + 1);
+			x1 = std::min(x1, srcW);
+			AreaResizeBin bin;
+			bin.y0 = crop.top + y0;
+			bin.y1 = crop.top + y1;
+			bin.x0 = crop.left + x0;
+			bin.x1 = crop.left + x1;
+			bin.count = static_cast<uint32_t>((y1 - y0) * (x1 - x0));
+			plan.bins.push_back(bin);
+		}
+	}
+	return plan;
+}
+
+void processNativeGrayscaleAreaPlanToBuffer(
+	const uint8_t* raw,
+	const uint8_t* maxRaw,
+	size_t pitch,
+	int depth,
+	const AreaResizePlan& plan,
+	uint8_t* dst
+) {
+	if (depth == 16) {
+		for (size_t i = 0; i < plan.bins.size(); ++i) {
+			const AreaResizeBin& bin = plan.bins[i];
+			uint32_t sum = 0;
+			for (long sy = bin.y0; sy < bin.y1; ++sy) {
+				const uint8_t* row = raw + static_cast<size_t>(sy) * pitch;
+				const uint8_t* maxRow = maxRaw ? maxRaw + static_cast<size_t>(sy) * pitch : nullptr;
+				for (long sx = bin.x0; sx < bin.x1; ++sx) {
+					uint16_t rgb;
+					std::memcpy(&rgb, row + static_cast<size_t>(sx) * 2, sizeof(rgb));
+					if (maxRow) {
+						uint16_t maxRgb;
+						std::memcpy(&maxRgb, maxRow + static_cast<size_t>(sx) * 2, sizeof(maxRgb));
+						sum += rgb565MaxGray(rgb, maxRgb);
+					} else {
+						sum += rgb565Gray(rgb);
+					}
+				}
+			}
+			dst[i] = static_cast<uint8_t>(sum / bin.count);
+		}
+		return;
+	}
+	if (depth == 32) {
+		for (size_t i = 0; i < plan.bins.size(); ++i) {
+			const AreaResizeBin& bin = plan.bins[i];
+			uint32_t sum = 0;
+			for (long sy = bin.y0; sy < bin.y1; ++sy) {
+				const uint8_t* row = raw + static_cast<size_t>(sy) * pitch;
+				const uint8_t* maxRow = maxRaw ? maxRaw + static_cast<size_t>(sy) * pitch : nullptr;
+				for (long sx = bin.x0; sx < bin.x1; ++sx) {
+					uint32_t xrgb;
+					std::memcpy(&xrgb, row + static_cast<size_t>(sx) * 4, sizeof(xrgb));
+					if (maxRow) {
+						uint32_t maxXrgb;
+						std::memcpy(&maxXrgb, maxRow + static_cast<size_t>(sx) * 4, sizeof(maxXrgb));
+						sum += xrgb8888MaxGray(xrgb, maxXrgb);
+					} else {
+						sum += xrgb8888Gray(xrgb);
+					}
+				}
+			}
+			dst[i] = static_cast<uint8_t>(sum / bin.count);
+		}
+		return;
+	}
+	throw std::runtime_error("Unsupported image depth from core");
+}
+
+void processIndexedGrayscaleAreaPlanToBuffer(
+	const IndexedVideoFrame& frame,
+	const uint8_t* maxRaw,
+	IndexedPaletteCache* cache,
+	const AreaResizePlan& plan,
+	uint8_t* dst
+) {
+	if (cache) {
+		updateIndexedPaletteCache(frame, *cache);
+		const uint8_t* gray = cache->gray.data();
+		const uint8_t* maxGray = cache->maxGray.data();
+		for (size_t i = 0; i < plan.bins.size(); ++i) {
+			const AreaResizeBin& bin = plan.bins[i];
+			uint32_t sum = 0;
+			for (long sy = bin.y0; sy < bin.y1; ++sy) {
+				const uint8_t* row = frame.data + static_cast<size_t>(sy) * frame.pitch;
+				const uint8_t* maxRow = maxRaw ? maxRaw + static_cast<size_t>(sy) * frame.pitch : nullptr;
+				for (long sx = bin.x0; sx < bin.x1; ++sx) {
+					const uint8_t pixel = row[sx];
+					sum += maxRow ? maxGray[(static_cast<size_t>(pixel) << 8) | maxRow[sx]] : gray[pixel];
+				}
+			}
+			dst[i] = static_cast<uint8_t>(sum / bin.count);
+		}
+		return;
+	}
+	for (size_t i = 0; i < plan.bins.size(); ++i) {
+		const AreaResizeBin& bin = plan.bins[i];
+		uint32_t sum = 0;
+		for (long sy = bin.y0; sy < bin.y1; ++sy) {
+			for (long sx = bin.x0; sx < bin.x1; ++sx) {
+				sum += indexedGray(frame, maxRaw, sy, sx);
+			}
+		}
+		dst[i] = static_cast<uint8_t>(sum / bin.count);
+	}
+}
+
+void processNativeGrayscaleFrameToBuffer(
+	const uint8_t* raw,
+	const uint8_t* maxRaw,
+	long rawW,
+	long rawH,
+	size_t pitch,
+	int depth,
+	const NativeCrop& crop,
+	const NativeResize& resize,
+	const string& algorithm,
+	uint8_t* dst
+) {
+	if (crop.top + crop.bottom >= rawH || crop.left + crop.right >= rawW) {
+		throw std::runtime_error("crop removes the entire observation");
+	}
+	if (depth != 16 && depth != 32) {
+		throw std::runtime_error("Unsupported image depth from core");
+	}
+	const long srcH = rawH - crop.top - crop.bottom;
+	const long srcW = rawW - crop.left - crop.right;
+	const long dstH = resize.enabled ? resize.height : srcH;
+	const long dstW = resize.enabled ? resize.width : srcW;
+
+	auto srcGray = [&](long y, long x) -> uint8_t {
+		return nativeGray(raw, maxRaw, pitch, depth, crop.top + y, crop.left + x);
+	};
+	auto writePixel = [&](long y, long x, uint8_t value) {
+		dst[static_cast<size_t>(y) * static_cast<size_t>(dstW) + static_cast<size_t>(x)] = value;
+	};
+
+	if (algorithm == "area") {
+		if (dstH > srcH || dstW > srcW) {
+			throw std::runtime_error("area resize only supports downscaling");
+		}
+		for (long dy = 0; dy < dstH; ++dy) {
+			long y0 = (dy * srcH) / dstH;
+			long y1 = std::max<long>(((dy + 1) * srcH) / dstH, y0 + 1);
+			y1 = std::min(y1, srcH);
+			for (long dx = 0; dx < dstW; ++dx) {
+				long x0 = (dx * srcW) / dstW;
+				long x1 = std::max<long>(((dx + 1) * srcW) / dstW, x0 + 1);
+				x1 = std::min(x1, srcW);
+				uint32_t sum = 0;
+				for (long sy = y0; sy < y1; ++sy) {
+					for (long sx = x0; sx < x1; ++sx) {
+						sum += srcGray(sy, sx);
+					}
+				}
+				const uint32_t count = static_cast<uint32_t>((y1 - y0) * (x1 - x0));
+				writePixel(dy, dx, static_cast<uint8_t>(sum / count));
+			}
+		}
+		return;
+	}
+
+	const bool bilinear = algorithm == "bilinear";
+	for (long dy = 0; dy < dstH; ++dy) {
+		const float fy = dstH == 1 ? 0.0f : static_cast<float>(dy) * static_cast<float>(srcH - 1) / static_cast<float>(dstH - 1);
+		const long y0 = std::max<long>(0, std::min<long>(srcH - 1, static_cast<long>(std::floor(fy))));
+		const long y1 = std::min<long>(y0 + 1, srcH - 1);
+		const float wy = bilinear ? fy - static_cast<float>(y0) : 0.0f;
+		const long sy = bilinear ? y0 : static_cast<long>(fy);
+		for (long dx = 0; dx < dstW; ++dx) {
+			const float fx = dstW == 1 ? 0.0f : static_cast<float>(dx) * static_cast<float>(srcW - 1) / static_cast<float>(dstW - 1);
+			const long x0 = std::max<long>(0, std::min<long>(srcW - 1, static_cast<long>(std::floor(fx))));
+			const long x1 = std::min<long>(x0 + 1, srcW - 1);
+			const float wx = bilinear ? fx - static_cast<float>(x0) : 0.0f;
+			const long sx = bilinear ? x0 : static_cast<long>(fx);
+			if (!bilinear) {
+				writePixel(dy, dx, srcGray(sy, sx));
+			} else {
+				const float topPix = static_cast<float>(srcGray(y0, x0)) * (1.0f - wx) + static_cast<float>(srcGray(y0, x1)) * wx;
+				const float bottomPix = static_cast<float>(srcGray(y1, x0)) * (1.0f - wx) + static_cast<float>(srcGray(y1, x1)) * wx;
+				writePixel(dy, dx, static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, topPix * (1.0f - wy) + bottomPix * wy))));
+			}
+		}
+	}
+}
+
 class PyNativeVectorEnv {
 public:
 	PyNativeVectorEnv(
@@ -863,7 +1257,8 @@ public:
 		bool rewardClip,
 		float rewardClipLow,
 		float rewardClipHigh,
-		int numThreads
+		int numThreads,
+		const string& infoMode
 	)
 		: m_numButtons(numButtons)
 		, m_frameSkip(frameSkip)
@@ -879,6 +1274,8 @@ public:
 		, m_rewardClip(rewardClip)
 		, m_rewardClipLow(rewardClipLow)
 		, m_rewardClipHigh(rewardClipHigh)
+		, m_fullInfo(infoMode == "all")
+		, m_noInfo(infoMode == "none")
 		, m_numThreads(numThreads) {
 		if (numEnvs == 0) {
 			throw std::runtime_error("num_envs must be positive");
@@ -901,6 +1298,9 @@ public:
 		if (algorithm != "nearest" && algorithm != "bilinear" && algorithm != "area") {
 			throw std::runtime_error("algorithm must be nearest, bilinear, or area");
 		}
+		if (infoMode != "terminal" && infoMode != "all" && infoMode != "none") {
+			throw std::runtime_error("info_mode must be terminal, all, or none");
+		}
 		if (!initialStateObj.is_none()) {
 			m_initialState = py::bytes(initialStateObj);
 		}
@@ -908,6 +1308,9 @@ public:
 		m_slots.reserve(numEnvs);
 		for (size_t i = 0; i < numEnvs; ++i) {
 			auto slot = std::make_unique<Slot>(romPath, dataPath, scenarioPath, m_initialState, i);
+			if (m_grayscale && m_algorithm == "area") {
+				slot->usesIndexedVideo = slot->emulator->m_re.setIndexedVideoEnabled(true);
+			}
 			if (i == 0) {
 				const long rawW = slot->emulator->m_re.getImageWidth();
 				const long rawH = slot->emulator->m_re.getImageHeight();
@@ -922,11 +1325,29 @@ public:
 				m_singleObsSize = static_cast<size_t>(m_obsHeight) * static_cast<size_t>(m_obsWidth) * static_cast<size_t>(m_obsChannels);
 				m_stackedChannels = m_obsChannels * m_frameStack;
 				m_stackedObsSize = static_cast<size_t>(m_obsHeight) * static_cast<size_t>(m_obsWidth) * static_cast<size_t>(m_stackedChannels);
+				if (m_grayscale && m_algorithm == "area") {
+					m_grayscaleAreaPlan = buildAreaResizePlan(rawW, rawH, m_crop, m_resize);
+					m_useGrayscaleAreaPlan = true;
+				}
 			}
 			slot->frameStack.resize(static_cast<size_t>(m_frameStack) * m_singleObsSize);
+			slot->action.resize(static_cast<size_t>(m_numButtons));
 			slot->lastMask.assign(static_cast<size_t>(m_numButtons), 0);
 			m_slots.emplace_back(std::move(slot));
 		}
+		m_obsArray = py::array_t<uint8_t>(py::array::ShapeContainer{
+			static_cast<py::ssize_t>(m_slots.size()),
+			static_cast<py::ssize_t>(m_obsHeight),
+			static_cast<py::ssize_t>(m_obsWidth),
+			static_cast<py::ssize_t>(m_stackedChannels),
+		});
+		m_rewardArray = py::array_t<float>({ static_cast<py::ssize_t>(m_slots.size()) });
+		m_doneArray = py::array_t<bool>({ static_cast<py::ssize_t>(m_slots.size()) });
+		for (size_t i = 0; i < m_slots.size(); ++i) {
+			m_emptyInfos.append(py::dict());
+		}
+		m_errors.resize(m_slots.size());
+		m_terminalObservations.resize(m_slots.size());
 	}
 
 	py::tuple reset(py::object seedObj = py::none()) {
@@ -936,32 +1357,22 @@ public:
 				m_slots[i]->rng.seed(static_cast<uint32_t>(seed + i));
 			}
 		}
-		py::array_t<uint8_t> obs(py::array::ShapeContainer{
-			static_cast<py::ssize_t>(m_slots.size()),
-			static_cast<py::ssize_t>(m_obsHeight),
-			static_cast<py::ssize_t>(m_obsWidth),
-			static_cast<py::ssize_t>(m_stackedChannels),
-		});
-		uint8_t* obsData = obs.mutable_data();
-		std::vector<std::string> errors(m_slots.size());
+		uint8_t* obsData = m_obsArray.mutable_data();
+		clearErrors();
 		{
 			py::gil_scoped_release release;
 			batchThreadPool(m_numThreads).parallelFor(m_slots.size(), [&](size_t index) {
 				try {
 					resetSlot(*m_slots[index], obsData + index * m_stackedObsSize);
 				} catch (const std::exception& exc) {
-					errors[index] = exc.what();
+					m_errors[index] = exc.what();
 				} catch (...) {
-					errors[index] = "unknown native vector reset error";
+					m_errors[index] = "unknown native vector reset error";
 				}
 			});
 		}
-		throwFirstError(errors);
-		py::list infos;
-		for (size_t i = 0; i < m_slots.size(); ++i) {
-			infos.append(py::dict());
-		}
-		return py::make_tuple(obs, infos);
+		throwFirstError(m_errors);
+		return py::make_tuple(m_obsArray, m_emptyInfos);
 	}
 
 	py::tuple step(py::array_t<uint8_t> masks) {
@@ -972,59 +1383,57 @@ public:
 		if (mask.shape(1) != m_numButtons) {
 			throw std::runtime_error("actions second dimension must match num_buttons");
 		}
-		py::array_t<uint8_t> obs(py::array::ShapeContainer{
-			static_cast<py::ssize_t>(m_slots.size()),
-			static_cast<py::ssize_t>(m_obsHeight),
-			static_cast<py::ssize_t>(m_obsWidth),
-			static_cast<py::ssize_t>(m_stackedChannels),
-		});
-		py::array_t<float> rewardArray({ static_cast<py::ssize_t>(m_slots.size()) });
-		py::array_t<uint8_t> doneArray({ static_cast<py::ssize_t>(m_slots.size()) });
-		uint8_t* obsData = obs.mutable_data();
-		auto rewards = rewardArray.mutable_unchecked<1>();
-		auto dones = doneArray.mutable_unchecked<1>();
-		std::vector<std::string> errors(m_slots.size());
-		std::vector<std::vector<uint8_t>> terminalObservations(m_slots.size());
+		uint8_t* obsData = m_obsArray.mutable_data();
+		auto rewards = m_rewardArray.mutable_unchecked<1>();
+		auto dones = m_doneArray.mutable_unchecked<1>();
+		clearErrors();
+		clearTerminalObservations();
 		{
 			py::gil_scoped_release release;
 			batchThreadPool(m_numThreads).parallelFor(m_slots.size(), [&](size_t index) {
 				try {
 					StepOutput output;
-					std::vector<uint8_t> action(static_cast<size_t>(m_numButtons));
+					std::vector<uint8_t>& action = m_slots[index]->action;
 					for (int key = 0; key < m_numButtons; ++key) {
 						action[static_cast<size_t>(key)] = mask(static_cast<py::ssize_t>(index), key) ? 1 : 0;
 					}
-					stepSlot(*m_slots[index], action, obsData + index * m_stackedObsSize, output);
+					stepSlot(*m_slots[index], action, obsData + index * m_stackedObsSize, output, !m_noInfo);
 					rewards(static_cast<py::ssize_t>(index)) = output.reward;
-					dones(static_cast<py::ssize_t>(index)) = output.done ? 1 : 0;
+					dones(static_cast<py::ssize_t>(index)) = output.done;
 					if (output.done) {
-						terminalObservations[index] = std::move(output.terminalObservation);
+						m_terminalObservations[index] = std::move(output.terminalObservation);
 					}
 				} catch (const std::exception& exc) {
-					errors[index] = exc.what();
+					m_errors[index] = exc.what();
 				} catch (...) {
-					errors[index] = "unknown native vector step error";
+					m_errors[index] = "unknown native vector step error";
 				}
 			});
 		}
-		throwFirstError(errors);
+		throwFirstError(m_errors);
+		if (m_noInfo) {
+			return py::make_tuple(m_obsArray, m_rewardArray, m_doneArray, m_emptyInfos);
+		}
 		py::list infos;
 		for (size_t i = 0; i < m_slots.size(); ++i) {
-			py::dict info = m_slots[i]->data.lookupAll();
-			if (!terminalObservations[i].empty()) {
+			py::dict info = py::dict();
+			if (m_fullInfo || !m_terminalObservations[i].empty()) {
+				info = m_slots[i]->data.lookupAll();
+			}
+			if (!m_terminalObservations[i].empty()) {
 				py::array_t<uint8_t> terminal(py::array::ShapeContainer{
 					static_cast<py::ssize_t>(m_obsHeight),
 					static_cast<py::ssize_t>(m_obsWidth),
 					static_cast<py::ssize_t>(m_stackedChannels),
 				});
-				std::memcpy(terminal.mutable_data(), terminalObservations[i].data(), m_stackedObsSize);
+				std::memcpy(terminal.mutable_data(), m_terminalObservations[i].data(), m_stackedObsSize);
 				info["terminal_observation"] = terminal;
 				info["reset_info"] = py::dict();
 				info["TimeLimit.truncated"] = false;
 			}
 			infos.append(info);
 		}
-		return py::make_tuple(obs, rewardArray, doneArray, infos);
+		return py::make_tuple(m_obsArray, m_rewardArray, m_doneArray, infos);
 	}
 
 	py::tuple observationShape() const {
@@ -1042,8 +1451,16 @@ private:
 			, rng(static_cast<uint32_t>(0xC0D3u + index * 9973u)) {
 			emulator->configureData(data);
 			ScriptContext::reset();
-			if (!data.m_data.load(dataPath) || !data.m_scen.load(scenarioPath)) {
-				throw std::runtime_error("failed to load data or scenario");
+			if (!data.m_data.load(dataPath)) {
+				throw std::runtime_error("failed to load data");
+			}
+			std::vector<Variable> trackedVariables;
+			for (const auto& item : data.m_data.listVariables()) {
+				trackedVariables.push_back(item.second);
+			}
+			data.m_data.setTrackedVariables(trackedVariables);
+			if (!data.m_scen.load(scenarioPath)) {
+				throw std::runtime_error("failed to load scenario");
 			}
 			if (!initialState.empty() && !emulator->m_re.unserialize(initialState.data(), initialState.size())) {
 				throw std::runtime_error("failed to load initial state");
@@ -1056,8 +1473,16 @@ private:
 		std::unique_ptr<PyRetroEmulator> emulator;
 		PyGameData data;
 		std::vector<uint8_t> frameStack;
+		std::vector<uint8_t> singleObs;
+		std::vector<uint8_t> rgb;
+		std::vector<uint8_t> prevRaw;
+		std::vector<uint8_t> currRaw;
+		std::vector<uint8_t> prevIndexed;
+		IndexedPaletteCache indexedPaletteCache;
+		std::vector<uint8_t> action;
 		std::vector<uint8_t> lastMask;
 		bool hasLastMask = false;
+		bool usesIndexedVideo = false;
 		std::mt19937 rng;
 	};
 
@@ -1088,25 +1513,73 @@ private:
 		}
 	}
 
-	void readProcessedFrame(Slot& slot, std::vector<uint8_t>& singleObs) {
-		std::vector<uint8_t> rgb;
-		slot.emulator->readRgbFrame(rgb);
-		singleObs.resize(m_singleObsSize);
+	void readProcessedFrame(Slot& slot) {
+		slot.singleObs.resize(m_singleObsSize);
+		if (m_grayscale) {
+			IndexedVideoFrame indexedFrame;
+			if (slot.usesIndexedVideo && slot.emulator->m_re.getIndexedVideoFrame(indexedFrame) && m_useGrayscaleAreaPlan) {
+				processIndexedGrayscaleAreaPlanToBuffer(
+					indexedFrame,
+					nullptr,
+					&slot.indexedPaletteCache,
+					m_grayscaleAreaPlan,
+					slot.singleObs.data()
+				);
+				return;
+			}
+			const uint8_t* raw = static_cast<const uint8_t*>(slot.emulator->m_re.getImageData());
+			if (!raw) {
+				slot.emulator->readRawFrame(slot.currRaw);
+				raw = slot.currRaw.data();
+			}
+			if (m_useGrayscaleAreaPlan) {
+				processNativeGrayscaleAreaPlanToBuffer(
+					raw,
+					nullptr,
+					static_cast<size_t>(slot.emulator->m_re.getImagePitch()),
+					slot.emulator->m_re.getImageDepth(),
+					m_grayscaleAreaPlan,
+					slot.singleObs.data()
+				);
+				return;
+			}
+			processNativeGrayscaleFrameToBuffer(
+				raw,
+				nullptr,
+				slot.emulator->m_re.getImageWidth(),
+				slot.emulator->m_re.getImageHeight(),
+				static_cast<size_t>(slot.emulator->m_re.getImagePitch()),
+				slot.emulator->m_re.getImageDepth(),
+				m_crop,
+				m_resize,
+				m_algorithm,
+				slot.singleObs.data()
+			);
+			return;
+		}
+		slot.emulator->readRgbFrame(slot.rgb);
 		processRgbFrameToBuffer(
-			rgb,
+			slot.rgb,
 			slot.emulator->m_re.getImageWidth(),
 			slot.emulator->m_re.getImageHeight(),
 			m_crop,
 			m_resize,
 			m_grayscale,
 			m_algorithm,
-			singleObs.data()
+			slot.singleObs.data()
 		);
 	}
 
 	void resetFrameStack(Slot& slot, const std::vector<uint8_t>& singleObs) {
-		for (int frame = 0; frame < m_frameStack; ++frame) {
-			std::memcpy(slot.frameStack.data() + static_cast<size_t>(frame) * m_singleObsSize, singleObs.data(), m_singleObsSize);
+		const size_t pixelCount = static_cast<size_t>(m_obsHeight) * static_cast<size_t>(m_obsWidth);
+		const size_t channels = static_cast<size_t>(m_obsChannels);
+		const size_t stackedChannels = static_cast<size_t>(m_stackedChannels);
+		for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
+			const uint8_t* src = singleObs.data() + pixel * channels;
+			uint8_t* dst = slot.frameStack.data() + pixel * stackedChannels;
+			for (int frame = 0; frame < m_frameStack; ++frame) {
+				std::memcpy(dst + static_cast<size_t>(frame) * channels, src, channels);
+			}
 		}
 	}
 
@@ -1115,19 +1588,19 @@ private:
 			std::memcpy(slot.frameStack.data(), singleObs.data(), m_singleObsSize);
 			return;
 		}
-		std::memmove(slot.frameStack.data(), slot.frameStack.data() + m_singleObsSize, static_cast<size_t>(m_frameStack - 1) * m_singleObsSize);
-		std::memcpy(slot.frameStack.data() + static_cast<size_t>(m_frameStack - 1) * m_singleObsSize, singleObs.data(), m_singleObsSize);
+		const size_t pixelCount = static_cast<size_t>(m_obsHeight) * static_cast<size_t>(m_obsWidth);
+		const size_t channels = static_cast<size_t>(m_obsChannels);
+		const size_t stackedChannels = static_cast<size_t>(m_stackedChannels);
+		const size_t keptChannels = static_cast<size_t>(m_frameStack - 1) * channels;
+		for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
+			uint8_t* dst = slot.frameStack.data() + pixel * stackedChannels;
+			std::memmove(dst, dst + channels, keptChannels);
+			std::memcpy(dst + keptChannels, singleObs.data() + pixel * channels, channels);
+		}
 	}
 
 	void writeStackedObservation(const Slot& slot, uint8_t* dst) const {
-		const size_t pixelCount = static_cast<size_t>(m_obsHeight) * static_cast<size_t>(m_obsWidth);
-		for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
-			for (int frame = 0; frame < m_frameStack; ++frame) {
-				const uint8_t* src = slot.frameStack.data() + static_cast<size_t>(frame) * m_singleObsSize + pixel * static_cast<size_t>(m_obsChannels);
-				uint8_t* out = dst + pixel * static_cast<size_t>(m_stackedChannels) + static_cast<size_t>(frame) * static_cast<size_t>(m_obsChannels);
-				std::memcpy(out, src, static_cast<size_t>(m_obsChannels));
-			}
-		}
+		std::memcpy(dst, slot.frameStack.data(), m_stackedObsSize);
 	}
 
 	float clipReward(float reward) const {
@@ -1157,44 +1630,65 @@ private:
 			for (int i = 0; i < noopCount; ++i) {
 				slot.emulator->m_re.run();
 				slot.data.m_data.updateRam();
-				slot.data.m_scen.update();
+				slot.data.m_scen.update(1);
 				if (slot.data.m_scen.isDone()) {
 					break;
 				}
 			}
 		}
-		std::vector<uint8_t> singleObs;
-		readProcessedFrame(slot, singleObs);
-		resetFrameStack(slot, singleObs);
+		readProcessedFrame(slot);
+		resetFrameStack(slot, slot.singleObs);
 		writeStackedObservation(slot, dst);
 	}
 
-	void stepSlot(Slot& slot, const std::vector<uint8_t>& requestedAction, uint8_t* dst, StepOutput& output) {
-		std::vector<uint8_t> action = requestedAction;
-		if (slot.hasLastMask && m_stickyActionProb > 0.0) {
-			std::uniform_real_distribution<double> stickyDist(0.0, 1.0);
-			if (stickyDist(slot.rng) < m_stickyActionProb) {
-				action = slot.lastMask;
+	void stepSlot(Slot& slot, const std::vector<uint8_t>& requestedAction, uint8_t* dst, StepOutput& output, bool captureTerminalObservation) {
+		const std::vector<uint8_t>* action = &requestedAction;
+		if (m_stickyActionProb > 0.0) {
+			if (slot.hasLastMask) {
+				std::uniform_real_distribution<double> stickyDist(0.0, 1.0);
+				if (stickyDist(slot.rng) < m_stickyActionProb) {
+					action = &slot.lastMask;
+				}
 			}
+			slot.lastMask.assign(action->begin(), action->end());
+			slot.hasLastMask = true;
 		}
-		slot.lastMask = action;
-		slot.hasLastMask = true;
-		setKeys(slot, action);
+		setKeys(slot, *action);
 
 		bool done = false;
 		float totalReward = 0.0f;
 		bool sawFrame = false;
 		std::vector<uint8_t> prevRgb;
 		std::vector<uint8_t> currRgb;
+		slot.prevRaw.clear();
+		slot.prevIndexed.clear();
 		for (int i = 0; i < m_frameSkip; ++i) {
 			slot.emulator->m_re.run();
 			slot.data.m_data.updateRam();
-			slot.data.m_scen.update();
+			slot.data.m_scen.update(1);
 			totalReward += slot.data.m_scen.currentReward();
 			done = slot.data.m_scen.isDone();
 			if (m_maxpoolLastTwo && (i >= m_frameSkip - 2 || done)) {
-				prevRgb.swap(currRgb);
-				slot.emulator->readRgbFrame(currRgb);
+				if (m_grayscale) {
+					if (!done && i < m_frameSkip - 1) {
+						IndexedVideoFrame indexedFrame;
+						if (slot.usesIndexedVideo && slot.emulator->m_re.getIndexedVideoFrame(indexedFrame)) {
+							slot.prevIndexed.resize(static_cast<size_t>(indexedFrame.pitch) * static_cast<size_t>(indexedFrame.height));
+							for (unsigned row = 0; row < indexedFrame.height; ++row) {
+								std::memcpy(
+									slot.prevIndexed.data() + static_cast<size_t>(row) * indexedFrame.pitch,
+									indexedFrame.data + static_cast<size_t>(row) * indexedFrame.pitch,
+									indexedFrame.pitch
+								);
+							}
+						} else {
+							slot.emulator->readRawFrame(slot.prevRaw);
+						}
+					}
+				} else {
+					prevRgb.swap(currRgb);
+					slot.emulator->readRgbFrame(currRgb);
+				}
 				sawFrame = true;
 			}
 			if (done) {
@@ -1202,35 +1696,103 @@ private:
 			}
 		}
 
-		std::vector<uint8_t> singleObs(m_singleObsSize);
+		slot.singleObs.resize(m_singleObsSize);
 		if (!m_maxpoolLastTwo || !sawFrame) {
-			readProcessedFrame(slot, singleObs);
+			readProcessedFrame(slot);
 		} else {
-			if (!prevRgb.empty()) {
-				for (size_t i = 0; i < currRgb.size(); ++i) {
-					currRgb[i] = std::max(currRgb[i], prevRgb[i]);
+			if (m_grayscale) {
+				IndexedVideoFrame indexedFrame;
+				if (slot.usesIndexedVideo && slot.emulator->m_re.getIndexedVideoFrame(indexedFrame) && m_useGrayscaleAreaPlan) {
+					processIndexedGrayscaleAreaPlanToBuffer(
+						indexedFrame,
+						slot.prevIndexed.empty() ? nullptr : slot.prevIndexed.data(),
+						&slot.indexedPaletteCache,
+						m_grayscaleAreaPlan,
+						slot.singleObs.data()
+					);
+					pushFrame(slot, slot.singleObs);
+					output.reward = clipReward(totalReward);
+					output.done = done;
+					if (done && captureTerminalObservation) {
+						output.terminalObservation.resize(m_stackedObsSize);
+						writeStackedObservation(slot, output.terminalObservation.data());
+						resetSlot(slot, dst);
+					} else if (done) {
+						resetSlot(slot, dst);
+					} else {
+						writeStackedObservation(slot, dst);
+					}
+					return;
 				}
+				const uint8_t* raw = static_cast<const uint8_t*>(slot.emulator->m_re.getImageData());
+				if (!raw) {
+					slot.emulator->readRawFrame(slot.currRaw);
+					raw = slot.currRaw.data();
+				}
+				if (m_useGrayscaleAreaPlan) {
+					processNativeGrayscaleAreaPlanToBuffer(
+						raw,
+						slot.prevRaw.empty() ? nullptr : slot.prevRaw.data(),
+						static_cast<size_t>(slot.emulator->m_re.getImagePitch()),
+						slot.emulator->m_re.getImageDepth(),
+						m_grayscaleAreaPlan,
+						slot.singleObs.data()
+					);
+				} else {
+					processNativeGrayscaleFrameToBuffer(
+						raw,
+						slot.prevRaw.empty() ? nullptr : slot.prevRaw.data(),
+						slot.emulator->m_re.getImageWidth(),
+						slot.emulator->m_re.getImageHeight(),
+						static_cast<size_t>(slot.emulator->m_re.getImagePitch()),
+						slot.emulator->m_re.getImageDepth(),
+						m_crop,
+						m_resize,
+						m_algorithm,
+						slot.singleObs.data()
+					);
+				}
+			} else {
+				if (!prevRgb.empty()) {
+					for (size_t i = 0; i < currRgb.size(); ++i) {
+						currRgb[i] = std::max(currRgb[i], prevRgb[i]);
+					}
+				}
+				processRgbFrameToBuffer(
+					currRgb,
+					slot.emulator->m_re.getImageWidth(),
+					slot.emulator->m_re.getImageHeight(),
+					m_crop,
+					m_resize,
+					m_grayscale,
+					m_algorithm,
+					slot.singleObs.data()
+				);
 			}
-			processRgbFrameToBuffer(
-				currRgb,
-				slot.emulator->m_re.getImageWidth(),
-				slot.emulator->m_re.getImageHeight(),
-				m_crop,
-				m_resize,
-				m_grayscale,
-				m_algorithm,
-				singleObs.data()
-			);
 		}
-		pushFrame(slot, singleObs);
+		pushFrame(slot, slot.singleObs);
 		output.reward = clipReward(totalReward);
 		output.done = done;
-		if (done) {
+		if (done && captureTerminalObservation) {
 			output.terminalObservation.resize(m_stackedObsSize);
 			writeStackedObservation(slot, output.terminalObservation.data());
 			resetSlot(slot, dst);
+		} else if (done) {
+			resetSlot(slot, dst);
 		} else {
 			writeStackedObservation(slot, dst);
+		}
+	}
+
+	void clearErrors() {
+		for (std::string& error : m_errors) {
+			error.clear();
+		}
+	}
+
+	void clearTerminalObservations() {
+		for (std::vector<uint8_t>& terminalObservation : m_terminalObservations) {
+			terminalObservation.clear();
 		}
 	}
 
@@ -1258,6 +1820,8 @@ private:
 	bool m_rewardClip = false;
 	float m_rewardClipLow = -1.0f;
 	float m_rewardClipHigh = 1.0f;
+	bool m_fullInfo = false;
+	bool m_noInfo = false;
 	int m_numThreads = 1;
 	long m_obsHeight = 0;
 	long m_obsWidth = 0;
@@ -1265,6 +1829,14 @@ private:
 	int m_stackedChannels = 0;
 	size_t m_singleObsSize = 0;
 	size_t m_stackedObsSize = 0;
+	bool m_useGrayscaleAreaPlan = false;
+	AreaResizePlan m_grayscaleAreaPlan;
+	py::array_t<uint8_t> m_obsArray;
+	py::array_t<float> m_rewardArray;
+	py::array_t<bool> m_doneArray;
+	py::list m_emptyInfos;
+	std::vector<std::string> m_errors;
+	std::vector<std::vector<uint8_t>> m_terminalObservations;
 };
 
 	py::tuple PyRetroEmulator::stepRepeatAndProcess(PyGameData& data, py::array_t<uint8_t> mask, int repeats, py::object cropObj, py::object resizeObj, bool grayscale, const string& algorithm, bool maxpoolLastTwo) {
@@ -1477,7 +2049,8 @@ PYBIND11_MODULE(_retro, m) {
 				bool,
 				float,
 				float,
-				int>(),
+				int,
+				const string&>(),
 			py::arg("num_envs"),
 			py::arg("rom_path"),
 			py::arg("data_path"),
@@ -1497,7 +2070,8 @@ PYBIND11_MODULE(_retro, m) {
 			py::arg("reward_clip"),
 			py::arg("reward_clip_low"),
 			py::arg("reward_clip_high"),
-			py::arg("num_threads") = 0
+			py::arg("num_threads") = 0,
+			py::arg("info_mode") = "terminal"
 		)
 		.def("reset", &PyNativeVectorEnv::reset, py::arg("seed") = py::none())
 		.def("step", &PyNativeVectorEnv::step)

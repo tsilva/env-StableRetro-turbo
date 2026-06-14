@@ -179,3 +179,5 @@ third-party/libzip/src/ziptool
 
 # PyPI verification
 pypi-proof/
+
+artifacts/

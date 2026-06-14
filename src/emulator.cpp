@@ -148,7 +148,6 @@ static string copyCoreForIsolation(const string& corePath) {
 
 Emulator::Emulator() {
 	m_audioEnabled = !envFlagEnabled("STABLE_RETRO_DISABLE_AUDIO");
-	m_videoEnabled = !envFlagEnabled("STABLE_RETRO_DISABLE_VIDEO");
 }
 
 Emulator::~Emulator() {
@@ -472,6 +471,8 @@ bool Emulator::loadCore(const string& corePath) {
 	m_retro_set_audio_sample_batch = reinterpret_cast<void (*)(retro_audio_sample_batch_t)>(GETSYM(m_coreHandle, "retro_set_audio_sample_batch"));
 	m_retro_set_input_poll = reinterpret_cast<void (*)(retro_input_poll_t)>(GETSYM(m_coreHandle, "retro_set_input_poll"));
 	m_retro_set_input_state = reinterpret_cast<void (*)(short (*)(unsigned int, unsigned int, unsigned int, unsigned int))>(GETSYM(m_coreHandle, "retro_set_input_state"));
+	m_stable_retro_set_indexed_video = reinterpret_cast<void (*)(bool)>(GETSYM(m_coreHandle, "stable_retro_set_indexed_video"));
+	m_stable_retro_get_indexed_video = reinterpret_cast<bool (*)(const uint8_t**, const uint16_t**, unsigned*, unsigned*, size_t*, bool*, int*)>(GETSYM(m_coreHandle, "stable_retro_get_indexed_video"));
 
 	// The default according to the docs
 	m_imgDepth = 15;
@@ -497,6 +498,29 @@ bool Emulator::loadCore(const string& corePath) {
 		}
 
 	return true;
+}
+
+bool Emulator::setIndexedVideoEnabled(bool enabled) {
+	if (!m_stable_retro_set_indexed_video || !m_stable_retro_get_indexed_video) {
+		return false;
+	}
+	m_stable_retro_set_indexed_video(enabled);
+	return true;
+}
+
+bool Emulator::getIndexedVideoFrame(IndexedVideoFrame& frame) {
+	if (!m_stable_retro_get_indexed_video) {
+		return false;
+	}
+	return m_stable_retro_get_indexed_video(
+		&frame.data,
+		&frame.palette,
+		&frame.width,
+		&frame.height,
+		&frame.pitch,
+		&frame.rawPalette,
+		&frame.deemp
+	) && frame.data && frame.palette && frame.width && frame.height && frame.pitch;
 }
 
 void Emulator::fixScreenSize(const string& romName) {
@@ -605,6 +629,32 @@ bool Emulator::cbEnvironment(unsigned cmd, void* data) {
 			break;
 		}
 		return true;
+	case RETRO_ENVIRONMENT_GET_CURRENT_SOFTWARE_FRAMEBUFFER: {
+		auto* framebuffer = reinterpret_cast<retro_framebuffer*>(data);
+		if (!framebuffer || !framebuffer->width || !framebuffer->height) {
+			return false;
+		}
+		size_t bytesPerPixel = 0;
+		switch (emulator->m_imgDepth) {
+		case 16:
+			bytesPerPixel = 2;
+			framebuffer->format = RETRO_PIXEL_FORMAT_RGB565;
+			break;
+		case 32:
+			bytesPerPixel = 4;
+			framebuffer->format = RETRO_PIXEL_FORMAT_XRGB8888;
+			break;
+		default:
+			return false;
+		}
+		const size_t rowBytes = static_cast<size_t>(framebuffer->width) * bytesPerPixel;
+		const size_t bytes = rowBytes * static_cast<size_t>(framebuffer->height);
+		emulator->m_softwareFramebuffer.resize(bytes);
+		framebuffer->data = emulator->m_softwareFramebuffer.data();
+		framebuffer->pitch = rowBytes;
+		framebuffer->memory_flags = 0;
+		return true;
+	}
 	case RETRO_ENVIRONMENT_SET_VARIABLES: {
 		auto* vars = reinterpret_cast<const retro_variable*>(data);
 		if (!vars) {
@@ -728,9 +778,6 @@ void Emulator::cbVideoRefresh(const void* data, unsigned width, unsigned height,
 			emulator->m_avInfo.geometry.max_height = height;
 		}
 	}
-	if (!emulator->m_videoEnabled) {
-		return;
-	}
 	// Hardware rendering: the core is signaling that the framebuffer lives on the GPU.
 	if (data == RETRO_HW_FRAME_BUFFER_VALID) {
 #ifdef ENABLE_HW_RENDER
@@ -773,6 +820,16 @@ void Emulator::cbVideoRefresh(const void* data, unsigned width, unsigned height,
 		pitch = row_bytes;
 	}
 	if (pitch < row_bytes) {
+		if (data == emulator->m_softwareFramebuffer.data()) {
+			pitch = row_bytes;
+		} else {
+			return;
+		}
+	}
+
+	if (data == emulator->m_softwareFramebuffer.data() && pitch == row_bytes) {
+		emulator->m_imgData = data;
+		emulator->m_imgPitch = row_bytes;
 		return;
 	}
 

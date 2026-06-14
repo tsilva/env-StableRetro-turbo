@@ -29,6 +29,16 @@ namespace Retro {
 const int N_BUTTONS = 16;
 const int MAX_PLAYERS = 2;
 
+struct IndexedVideoFrame {
+	const uint8_t* data = nullptr;
+	const uint16_t* palette = nullptr;
+	unsigned width = 0;
+	unsigned height = 0;
+	size_t pitch = 0;
+	bool rawPalette = false;
+	int deemp = 0;
+};
+
 class GameData;
 class Emulator {
 public:
@@ -48,6 +58,8 @@ public:
 	int getImageWidth() { return m_avInfo.geometry.base_width; }
 	int getImagePitch() { return m_imgPitch; }
 	int getImageDepth() { return m_imgDepth; }
+	bool setIndexedVideoEnabled(bool enabled);
+	bool getIndexedVideoFrame(IndexedVideoFrame& frame);
 	int getRotation() const { return m_rotation; }
 	bool isHWRenderEnabled() const;
 	double getFrameRate() { return m_avInfo.timing.fps; }
@@ -94,11 +106,11 @@ private:
 	size_t m_imgPitch = 0;
 	int m_imgDepth = 0;
 	std::vector<uint8_t> m_imgBuffer;
+	std::vector<uint8_t> m_softwareFramebuffer;
 
 	// Audio buffer; accumulated during run()
 	std::vector<int16_t> m_audioData;
 	bool m_audioEnabled = true;
-	bool m_videoEnabled = true;
 	AddressSpace* m_addressSpace = nullptr;
 
 	retro_system_av_info m_avInfo = {};
@@ -136,6 +148,8 @@ private:
 	void (*m_retro_set_audio_sample_batch)(retro_audio_sample_batch_t) = nullptr;
 	void (*m_retro_set_input_poll)(retro_input_poll_t) = nullptr;
 	void (*m_retro_set_input_state)(retro_input_state_t) = nullptr;
+	void (*m_stable_retro_set_indexed_video)(bool) = nullptr;
+	bool (*m_stable_retro_get_indexed_video)(const uint8_t**, const uint16_t**, unsigned*, unsigned*, size_t*, bool*, int*) = nullptr;
 
 	bool m_romLoaded = false;
 	std::string m_core;

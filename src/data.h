@@ -43,6 +43,7 @@ public:
 
 	Datum lookupValue(const std::string& name);
 	Variant lookupValue(const std::string& name) const;
+	int64_t lookupValue(const Variable&) const;
 	Datum lookupValue(const TypedSearchResult&);
 	int64_t lookupValue(const TypedSearchResult&) const;
 	std::unordered_map<std::string, Datum> lookupAll();
@@ -52,12 +53,17 @@ public:
 	void setValue(const std::string& name, const Variant&);
 
 	int64_t lookupDelta(const std::string& name) const;
+	int64_t lookupDelta(const Variable&) const;
 
 	Variable getVariable(const std::string& name) const;
 	void setVariable(const std::string& name, const Variable&);
 	void removeVariable(const std::string& name);
 
 	std::unordered_map<std::string, Variable> listVariables() const;
+	void setTrackedVariables(const std::vector<Variable>& variables);
+	size_t trackedVariableIndex(const Variable& variable) const;
+	int64_t lookupTrackedValue(size_t index) const;
+	int64_t lookupTrackedDelta(size_t index) const;
 	size_t numVariables() const;
 
 	void search(const std::string& name, int64_t value);
@@ -86,6 +92,10 @@ private:
 	std::unordered_map<std::string, Search> m_searches;
 	std::unordered_map<std::string, AddressSpace> m_searchOldMem;
 	std::unordered_map<std::string, std::unique_ptr<Variant>> m_customVars;
+	std::vector<Variable> m_trackedVariables;
+	std::vector<int64_t> m_trackedCurrentValues;
+	std::vector<int64_t> m_trackedLastValues;
+	bool m_trackedHasLastValues = false;
 };
 
 class Scenario {
@@ -106,7 +116,7 @@ public:
 
 	const GameData* data() const { return &m_data; }
 
-	void update();
+	void update(unsigned players = MAX_PLAYERS);
 	void restart();
 
 	float currentReward(unsigned player = 0) const;
@@ -164,6 +174,18 @@ public:
 		DoneCondition condition = DoneCondition::ANY;
 	};
 
+	struct ResolvedRewardSpec {
+		Variable variable;
+		RewardSpec spec;
+		size_t trackedIndex = static_cast<size_t>(-1);
+	};
+
+	struct ResolvedDoneSpec {
+		Variable variable;
+		DoneSpec spec;
+		size_t trackedIndex = static_cast<size_t>(-1);
+	};
+
 	struct CropInfo {
 		size_t x = 0;
 		size_t y = 0;
@@ -192,6 +214,7 @@ public:
 
 	std::pair<std::string, std::string> rewardFunction(unsigned player = 0) const { return m_rewardFunc[player]; }
 	std::pair<std::string, std::string> doneFunction() const { return m_doneFunc; }
+	RewardSpec rewardTime(unsigned player = 0) const { return m_rewardTime[player]; }
 
 	DoneCondition doneCondition() const { return m_doneCondition; }
 
@@ -200,6 +223,8 @@ private:
 
 	float calculateReward(unsigned player) const;
 	bool calculateDone() const;
+	void refreshResolvedRewardVariables(unsigned player);
+	void refreshResolvedDoneVariables();
 
 	GameData& m_data;
 	std::string m_base;
@@ -207,10 +232,12 @@ private:
 	std::vector<std::pair<std::string, std::string>> m_scripts;
 
 	std::unordered_map<std::string, RewardSpec> m_rewardVars[MAX_PLAYERS];
+	std::vector<ResolvedRewardSpec> m_resolvedRewardVars[MAX_PLAYERS];
 	RewardSpec m_rewardTime[MAX_PLAYERS];
 	std::pair<std::string, std::string> m_rewardFunc[MAX_PLAYERS];
 
 	std::unordered_map<std::string, DoneSpec> m_doneVars;
+	std::vector<ResolvedDoneSpec> m_resolvedDoneVars;
 	std::unordered_map<std::string, std::shared_ptr<DoneNode>> m_doneNodes;
 	DoneCondition m_doneCondition = DoneCondition::ANY;
 	std::pair<std::string, std::string> m_doneFunc;

@@ -51,6 +51,7 @@ class StableRetroNativeVecEnv(VecEnv):
         self._observations = None
 
         env_kwargs = dict(env_kwargs)
+        info_mode = str(env_kwargs.pop("info_mode", "terminal"))
         env_kwargs.setdefault("render_mode", "rgb_array")
         self.render_mode = env_kwargs["render_mode"]
         if env_kwargs.get("players", 1) != 1:
@@ -124,6 +125,7 @@ class StableRetroNativeVecEnv(VecEnv):
             float(reward_low),
             float(reward_high),
             int(num_threads),
+            info_mode,
         )
         super().__init__(int(num_envs), self.observation_space, self.action_space)
 

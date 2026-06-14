@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record a side-by-side video of a native vector env frame stack."""
+"""Record a video of native vector env observations."""
 
 from __future__ import annotations
 
@@ -42,15 +42,31 @@ def _sample_actions(env, rng: np.random.Generator) -> np.ndarray:
     return np.asarray([env.action_space.sample() for _ in range(env.num_envs)])
 
 
-def _stack_canvas(obs: np.ndarray, frame_idx: int, scale: int, footer: str) -> Image.Image:
-    if obs.ndim != 3 or obs.shape[-1] != 4:
-        raise ValueError(f"expected one stacked grayscale obs with shape HxWx4, got {obs.shape}")
+def _obs_canvas(obs: np.ndarray, frame_idx: int, scale: int, footer: str) -> Image.Image:
+    if obs.ndim != 3:
+        raise ValueError(f"expected one image observation with shape HxWxC, got {obs.shape}")
 
     height, width, channels = obs.shape
     panel_w = width * scale
     panel_h = height * scale
     top = 28
     bottom = 28
+    if channels == 3:
+        canvas = Image.new("RGB", (panel_w, panel_h + top + bottom), (14, 14, 14))
+        draw = ImageDraw.Draw(canvas)
+        frame = Image.fromarray(obs, mode="RGB")
+        frame = frame.resize((panel_w, panel_h), Image.Resampling.NEAREST)
+        canvas.paste(frame, (0, top))
+        draw.text((8, 8), "raw RGB", fill=(235, 235, 235))
+        draw.text(
+            (8, top + panel_h + 8),
+            f"{footer} | frame {frame_idx}",
+            fill=(220, 220, 220),
+        )
+        return canvas
+    if channels != 4:
+        raise ValueError(f"expected raw RGB HxWx3 or stacked grayscale HxWx4, got {obs.shape}")
+
     canvas = Image.new("RGB", (panel_w * channels, panel_h + top + bottom), (14, 14, 14))
     draw = ImageDraw.Draw(canvas)
     labels = ("oldest", "t-2", "t-1", "newest")
@@ -77,6 +93,12 @@ def main(argv=None) -> int:
     parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--scale", type=int, default=3)
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--rom-path", default=None)
+    parser.add_argument(
+        "--no-preprocessing",
+        action="store_true",
+        help="Record the raw RGB observation: no crop, resize, grayscale, frame stack, frame skip, or maxpool.",
+    )
     args = parser.parse_args(argv)
 
     if args.frames <= 0:
@@ -88,28 +110,44 @@ def main(argv=None) -> int:
 
     profile = _load_profile(Path(args.profiles_json), args.profile)
 
-    import stable_retro as retro
-    from stable_retro.vec_env import StableRetroNativeVecEnv
-
     os.environ.setdefault("MPLCONFIGDIR", "/private/tmp/matplotlib-stable-retro")
     os.environ["STABLE_RETRO_DISABLE_AUDIO"] = "1"
 
+    import stable_retro as retro
+    from stable_retro.vec_env import StableRetroNativeVecEnv
+
     resize_h, resize_w = (int(part) for part in str(profile["resize"]).lower().split("x", 1))
     crop = _parse_crop(profile.get("obs_crop"))
+    if args.no_preprocessing:
+        obs_resize = None
+        obs_grayscale = False
+        crop = None
+        resize_algorithm = "nearest"
+        frame_skip = 1
+        frame_stack = 1
+        maxpool_last_two = False
+    else:
+        obs_resize = (resize_h, resize_w)
+        obs_grayscale = bool(profile["grayscale"])
+        resize_algorithm = str(profile.get("resize_algorithm", "area"))
+        frame_skip = int(profile["frame_skip"])
+        frame_stack = int(profile["frame_stack"])
+        maxpool_last_two = bool(profile.get("maxpool_last_two", True))
     env = StableRetroNativeVecEnv(
         profile["game"],
         1,
         state=profile["state"],
+        rom_path=None if args.rom_path is None else str(Path(args.rom_path).resolve()),
         num_threads=1,
         copy_observations=False,
         render_mode="rgb_array",
-        obs_resize=(resize_h, resize_w),
-        obs_grayscale=bool(profile["grayscale"]),
+        obs_resize=obs_resize,
+        obs_grayscale=obs_grayscale,
         obs_crop=crop,
-        obs_resize_algorithm=str(profile.get("resize_algorithm", "area")),
-        frame_skip=int(profile["frame_skip"]),
-        frame_stack=int(profile["frame_stack"]),
-        maxpool_last_two=bool(profile.get("maxpool_last_two", True)),
+        obs_resize_algorithm=resize_algorithm,
+        frame_skip=frame_skip,
+        frame_stack=frame_stack,
+        maxpool_last_two=maxpool_last_two,
     )
     env.action_space.seed(args.seed)
     rng = np.random.default_rng(args.seed)
@@ -122,10 +160,10 @@ def main(argv=None) -> int:
     output.parent.mkdir(parents=True, exist_ok=True)
     first_png = output.with_name(output.stem + "_first.png")
     footer = (
-        f"{profile['game']} {profile['state']} | {profile['resize']} "
-        f"{'gray' if profile['grayscale'] else 'rgb'} | crop {crop} | "
-        f"{profile.get('resize_algorithm', 'area')} | skip {profile['frame_skip']} | "
-        f"stack {profile['frame_stack']}"
+        f"{profile['game']} {profile['state']} | "
+        f"{'raw RGB, no preprocessing' if args.no_preprocessing else profile['resize']} "
+        f"{'rgb' if args.no_preprocessing else ('gray' if profile['grayscale'] else 'rgb')} | "
+        f"crop {crop} | {resize_algorithm} | skip {frame_skip} | stack {frame_stack}"
     )
 
     try:
@@ -133,7 +171,7 @@ def main(argv=None) -> int:
         with tempfile.TemporaryDirectory(prefix="stable-retro-stack-frames-") as tmpdir:
             tmp = Path(tmpdir)
             for frame_idx in range(args.frames):
-                canvas = _stack_canvas(obs, frame_idx, args.scale, footer)
+                canvas = _obs_canvas(obs, frame_idx, args.scale, footer)
                 frame_path = tmp / f"frame_{frame_idx:05d}.png"
                 canvas.save(frame_path)
                 if frame_idx == 0:
