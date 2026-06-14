@@ -24,6 +24,11 @@ PUBLIC_CORE_NAMES = tuple(
 )
 ROSETTA_HELPER_NAME = "rosetta_snes_helper"
 ROSETTA_CORE_NAME = "snes9x_libretro.dylib"
+PUBLIC_DATA_PLATFORMS = frozenset(
+    platform.strip()
+    for platform in os.environ.get("STABLE_RETRO_PUBLIC_DATA_PLATFORMS", "").split(",")
+    if platform.strip()
+)
 
 DATA_PACKAGE_DIRS = {
     "stable_retro.data.stable": SCRIPT_DIR / "stable_retro" / "data" / "stable",
@@ -46,6 +51,30 @@ def package_files(root: Path, *, exclude=None):
         if path.is_file() and not exclude(path):
             files.append(path.relative_to(root).as_posix())
     return files
+
+
+def data_dir_platform(name: str):
+    parts = name.rsplit("-", 2)
+    if len(parts) >= 3 and parts[-1].startswith("v"):
+        return parts[-2]
+    return name.rsplit("-", 1)[-1]
+
+
+def is_excluded_data_platform(root: Path, path: Path):
+    if not PUBLIC_DATA_PLATFORMS:
+        return False
+    relative = path.relative_to(root)
+    if len(relative.parts) < 2:
+        return False
+    return data_dir_platform(relative.parts[0]) not in PUBLIC_DATA_PLATFORMS
+
+
+def stable_retro_data_package_data(package_root: Path):
+    return package_files(
+        package_root,
+        exclude=lambda path: is_rom_payload(path)
+        or is_excluded_data_platform(package_root, path),
+    )
 
 
 def stable_retro_package_data():
@@ -285,7 +314,7 @@ setup(
     package_data={
         "stable_retro": stable_retro_package_data(),
         **{
-            package_name: package_files(package_root, exclude=is_rom_payload)
+            package_name: stable_retro_data_package_data(package_root)
             for package_name, package_root in DATA_PACKAGE_DIRS.items()
         },
     },

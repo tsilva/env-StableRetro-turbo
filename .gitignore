@@ -182,3 +182,5 @@ third-party/libzip/src/ziptool
 pypi-proof/
 
 artifacts/
+
+wheelhouse*/
