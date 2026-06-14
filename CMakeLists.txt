@@ -83,6 +83,7 @@ option(ENABLE_HW_RENDER
        OFF)
 option(BUILD_N64 "Build Parallel N64 core (requires OpenGL headers)" ON)
 option(ENABLE_CAPNPROTO "Enable CapnProto-based search save/load support" ON)
+option(STABLE_RETRO_USE_SYSTEM_LIBZIP "Use system libzip when available" ON)
 
 set(BUILD_PYTHON
     ON
@@ -110,7 +111,9 @@ if(ENABLE_CAPNPROTO AND NOT BUILD_MANYLINUX)
   endif()
 endif()
 
-pkg_search_module(LIBZIP QUIET libzip)
+if(STABLE_RETRO_USE_SYSTEM_LIBZIP)
+  pkg_search_module(LIBZIP QUIET libzip)
+endif()
 
 if(NOT BUILD_LUAJIT)
   find_package(Lua 5.1 EXACT REQUIRED)
@@ -417,7 +420,8 @@ find_path(
   STABLE_RETRO_LIBZIP_HEADER zip.h
   PATHS ${LIBZIP_INCLUDE_DIRS}
   NO_DEFAULT_PATH)
-if(LIBZIP_FOUND
+if(STABLE_RETRO_USE_SYSTEM_LIBZIP
+   AND LIBZIP_FOUND
    AND NOT LIBZIP_VERSION VERSION_LESS 1.0.0
    AND STABLE_RETRO_LIBZIP_HEADER)
   include_directories(${LIBZIP_INCLUDE_DIRS})
