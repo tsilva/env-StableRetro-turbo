@@ -110,6 +110,7 @@ tramp
 gameboy/
 roms/
 *.png
+!logo.png
 !architecture.png
 artifacts/*.mp4
 
