@@ -188,11 +188,6 @@ class CMakeBuild(build_ext):
             ext_path = Path(self.get_ext_fullpath("stable_retro._retro"))
             package_dir = ext_path.parent
             pylib_dir = f"-DPYLIB_DIRECTORY={package_dir.parent}"
-        if self.debug:
-            build_type = "-DCMAKE_BUILD_TYPE=Debug"
-        else:
-            build_type = ""
-
         # Provide hints to CMake about where to find Python (this should be enough for most cases)
         python_root_dir = f"-DPython_ROOT_DIR={os.path.dirname(sys.executable)}"
         python_find_strategy = "-DPython_FIND_STRATEGY=LOCATION"
@@ -210,6 +205,16 @@ class CMakeBuild(build_ext):
             value = os.environ.get(env_var)
             if value:
                 extra_cmake_args.extend(shlex.split(value))
+        has_build_type = any(
+            arg == "-DCMAKE_BUILD_TYPE" or arg.startswith("-DCMAKE_BUILD_TYPE=")
+            for arg in extra_cmake_args
+        )
+        if self.debug:
+            build_type = "-DCMAKE_BUILD_TYPE=Debug"
+        elif has_build_type:
+            build_type = ""
+        else:
+            build_type = "-DCMAKE_BUILD_TYPE=Release"
 
         cmake_cmd = [
             "cmake",

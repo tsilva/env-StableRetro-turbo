@@ -434,6 +434,8 @@ public:
 	void reset();
 	void clone(const AddressSpace&);
 	void clone();
+	void copyFrom(const AddressSpace&);
+	void swapWith(AddressSpace&);
 
 	void setOverlay(const MemoryOverlay& overlay);
 	const MemoryOverlay& overlay() const { return *m_overlay; };

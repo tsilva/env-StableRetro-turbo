@@ -160,6 +160,10 @@ void GameData::reset() {
 	m_vars.clear();
 	m_searches.clear();
 	m_searchOldMem.clear();
+	m_trackedVariables.clear();
+	m_trackedCurrentValues.clear();
+	m_trackedLastValues.clear();
+	m_trackedHasLastValues = false;
 }
 
 void GameData::restart() {
@@ -167,8 +171,27 @@ void GameData::restart() {
 }
 
 void GameData::updateRam() {
-	m_lastMem = move(m_cloneMem);
-	m_cloneMem.clone(m_mem);
+	if (!m_trackedVariables.empty()) {
+		if (m_trackedCurrentValues.size() == m_trackedVariables.size()) {
+			m_trackedLastValues.swap(m_trackedCurrentValues);
+			m_trackedCurrentValues.resize(m_trackedVariables.size());
+			m_trackedHasLastValues = true;
+		} else {
+			m_trackedLastValues.assign(m_trackedVariables.size(), 0);
+			m_trackedCurrentValues.resize(m_trackedVariables.size());
+			m_trackedHasLastValues = false;
+		}
+		for (size_t i = 0; i < m_trackedVariables.size(); ++i) {
+			m_trackedCurrentValues[i] = m_mem[m_trackedVariables[i]];
+		}
+		return;
+	}
+	if (m_cloneMem.ok()) {
+		m_lastMem.swapWith(m_cloneMem);
+	} else {
+		m_lastMem.reset();
+	}
+	m_cloneMem.copyFrom(m_mem);
 }
 
 void GameData::setTypes(const vector<DataType> types) {
@@ -219,6 +242,10 @@ Variant GameData::lookupValue(const string& name) const {
 	return m_mem[v->second];
 }
 
+int64_t GameData::lookupValue(const Variable& variable) const {
+	return m_mem[variable];
+}
+
 Datum GameData::lookupValue(const TypedSearchResult& result) {
 	return m_mem[Variable{ result.type, result.address }];
 }
@@ -232,12 +259,20 @@ int64_t GameData::lookupDelta(const string& name) const {
 	if (v == m_vars.end()) {
 		return 0;
 	}
-	int64_t newVal = m_cloneMem[v->second];
+	return lookupDelta(v->second);
+}
+
+int64_t GameData::lookupDelta(const Variable& variable) const {
+	const size_t trackedIndex = trackedVariableIndex(variable);
+	if (trackedIndex != static_cast<size_t>(-1)) {
+		return lookupTrackedDelta(trackedIndex);
+	}
+	int64_t newVal = m_cloneMem[variable];
 
 	if (!m_lastMem.ok()) {
 		return 0;
 	}
-	int64_t oldVal = m_lastMem[v->second];
+	int64_t oldVal = m_lastMem[variable];
 
 	return newVal - oldVal;
 }
@@ -320,6 +355,42 @@ void GameData::removeVariable(const string& name) {
 
 unordered_map<string, Variable> GameData::listVariables() const {
 	return m_vars;
+}
+
+void GameData::setTrackedVariables(const vector<Variable>& variables) {
+	m_trackedVariables.clear();
+	m_trackedVariables.reserve(variables.size());
+	for (const auto& variable : variables) {
+		m_trackedVariables.push_back(variable);
+	}
+	m_trackedCurrentValues.clear();
+	m_trackedLastValues.clear();
+	m_trackedHasLastValues = false;
+	m_lastMem.reset();
+	m_cloneMem.reset();
+}
+
+size_t GameData::trackedVariableIndex(const Variable& variable) const {
+	for (size_t i = 0; i < m_trackedVariables.size(); ++i) {
+		if (m_trackedVariables[i] == variable) {
+			return i;
+		}
+	}
+	return static_cast<size_t>(-1);
+}
+
+int64_t GameData::lookupTrackedValue(size_t index) const {
+	if (index == static_cast<size_t>(-1) || index >= m_trackedCurrentValues.size()) {
+		return 0;
+	}
+	return m_trackedCurrentValues[index];
+}
+
+int64_t GameData::lookupTrackedDelta(size_t index) const {
+	if (index == static_cast<size_t>(-1) || !m_trackedHasLastValues || index >= m_trackedCurrentValues.size() || index >= m_trackedLastValues.size()) {
+		return 0;
+	}
+	return m_trackedCurrentValues[index] - m_trackedLastValues[index];
 }
 
 size_t GameData::numVariables() const {
@@ -776,10 +847,12 @@ bool Scenario::save(ostream* file) const {
 void Scenario::reset() {
 	for (int i = 0; i < MAX_PLAYERS; ++i) {
 		m_rewardVars[i].clear();
+		m_resolvedRewardVars[i].clear();
 		m_rewardTime[i] = { Measurement::DELTA };
 		m_crops[i] = {};
 	}
 	m_doneVars.clear();
+	m_resolvedDoneVars.clear();
 	m_doneCondition = DoneCondition::ANY;
 }
 
@@ -846,11 +919,15 @@ void Scenario::restart() {
 	m_frame = 0;
 }
 
-void Scenario::update() {
+void Scenario::update(unsigned players) {
 	m_done = calculateDone();
-	for (unsigned i = 0; i < MAX_PLAYERS; ++i) {
+	players = std::min<unsigned>(players, MAX_PLAYERS);
+	for (unsigned i = 0; i < players; ++i) {
 		m_reward[i] = calculateReward(i);
 		m_totalReward[i] += m_reward[i];
+	}
+	for (unsigned i = players; i < MAX_PLAYERS; ++i) {
+		m_reward[i] = 0;
 	}
 	++m_frame;
 }
@@ -904,8 +981,19 @@ float Scenario::calculateReward(unsigned player) const {
 	}
 
 	float reward = m_rewardTime[player].calculate(1, 1);
-	for (auto var = m_rewardVars[player].cbegin(); var != m_rewardVars[player].cend(); ++var) {
-		reward += var->second.calculate(m_data.lookupValue(var->first), m_data.lookupDelta(var->first));
+	if (m_resolvedRewardVars[player].size() == m_rewardVars[player].size()) {
+		for (const auto& var : m_resolvedRewardVars[player]) {
+			const int64_t value = var.spec.measurement == Measurement::DELTA ? 0 : m_data.lookupValue(var.variable);
+			const int64_t delta = var.spec.measurement == Measurement::DELTA ?
+				(var.trackedIndex == static_cast<size_t>(-1) ? m_data.lookupDelta(var.variable) : m_data.lookupTrackedDelta(var.trackedIndex)) : 0;
+			reward += var.spec.calculate(value, delta);
+		}
+	} else {
+		for (auto var = m_rewardVars[player].cbegin(); var != m_rewardVars[player].cend(); ++var) {
+			const int64_t value = var->second.measurement == Measurement::DELTA ? 0 : static_cast<int64_t>(m_data.lookupValue(var->first));
+			const int64_t delta = var->second.measurement == Measurement::DELTA ? m_data.lookupDelta(var->first) : 0;
+			reward += var->second.calculate(value, delta);
+		}
 	}
 	return reward;
 }
@@ -914,13 +1002,30 @@ bool Scenario::calculateDone() const {
 	if (m_doneFunc.first.size()) {
 		return ScriptContext::get(m_doneFunc.second)->callFunction(m_doneFunc.first);
 	}
-	for (auto var = m_doneVars.cbegin(); var != m_doneVars.cend(); ++var) {
-		int done = var->second.test(m_data.lookupValue(var->first), m_data.lookupDelta(var->first));
-		if (done > 0 && m_doneCondition == DoneCondition::ANY) {
-			return true;
+	if (m_resolvedDoneVars.size() == m_doneVars.size()) {
+		for (const auto& var : m_resolvedDoneVars) {
+			const int64_t value = var.spec.measurement == Measurement::DELTA ? 0 : m_data.lookupValue(var.variable);
+			const int64_t delta = var.spec.measurement == Measurement::DELTA ?
+				(var.trackedIndex == static_cast<size_t>(-1) ? m_data.lookupDelta(var.variable) : m_data.lookupTrackedDelta(var.trackedIndex)) : 0;
+			int done = var.spec.test(value, delta);
+			if (done > 0 && m_doneCondition == DoneCondition::ANY) {
+				return true;
+			}
+			if (done <= 0 && m_doneCondition == DoneCondition::ALL) {
+				return false;
+			}
 		}
-		if (done <= 0 && m_doneCondition == DoneCondition::ALL) {
-			return false;
+	} else {
+		for (auto var = m_doneVars.cbegin(); var != m_doneVars.cend(); ++var) {
+			const int64_t value = var->second.measurement == Measurement::DELTA ? 0 : static_cast<int64_t>(m_data.lookupValue(var->first));
+			const int64_t delta = var->second.measurement == Measurement::DELTA ? m_data.lookupDelta(var->first) : 0;
+			int done = var->second.test(value, delta);
+			if (done > 0 && m_doneCondition == DoneCondition::ANY) {
+				return true;
+			}
+			if (done <= 0 && m_doneCondition == DoneCondition::ALL) {
+				return false;
+			}
 		}
 	}
 	for (auto node = m_doneNodes.cbegin(); node != m_doneNodes.cend(); ++node) {
@@ -937,7 +1042,9 @@ bool Scenario::calculateDone() const {
 
 bool Scenario::isDone(const DoneNode& subnode) const {
 	for (auto var = subnode.vars.cbegin(); var != subnode.vars.cend(); ++var) {
-		int done = var->second.test(m_data.lookupValue(var->first), m_data.lookupDelta(var->first));
+		const int64_t value = var->second.measurement == Measurement::DELTA ? 0 : static_cast<int64_t>(m_data.lookupValue(var->first));
+		const int64_t delta = var->second.measurement == Measurement::DELTA ? m_data.lookupDelta(var->first) : 0;
+		int done = var->second.test(value, delta);
 		if (done > 0 && subnode.condition == DoneCondition::ANY) {
 			return true;
 		}
@@ -1041,8 +1148,40 @@ string Scenario::name(Operation op) {
 	return name->second;
 }
 
+void Scenario::refreshResolvedRewardVariables(unsigned player) {
+	if (player >= MAX_PLAYERS) {
+		return;
+	}
+	m_resolvedRewardVars[player].clear();
+	m_resolvedRewardVars[player].reserve(m_rewardVars[player].size());
+	for (const auto& var : m_rewardVars[player]) {
+		try {
+			Variable variable = m_data.getVariable(var.first);
+			m_resolvedRewardVars[player].push_back({ variable, var.second, m_data.trackedVariableIndex(variable) });
+		} catch (...) {
+			m_resolvedRewardVars[player].clear();
+			return;
+		}
+	}
+}
+
+void Scenario::refreshResolvedDoneVariables() {
+	m_resolvedDoneVars.clear();
+	m_resolvedDoneVars.reserve(m_doneVars.size());
+	for (const auto& var : m_doneVars) {
+		try {
+			Variable variable = m_data.getVariable(var.first);
+			m_resolvedDoneVars.push_back({ variable, var.second, m_data.trackedVariableIndex(variable) });
+		} catch (...) {
+			m_resolvedDoneVars.clear();
+			return;
+		}
+	}
+}
+
 void Scenario::setRewardVariable(const string& name, const RewardSpec& var, unsigned player) {
-	m_rewardVars[player].emplace(name, var);
+	m_rewardVars[player][name] = var;
+	refreshResolvedRewardVariables(player);
 }
 
 void Scenario::setRewardFunction(const string& name, const string& scope, unsigned player) {
@@ -1054,7 +1193,8 @@ void Scenario::setRewardTime(const RewardSpec& spec, unsigned player) {
 }
 
 void Scenario::setDoneVariable(const string& name, const DoneSpec& var) {
-	m_doneVars.emplace(name, var);
+	m_doneVars[name] = var;
+	refreshResolvedDoneVariables();
 }
 
 void Scenario::setDoneNode(const string& name, shared_ptr<DoneNode> node) {
