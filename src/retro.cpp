@@ -1258,7 +1258,8 @@ public:
 		float rewardClipLow,
 		float rewardClipHigh,
 		int numThreads,
-		const string& infoMode
+		const string& infoMode,
+		bool unsafeZeroCopy
 	)
 		: m_numButtons(numButtons)
 		, m_frameSkip(frameSkip)
@@ -1276,6 +1277,7 @@ public:
 		, m_rewardClipHigh(rewardClipHigh)
 		, m_fullInfo(infoMode == "all")
 		, m_noInfo(infoMode == "none")
+		, m_unsafeZeroCopy(unsafeZeroCopy)
 		, m_numThreads(numThreads) {
 		if (numEnvs == 0) {
 			throw std::runtime_error("num_envs must be positive");
@@ -1335,12 +1337,14 @@ public:
 			slot->lastMask.assign(static_cast<size_t>(m_numButtons), 0);
 			m_slots.emplace_back(std::move(slot));
 		}
-		m_obsArray = py::array_t<uint8_t>(py::array::ShapeContainer{
+		const auto obsShape = py::array::ShapeContainer{
 			static_cast<py::ssize_t>(m_slots.size()),
 			static_cast<py::ssize_t>(m_obsHeight),
 			static_cast<py::ssize_t>(m_obsWidth),
 			static_cast<py::ssize_t>(m_stackedChannels),
-		});
+		};
+		m_obsArrays[0] = py::array_t<uint8_t>(obsShape);
+		m_obsArrays[1] = m_unsafeZeroCopy ? m_obsArrays[0] : py::array_t<uint8_t>(obsShape);
 		m_rewardArray = py::array_t<float>({ static_cast<py::ssize_t>(m_slots.size()) });
 		m_doneArray = py::array_t<bool>({ static_cast<py::ssize_t>(m_slots.size()) });
 		for (size_t i = 0; i < m_slots.size(); ++i) {
@@ -1357,7 +1361,8 @@ public:
 				m_slots[i]->rng.seed(static_cast<uint32_t>(seed + i));
 			}
 		}
-		uint8_t* obsData = m_obsArray.mutable_data();
+		py::array_t<uint8_t>& obsArray = nextObservationArray();
+		uint8_t* obsData = obsArray.mutable_data();
 		clearErrors();
 		{
 			py::gil_scoped_release release;
@@ -1372,7 +1377,7 @@ public:
 			});
 		}
 		throwFirstError(m_errors);
-		return py::make_tuple(m_obsArray, m_emptyInfos);
+		return py::make_tuple(obsArray, m_emptyInfos);
 	}
 
 	py::tuple step(py::array_t<uint8_t> masks) {
@@ -1383,7 +1388,8 @@ public:
 		if (mask.shape(1) != m_numButtons) {
 			throw std::runtime_error("actions second dimension must match num_buttons");
 		}
-		uint8_t* obsData = m_obsArray.mutable_data();
+		py::array_t<uint8_t>& obsArray = nextObservationArray();
+		uint8_t* obsData = obsArray.mutable_data();
 		auto rewards = m_rewardArray.mutable_unchecked<1>();
 		auto dones = m_doneArray.mutable_unchecked<1>();
 		clearErrors();
@@ -1412,7 +1418,7 @@ public:
 		}
 		throwFirstError(m_errors);
 		if (m_noInfo) {
-			return py::make_tuple(m_obsArray, m_rewardArray, m_doneArray, m_emptyInfos);
+			return py::make_tuple(obsArray, m_rewardArray, m_doneArray, m_emptyInfos);
 		}
 		py::list infos;
 		for (size_t i = 0; i < m_slots.size(); ++i) {
@@ -1433,7 +1439,7 @@ public:
 			}
 			infos.append(info);
 		}
-		return py::make_tuple(m_obsArray, m_rewardArray, m_doneArray, infos);
+		return py::make_tuple(obsArray, m_rewardArray, m_doneArray, infos);
 	}
 
 	py::tuple observationShape() const {
@@ -1445,6 +1451,15 @@ public:
 	}
 
 private:
+	py::array_t<uint8_t>& nextObservationArray() {
+		if (m_unsafeZeroCopy) {
+			return m_obsArrays[0];
+		}
+		const size_t index = m_nextObsArray;
+		m_nextObsArray = 1 - m_nextObsArray;
+		return m_obsArrays[index];
+	}
+
 	struct Slot {
 		Slot(const string& romPath, const string& dataPath, const string& scenarioPath, const std::string& initialState, size_t index)
 			: emulator(std::make_unique<PyRetroEmulator>(romPath))
@@ -1822,6 +1837,7 @@ private:
 	float m_rewardClipHigh = 1.0f;
 	bool m_fullInfo = false;
 	bool m_noInfo = false;
+	bool m_unsafeZeroCopy = false;
 	int m_numThreads = 1;
 	long m_obsHeight = 0;
 	long m_obsWidth = 0;
@@ -1831,7 +1847,8 @@ private:
 	size_t m_stackedObsSize = 0;
 	bool m_useGrayscaleAreaPlan = false;
 	AreaResizePlan m_grayscaleAreaPlan;
-	py::array_t<uint8_t> m_obsArray;
+	std::array<py::array_t<uint8_t>, 2> m_obsArrays;
+	size_t m_nextObsArray = 0;
 	py::array_t<float> m_rewardArray;
 	py::array_t<bool> m_doneArray;
 	py::list m_emptyInfos;
@@ -2050,7 +2067,8 @@ PYBIND11_MODULE(_retro, m) {
 				float,
 				float,
 				int,
-				const string&>(),
+				const string&,
+				bool>(),
 			py::arg("num_envs"),
 			py::arg("rom_path"),
 			py::arg("data_path"),
@@ -2071,7 +2089,8 @@ PYBIND11_MODULE(_retro, m) {
 			py::arg("reward_clip_low"),
 			py::arg("reward_clip_high"),
 			py::arg("num_threads") = 0,
-			py::arg("info_mode") = "terminal"
+			py::arg("info_mode") = "all",
+			py::arg("unsafe_zero_copy") = false
 		)
 		.def("reset", &PyNativeVectorEnv::reset, py::arg("seed") = py::none())
 		.def("step", &PyNativeVectorEnv::step)

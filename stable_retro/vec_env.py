@@ -18,6 +18,10 @@ class StableRetroNativeVecEnv(VecEnv):
     This is the supported high-throughput path. C++ owns the emulator pool,
     frame skip, preprocessing, frame stacking, autoreset, reward/done
     evaluation, and batched observation buffer.
+
+    With copy_observations=False, returned observations are double-buffered so
+    the previous observation survives the next step for SB3 rollout collection.
+    unsafe_zero_copy=True restores single-buffer aliasing for benchmarks only.
     """
 
     def __init__(
@@ -44,14 +48,20 @@ class StableRetroNativeVecEnv(VecEnv):
             state = retro.State.DEFAULT
         if inttype is None:
             inttype = retro.data.Integrations.DEFAULT
-        self.copy_observations = bool(copy_observations)
         self.waiting = False
         self.closed = False
         self._actions = None
         self._observations = None
 
         env_kwargs = dict(env_kwargs)
-        info_mode = str(env_kwargs.pop("info_mode", "terminal"))
+        info_mode = str(env_kwargs.pop("info_mode", "all"))
+        unsafe_zero_copy = bool(env_kwargs.pop("unsafe_zero_copy", False))
+        self.copy_observations = bool(copy_observations)
+        self.unsafe_zero_copy = unsafe_zero_copy
+        if self.copy_observations and self.unsafe_zero_copy:
+            raise ValueError(
+                "unsafe_zero_copy=True is only valid with copy_observations=False",
+            )
         env_kwargs.setdefault("render_mode", "rgb_array")
         self.render_mode = env_kwargs["render_mode"]
         if env_kwargs.get("players", 1) != 1:
@@ -126,6 +136,7 @@ class StableRetroNativeVecEnv(VecEnv):
             float(reward_high),
             int(num_threads),
             info_mode,
+            unsafe_zero_copy,
         )
         super().__init__(int(num_envs), self.observation_space, self.action_space)
 
