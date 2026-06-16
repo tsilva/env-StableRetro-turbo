@@ -246,12 +246,15 @@ class StableRetroNativeVecEnv(VecEnv):
         return masks
 
     def reset(self):
-        seed = None
+        seeds = None
         if self._seeds:
-            seeds = [value for value in self._seeds if value is not None]
-            if seeds:
-                seed = int(seeds[0])
-        obs, infos = self.native.reset(seed)
+            seeds = [
+                None if value is None else int(value)
+                for value in self._seeds
+            ]
+            if all(value is None for value in seeds):
+                seeds = None
+        obs, infos = self.native.reset(seeds)
         self._observations = np.asarray(obs, dtype=np.uint8)
         self.reset_infos = list(infos)
         self._reset_seeds()
@@ -269,8 +272,8 @@ class StableRetroNativeVecEnv(VecEnv):
         self._observations = np.asarray(obs, dtype=np.uint8)
         return (
             self._obs(),
-            np.asarray(rewards, dtype=np.float32),
-            np.asarray(dones, dtype=bool),
+            np.array(rewards, dtype=np.float32, copy=True),
+            np.array(dones, dtype=bool, copy=True),
             list(infos),
         )
 
