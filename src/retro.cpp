@@ -1356,9 +1356,22 @@ public:
 
 	py::tuple reset(py::object seedObj = py::none()) {
 		if (!seedObj.is_none()) {
-			const uint64_t seed = py::int_(seedObj);
-			for (size_t i = 0; i < m_slots.size(); ++i) {
-				m_slots[i]->rng.seed(static_cast<uint32_t>(seed + i));
+			if (PyLong_Check(seedObj.ptr())) {
+				const uint64_t seed = seedObj.cast<uint64_t>();
+				for (size_t i = 0; i < m_slots.size(); ++i) {
+					m_slots[i]->rng.seed(static_cast<uint32_t>(seed + i));
+				}
+			} else {
+				py::sequence seeds = py::reinterpret_borrow<py::sequence>(seedObj);
+				if (static_cast<size_t>(seeds.size()) != m_slots.size()) {
+					throw std::runtime_error("seed sequence length must match num_envs");
+				}
+				for (size_t i = 0; i < m_slots.size(); ++i) {
+					py::object seed = seeds[static_cast<py::ssize_t>(i)];
+					if (!seed.is_none()) {
+						m_slots[i]->rng.seed(seed.cast<uint32_t>());
+					}
+				}
 			}
 		}
 		py::array_t<uint8_t>& obsArray = nextObservationArray();
@@ -1392,6 +1405,7 @@ public:
 		uint8_t* obsData = obsArray.mutable_data();
 		auto rewards = m_rewardArray.mutable_unchecked<1>();
 		auto dones = m_doneArray.mutable_unchecked<1>();
+		std::vector<StepOutput> outputs(m_slots.size());
 		clearErrors();
 		clearTerminalObservations();
 		{
@@ -1404,11 +1418,7 @@ public:
 						action[static_cast<size_t>(key)] = mask(static_cast<py::ssize_t>(index), key) ? 1 : 0;
 					}
 					stepSlot(*m_slots[index], action, obsData + index * m_stackedObsSize, output, !m_noInfo);
-					rewards(static_cast<py::ssize_t>(index)) = output.reward;
-					dones(static_cast<py::ssize_t>(index)) = output.done;
-					if (output.done) {
-						m_terminalObservations[index] = std::move(output.terminalObservation);
-					}
+					outputs[index] = std::move(output);
 				} catch (const std::exception& exc) {
 					m_errors[index] = exc.what();
 				} catch (...) {
@@ -1417,6 +1427,13 @@ public:
 			});
 		}
 		throwFirstError(m_errors);
+		for (size_t i = 0; i < outputs.size(); ++i) {
+			rewards(static_cast<py::ssize_t>(i)) = outputs[i].reward;
+			dones(static_cast<py::ssize_t>(i)) = outputs[i].done;
+			if (outputs[i].done) {
+				m_terminalObservations[i] = std::move(outputs[i].terminalObservation);
+			}
+		}
 		if (m_noInfo) {
 			return py::make_tuple(obsArray, m_rewardArray, m_doneArray, m_emptyInfos);
 		}
@@ -1659,13 +1676,18 @@ private:
 	void stepSlot(Slot& slot, const std::vector<uint8_t>& requestedAction, uint8_t* dst, StepOutput& output, bool captureTerminalObservation) {
 		const std::vector<uint8_t>* action = &requestedAction;
 		if (m_stickyActionProb > 0.0) {
+			bool repeatPreviousAction = false;
 			if (slot.hasLastMask) {
 				std::uniform_real_distribution<double> stickyDist(0.0, 1.0);
 				if (stickyDist(slot.rng) < m_stickyActionProb) {
-					action = &slot.lastMask;
+					repeatPreviousAction = true;
 				}
 			}
-			slot.lastMask.assign(action->begin(), action->end());
+			if (repeatPreviousAction) {
+				action = &slot.lastMask;
+			} else {
+				slot.lastMask.assign(requestedAction.begin(), requestedAction.end());
+			}
 			slot.hasLastMask = true;
 		}
 		setKeys(slot, *action);
