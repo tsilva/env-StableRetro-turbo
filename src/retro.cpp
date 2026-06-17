@@ -25,6 +25,8 @@ static inline T _hypot(T x, T y) {
 #include <array>
 #include <atomic>
 #include <condition_variable>
+#include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <cmath>
 #include <map>
@@ -40,6 +42,17 @@ namespace py = pybind11;
 
 using std::string;
 using namespace Retro;
+
+static bool envFlagEnabled(const char* name) {
+	const char* value = std::getenv(name);
+	if (!value || !*value) {
+		return false;
+	}
+	return std::strcmp(value, "0") != 0 &&
+		std::strcmp(value, "false") != 0 &&
+		std::strcmp(value, "False") != 0 &&
+		std::strcmp(value, "FALSE") != 0;
+}
 
 struct AreaResizeBin {
 	long y0 = 0;
@@ -1303,6 +1316,7 @@ public:
 		if (infoMode != "terminal" && infoMode != "all" && infoMode != "none") {
 			throw std::runtime_error("info_mode must be terminal, all, or none");
 		}
+		m_renderSkipEnabled = !envFlagEnabled("STABLE_RETRO_DISABLE_RENDER_SKIP");
 		if (!initialStateObj.is_none()) {
 			m_initialState = py::bytes(initialStateObj);
 		}
@@ -1697,14 +1711,36 @@ private:
 		bool sawFrame = false;
 		std::vector<uint8_t> prevRgb;
 		std::vector<uint8_t> currRgb;
+		std::vector<uint8_t> preSkipState;
 		slot.prevRaw.clear();
 		slot.prevIndexed.clear();
 		for (int i = 0; i < m_frameSkip; ++i) {
-			slot.emulator->m_re.run();
+			const bool mayNeedPixels =
+				m_maxpoolLastTwo ? (i >= m_frameSkip - 2) : (i == m_frameSkip - 1);
+			bool skippedRender = false;
+			if (m_renderSkipEnabled && !mayNeedPixels) {
+				if (captureTerminalObservation) {
+					const size_t stateSize = slot.emulator->m_re.serializeSize();
+					preSkipState.resize(stateSize);
+					if (!slot.emulator->m_re.serialize(preSkipState.data(), stateSize)) {
+						throw std::runtime_error("failed to serialize pre-render-skip state");
+					}
+				}
+				skippedRender = slot.emulator->m_re.runSkipRender();
+			} else {
+				slot.emulator->m_re.run();
+			}
 			slot.data.m_data.updateRam();
 			slot.data.m_scen.update(1);
 			totalReward += slot.data.m_scen.currentReward();
 			done = slot.data.m_scen.isDone();
+			if (done && skippedRender && captureTerminalObservation) {
+				if (!slot.emulator->m_re.unserialize(preSkipState.data(), preSkipState.size())) {
+					throw std::runtime_error("failed to restore pre-render-skip terminal state");
+				}
+				slot.emulator->m_re.run();
+				slot.data.m_data.updateRam();
+			}
 			if (m_maxpoolLastTwo && (i >= m_frameSkip - 2 || done)) {
 				if (m_grayscale) {
 					if (!done && i < m_frameSkip - 1) {
@@ -1860,6 +1896,7 @@ private:
 	bool m_fullInfo = false;
 	bool m_noInfo = false;
 	bool m_unsafeZeroCopy = false;
+	bool m_renderSkipEnabled = false;
 	int m_numThreads = 1;
 	long m_obsHeight = 0;
 	long m_obsWidth = 0;

@@ -1,4 +1,5 @@
 import hashlib
+import os
 from pathlib import Path
 
 import numpy as np
@@ -49,6 +50,32 @@ def _time_reward_info_path(tmp_path):
         encoding="utf-8",
     )
     return reward_info
+
+
+def _done_on_frame_info_path(tmp_path):
+    done_info = tmp_path / "done_on_frame_info.json"
+    done_info.write_text(
+        """
+{
+  "info": {
+    "frame_reward_source": {
+      "address": 0,
+      "type": "|u1"
+    }
+  },
+  "done": {
+    "variables": {
+      "frame_reward_source": {
+        "op": "greater-than",
+        "reference": 0
+      }
+    }
+  }
+}
+""",
+        encoding="utf-8",
+    )
+    return done_info
 
 
 def _make_test_native_vec_env(tmp_path, **kwargs):
@@ -296,6 +323,79 @@ def test_stable_retro_native_vec_env_seed_determinism_ci_rom(
     _assert_native_traces_equal(first, second)
 
 
+def _native_render_skip_trace(tmp_path, *, disable_render_skip, maxpool_last_two):
+    import stable_retro as retro
+    from stable_retro.vec_env import StableRetroNativeVecEnv
+
+    if disable_render_skip:
+        os.environ["STABLE_RETRO_DISABLE_RENDER_SKIP"] = "1"
+    else:
+        os.environ.pop("STABLE_RETRO_DISABLE_RENDER_SKIP", None)
+
+    root = Path(__file__).resolve().parents[1]
+    rom_path = root / "roms" / "Dr88-FamiconIntro.nes"
+    done_info = _done_on_frame_info_path(tmp_path)
+    env = StableRetroNativeVecEnv(
+        "Dr88-FamiconIntro",
+        4,
+        state=retro.State.NONE,
+        rom_path=str(rom_path),
+        info=str(done_info),
+        scenario=str(done_info),
+        obs_resize=(84, 84),
+        obs_grayscale=True,
+        frame_skip=4,
+        frame_stack=4,
+        maxpool_last_two=maxpool_last_two,
+        num_threads=2,
+        copy_observations=True,
+        info_mode="all",
+    )
+    try:
+        env.seed(20260616)
+        obs = env.reset()
+        trace = [(_sha(obs), None, None, None)]
+        actions = np.zeros((env.num_envs, env.num_buttons), dtype=np.uint8)
+        terminal_count = 0
+        for _ in range(12):
+            obs, rewards, dones, infos = env.step(actions)
+            terminal_count += sum("terminal_observation" in info for info in infos)
+            trace.append(
+                (
+                    _sha(obs),
+                    rewards.copy(),
+                    dones.copy(),
+                    _normalize_infos(infos),
+                ),
+            )
+        assert terminal_count > 0
+        return trace
+    finally:
+        env.close()
+        os.environ.pop("STABLE_RETRO_DISABLE_RENDER_SKIP", None)
+
+
+@pytest.mark.parametrize("maxpool_last_two", [True, False])
+def test_stable_retro_native_vec_env_nes_render_skip_matches_full_render(
+    tmp_path,
+    maxpool_last_two,
+):
+    pytest.importorskip("stable_baselines3")
+
+    baseline = _native_render_skip_trace(
+        tmp_path,
+        disable_render_skip=True,
+        maxpool_last_two=maxpool_last_two,
+    )
+    render_skip = _native_render_skip_trace(
+        tmp_path,
+        disable_render_skip=False,
+        maxpool_last_two=maxpool_last_two,
+    )
+
+    _assert_native_traces_equal(baseline, render_skip)
+
+
 def test_stable_retro_native_vec_env_mario_infos_if_rom_present():
     pytest.importorskip("stable_baselines3")
     import stable_retro as retro
@@ -411,7 +511,10 @@ def _normalize_infos(infos):
     for info in infos:
         normalized_info = {}
         for key, value in info.items():
-            if key in {"terminal_observation", "reset_info"}:
+            if key == "terminal_observation":
+                normalized_info["terminal_observation_sha"] = _sha(value)
+                continue
+            if key == "reset_info":
                 continue
             if hasattr(value, "item"):
                 value = value.item()

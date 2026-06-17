@@ -51,6 +51,7 @@ public:
 	bool loadRom(const std::string& romPath);
 
 	void run();
+	bool runSkipRender();
 	void reset();
 	AddressSpace* getAddressSpace();
 	const void* getImageData() { return m_imgData; }
@@ -133,6 +134,7 @@ private:
 	void (*m_retro_get_system_av_info)(struct retro_system_av_info* info) = nullptr;
 	void (*m_retro_reset)(void) = nullptr;
 	void (*m_retro_run)(void) = nullptr;
+	void (*m_stable_retro_run_skip_render)(void) = nullptr;
 	size_t (*m_retro_serialize_size)(void) = nullptr;
 	bool (*m_retro_serialize)(void* data, size_t size) = nullptr;
 	bool (*m_retro_unserialize)(const void* data, size_t size) = nullptr;

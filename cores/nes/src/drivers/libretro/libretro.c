@@ -1314,7 +1314,7 @@ static void retro_run_blit(uint8_t *gfx)
 
 }
 
-void retro_run(void)
+static void stable_retro_run_internal(bool skip_render)
 {
    unsigned i;
    uint8_t *gfx;
@@ -1324,13 +1324,19 @@ void retro_run(void)
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &updated) && updated)
       check_variables(false);
 
+   if (skip_render)
+      stable_retro_indexed_data = NULL;
+
    FCEUD_UpdateInput();
-   FCEUI_Emulate(&gfx, &sound, &ssize, 0);
+   FCEUI_Emulate(&gfx, &sound, &ssize, skip_render ? 1 : 0);
 
    for (i = 0; i < ssize; i++)
       sound[i] = (sound[i] << 16) | (sound[i] & 0xffff);
 
    audio_batch_cb((const int16_t*)sound, ssize);
+
+   if (skip_render)
+      return;
 
    if (stable_retro_indexed_video)
    {
@@ -1350,6 +1356,16 @@ void retro_run(void)
    }
 
    retro_run_blit(gfx);
+}
+
+void retro_run(void)
+{
+   stable_retro_run_internal(false);
+}
+
+RETRO_API void stable_retro_run_skip_render(void)
+{
+   stable_retro_run_internal(true);
 }
 
 RETRO_API void stable_retro_set_indexed_video(bool enabled)

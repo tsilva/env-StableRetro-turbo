@@ -287,6 +287,22 @@ void Emulator::run() {
 	}
 }
 
+bool Emulator::runSkipRender() {
+	if (!m_stable_retro_run_skip_render) {
+		run();
+		return false;
+	}
+	if (m_audioEnabled) {
+		m_audioData.clear();
+	}
+	CallbackScope callbackScope(this);
+	m_stable_retro_run_skip_render();
+	if (m_serializationQuirks & RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE) {
+		m_needsInitFrame = false;
+	}
+	return true;
+}
+
 void Emulator::reset() {
 	memset(m_buttonMask, 0, sizeof(m_buttonMask));
 
@@ -456,6 +472,7 @@ bool Emulator::loadCore(const string& corePath) {
 	m_retro_get_system_av_info = reinterpret_cast<void (*)(struct retro_system_av_info*)>(GETSYM(m_coreHandle, "retro_get_system_av_info"));
 	m_retro_reset = reinterpret_cast<void (*)()>(GETSYM(m_coreHandle, "retro_reset"));
 	m_retro_run = reinterpret_cast<void (*)()>(GETSYM(m_coreHandle, "retro_run"));
+	m_stable_retro_run_skip_render = reinterpret_cast<void (*)()>(GETSYM(m_coreHandle, "stable_retro_run_skip_render"));
 	m_retro_serialize_size = reinterpret_cast<size_t (*)()>(GETSYM(m_coreHandle, "retro_serialize_size"));
 	m_retro_serialize = reinterpret_cast<bool (*)(void*, size_t)>(GETSYM(m_coreHandle, "retro_serialize"));
 	m_retro_unserialize = reinterpret_cast<bool (*)(const void*, size_t)>(GETSYM(m_coreHandle, "retro_unserialize"));
