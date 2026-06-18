@@ -106,6 +106,32 @@ def _parse_state(value, retro, *, allow_state_none: bool):
     return normalized
 
 
+def _parse_info_keys(value, *, game, info, retro):
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    if not normalized:
+        return None
+    if normalized.lower() != "all":
+        return [key.strip() for key in normalized.split(",") if key.strip()]
+
+    if info is None:
+        info_path = Path(
+            retro.data.get_file_path(
+                game,
+                "data.json",
+                retro.data.Integrations.DEFAULT,
+            ),
+        )
+    else:
+        info_path = Path(info)
+    raw = json.loads(info_path.read_text(encoding="utf-8"))
+    info_data = raw.get("info", {})
+    if not isinstance(info_data, dict):
+        raise SystemExit(f"Expected object-valued info in {info_path}")
+    return sorted(str(key) for key in info_data)
+
+
 def _sample_actions(env, fixed_actions=None):
     if fixed_actions is not None:
         return fixed_actions
@@ -185,6 +211,17 @@ def main(argv=None) -> int:
         choices=("terminal", "all", "none"),
         default="terminal",
     )
+    parser.add_argument(
+        "--info-keys",
+        default=None,
+        help="Comma-separated info keys to emit, or 'all' to pass all keys from data.json.",
+    )
+    parser.add_argument("--obs-layout", choices=("hwc", "chw"), default="hwc")
+    parser.add_argument(
+        "--vec-transpose-image",
+        action="store_true",
+        help="Wrap the native HWC env in SB3 VecTransposeImage to model PyTorch pixel training.",
+    )
     parser.add_argument("--no-maxpool-last-two", action="store_true")
     parser.add_argument("--fixed-actions", action="store_true")
     parser.add_argument("--copy-observations", action="store_true")
@@ -258,6 +295,7 @@ def main(argv=None) -> int:
         else args.resize_algorithm
     )
     maxpool_last_two = profile.maxpool_last_two and not args.no_maxpool_last_two
+    info_keys = _parse_info_keys(args.info_keys, game=game, info=info, retro=retro)
 
     env_kwargs = {
         "render_mode": "rgb_array",
@@ -269,7 +307,12 @@ def main(argv=None) -> int:
         "frame_stack": frame_stack,
         "maxpool_last_two": maxpool_last_two,
         "info_mode": args.info_mode,
+        "obs_layout": args.obs_layout,
     }
+    if info_keys is not None:
+        env_kwargs["info_keys"] = info_keys
+    if args.vec_transpose_image and args.obs_layout != "hwc":
+        raise SystemExit("--vec-transpose-image requires --obs-layout=hwc")
 
     state_label = "State.NONE" if state is retro.State.NONE else str(state)
     action_label = "fixed" if args.fixed_actions else "sampled"
@@ -279,6 +322,8 @@ def main(argv=None) -> int:
         f"resize={resize} grayscale={grayscale} crop={obs_crop} "
         f"resize_algorithm={resize_algorithm} frame_skip={frame_skip} "
         f"frame_stack={frame_stack} info_mode={args.info_mode} "
+        f"info_keys={'default' if info_keys is None else len(info_keys)} "
+        f"obs_layout={args.obs_layout} vec_transpose_image={args.vec_transpose_image} "
         f"actions={action_label}",
     )
     if args.dry_run:
@@ -299,6 +344,10 @@ def main(argv=None) -> int:
             num_threads=num_threads,
             copy_observations=args.copy_observations,
         )
+        if args.vec_transpose_image:
+            from stable_baselines3.common.vec_env import VecTransposeImage
+
+            env = VecTransposeImage(env)
         fixed_actions = None
         if args.fixed_actions:
             fixed_actions = _sample_actions(env)
