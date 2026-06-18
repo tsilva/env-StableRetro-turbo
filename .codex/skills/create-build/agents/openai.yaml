@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create Build"
+  short_description: "Build next stable-retro-turbo wheels"
+  default_prompt: "Use $create-build to build the next post-version macOS and Linux wheels."

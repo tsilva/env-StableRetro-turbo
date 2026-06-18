@@ -515,19 +515,23 @@ struct PyGameData {
 		m_scen.update();
 	}
 
+	static py::object variantToPython(Variant data) {
+		switch (data.type()) {
+		case Variant::Type::BOOL:
+			return static_cast<py::bool_>(data);
+		case Variant::Type::INT:
+			return static_cast<py::int_>(static_cast<int64_t>(data));
+		case Variant::Type::FLOAT:
+			return static_cast<py::float_>(static_cast<double>(data));
+		case Variant::Type::VOID:
+			return py::none();
+		}
+		return py::none();
+	}
+
 	py::object lookupValue(py::str name) const {
 		try {
-			Variant data = m_data.lookupValue(name);
-			switch (data.type()) {
-			case Variant::Type::BOOL:
-				return static_cast<py::bool_>(data);
-			case Variant::Type::INT:
-				return static_cast<py::int_>(static_cast<int64_t>(data));
-			case Variant::Type::FLOAT:
-				return static_cast<py::float_>(static_cast<double>(data));
-			case Variant::Type::VOID:
-				return py::none();
-			}
+			return variantToPython(m_data.lookupValue(name));
 		} catch (std::invalid_argument e) {
 			throw pybind11::key_error(e.what());
 		}
@@ -1272,7 +1276,9 @@ public:
 		float rewardClipHigh,
 		int numThreads,
 		const string& infoMode,
-		bool unsafeZeroCopy
+		bool unsafeZeroCopy,
+		const string& obsLayout,
+		py::object infoKeysObj
 	)
 		: m_numButtons(numButtons)
 		, m_frameSkip(frameSkip)
@@ -1316,6 +1322,23 @@ public:
 		if (infoMode != "terminal" && infoMode != "all" && infoMode != "none") {
 			throw std::runtime_error("info_mode must be terminal, all, or none");
 		}
+		if (obsLayout == "hwc") {
+			m_channelsFirst = false;
+		} else if (obsLayout == "chw") {
+			m_channelsFirst = true;
+		} else {
+			throw std::runtime_error("obs_layout must be hwc or chw");
+		}
+		if (!infoKeysObj.is_none()) {
+			py::sequence infoKeys = py::reinterpret_borrow<py::sequence>(infoKeysObj);
+			m_infoKeys.reserve(static_cast<size_t>(infoKeys.size()));
+			for (py::handle key : infoKeys) {
+				if (!PyUnicode_Check(key.ptr())) {
+					throw std::runtime_error("info_keys must contain only strings");
+				}
+				m_infoKeys.push_back(py::str(key));
+			}
+		}
 		m_renderSkipEnabled = !envFlagEnabled("STABLE_RETRO_DISABLE_RENDER_SKIP");
 		if (!initialStateObj.is_none()) {
 			m_initialState = py::bytes(initialStateObj);
@@ -1328,6 +1351,16 @@ public:
 				slot->usesIndexedVideo = slot->emulator->m_re.setIndexedVideoEnabled(true);
 			}
 			if (i == 0) {
+				if (!m_infoKeys.empty()) {
+					const auto variables = slot->data.m_data.listVariables();
+					for (const std::string& key : m_infoKeys) {
+						auto variable = variables.find(key);
+						if (variable == variables.end()) {
+							throw std::runtime_error("unknown info key: " + key);
+						}
+						m_infoVariables.emplace_back(key, variable->second);
+					}
+				}
 				const long rawW = slot->emulator->m_re.getImageWidth();
 				const long rawH = slot->emulator->m_re.getImageHeight();
 				if (m_crop.top + m_crop.bottom >= rawH || m_crop.left + m_crop.right >= rawW) {
@@ -1351,12 +1384,7 @@ public:
 			slot->lastMask.assign(static_cast<size_t>(m_numButtons), 0);
 			m_slots.emplace_back(std::move(slot));
 		}
-		const auto obsShape = py::array::ShapeContainer{
-			static_cast<py::ssize_t>(m_slots.size()),
-			static_cast<py::ssize_t>(m_obsHeight),
-			static_cast<py::ssize_t>(m_obsWidth),
-			static_cast<py::ssize_t>(m_stackedChannels),
-		};
+		const auto obsShape = observationBatchShape();
 		m_obsArrays[0] = py::array_t<uint8_t>(obsShape);
 		m_obsArrays[1] = m_unsafeZeroCopy ? m_obsArrays[0] : py::array_t<uint8_t>(obsShape);
 		m_rewardArray = py::array_t<float>({ static_cast<py::ssize_t>(m_slots.size()) });
@@ -1455,14 +1483,10 @@ public:
 		for (size_t i = 0; i < m_slots.size(); ++i) {
 			py::dict info = py::dict();
 			if (m_fullInfo || !m_terminalObservations[i].empty()) {
-				info = m_slots[i]->data.lookupAll();
+				info = lookupInfo(*m_slots[i]);
 			}
 			if (!m_terminalObservations[i].empty()) {
-				py::array_t<uint8_t> terminal(py::array::ShapeContainer{
-					static_cast<py::ssize_t>(m_obsHeight),
-					static_cast<py::ssize_t>(m_obsWidth),
-					static_cast<py::ssize_t>(m_stackedChannels),
-				});
+				py::array_t<uint8_t> terminal(observationShapeContainer());
 				std::memcpy(terminal.mutable_data(), m_terminalObservations[i].data(), m_stackedObsSize);
 				info["terminal_observation"] = terminal;
 				info["reset_info"] = py::dict();
@@ -1474,6 +1498,9 @@ public:
 	}
 
 	py::tuple observationShape() const {
+		if (m_channelsFirst) {
+			return py::make_tuple(m_stackedChannels, m_obsHeight, m_obsWidth);
+		}
 		return py::make_tuple(m_obsHeight, m_obsWidth, m_stackedChannels);
 	}
 
@@ -1482,6 +1509,38 @@ public:
 	}
 
 private:
+	py::array::ShapeContainer observationShapeContainer() const {
+		if (m_channelsFirst) {
+			return py::array::ShapeContainer{
+				static_cast<py::ssize_t>(m_stackedChannels),
+				static_cast<py::ssize_t>(m_obsHeight),
+				static_cast<py::ssize_t>(m_obsWidth),
+			};
+		}
+		return py::array::ShapeContainer{
+			static_cast<py::ssize_t>(m_obsHeight),
+			static_cast<py::ssize_t>(m_obsWidth),
+			static_cast<py::ssize_t>(m_stackedChannels),
+		};
+	}
+
+	py::array::ShapeContainer observationBatchShape() const {
+		if (m_channelsFirst) {
+			return py::array::ShapeContainer{
+				static_cast<py::ssize_t>(m_slots.size()),
+				static_cast<py::ssize_t>(m_stackedChannels),
+				static_cast<py::ssize_t>(m_obsHeight),
+				static_cast<py::ssize_t>(m_obsWidth),
+			};
+		}
+		return py::array::ShapeContainer{
+			static_cast<py::ssize_t>(m_slots.size()),
+			static_cast<py::ssize_t>(m_obsHeight),
+			static_cast<py::ssize_t>(m_obsWidth),
+			static_cast<py::ssize_t>(m_stackedChannels),
+		};
+	}
+
 	py::array_t<uint8_t>& nextObservationArray() {
 		if (m_unsafeZeroCopy) {
 			return m_obsArrays[0];
@@ -1537,6 +1596,17 @@ private:
 		bool done = false;
 		std::vector<uint8_t> terminalObservation;
 	};
+
+	py::dict lookupInfo(const Slot& slot) const {
+		if (m_infoKeys.empty()) {
+			return slot.data.lookupAll();
+		}
+		py::dict data;
+		for (const auto& item : m_infoVariables) {
+			data[py::str(item.first)] = slot.data.m_data.lookupValue(item.second);
+		}
+		return data;
+	}
 
 	void clearKeys(Slot& slot) {
 		for (int key = 0; key < m_numButtons; ++key) {
@@ -1617,6 +1687,16 @@ private:
 	}
 
 	void resetFrameStack(Slot& slot, const std::vector<uint8_t>& singleObs) {
+		if (m_channelsFirst) {
+			const size_t frameSize = m_singleObsSize;
+			for (int frame = 0; frame < m_frameStack; ++frame) {
+				writeSingleObservationChannelsFirst(
+					singleObs,
+					slot.frameStack.data() + static_cast<size_t>(frame) * frameSize
+				);
+			}
+			return;
+		}
 		const size_t pixelCount = static_cast<size_t>(m_obsHeight) * static_cast<size_t>(m_obsWidth);
 		const size_t channels = static_cast<size_t>(m_obsChannels);
 		const size_t stackedChannels = static_cast<size_t>(m_stackedChannels);
@@ -1630,6 +1710,21 @@ private:
 	}
 
 	void pushFrame(Slot& slot, const std::vector<uint8_t>& singleObs) {
+		if (m_channelsFirst) {
+			const size_t frameSize = m_singleObsSize;
+			if (m_frameStack > 1) {
+				std::memmove(
+					slot.frameStack.data(),
+					slot.frameStack.data() + frameSize,
+					static_cast<size_t>(m_frameStack - 1) * frameSize
+				);
+			}
+			writeSingleObservationChannelsFirst(
+				singleObs,
+				slot.frameStack.data() + static_cast<size_t>(m_frameStack - 1) * frameSize
+			);
+			return;
+		}
 		if (m_frameStack == 1) {
 			std::memcpy(slot.frameStack.data(), singleObs.data(), m_singleObsSize);
 			return;
@@ -1647,6 +1742,21 @@ private:
 
 	void writeStackedObservation(const Slot& slot, uint8_t* dst) const {
 		std::memcpy(dst, slot.frameStack.data(), m_stackedObsSize);
+	}
+
+	void writeSingleObservationChannelsFirst(const std::vector<uint8_t>& singleObs, uint8_t* dst) const {
+		const size_t pixelCount = static_cast<size_t>(m_obsHeight) * static_cast<size_t>(m_obsWidth);
+		const size_t channels = static_cast<size_t>(m_obsChannels);
+		if (channels == 1) {
+			std::memcpy(dst, singleObs.data(), pixelCount);
+			return;
+		}
+		for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
+			const uint8_t* src = singleObs.data() + pixel * channels;
+			for (size_t channel = 0; channel < channels; ++channel) {
+				dst[channel * pixelCount + pixel] = src[channel];
+			}
+		}
 	}
 
 	float clipReward(float reward) const {
@@ -1896,7 +2006,10 @@ private:
 	bool m_fullInfo = false;
 	bool m_noInfo = false;
 	bool m_unsafeZeroCopy = false;
+	bool m_channelsFirst = false;
 	bool m_renderSkipEnabled = false;
+	std::vector<std::string> m_infoKeys;
+	std::vector<std::pair<std::string, Variable>> m_infoVariables;
 	int m_numThreads = 1;
 	long m_obsHeight = 0;
 	long m_obsWidth = 0;
@@ -2127,7 +2240,9 @@ PYBIND11_MODULE(_retro, m) {
 				float,
 				int,
 				const string&,
-				bool>(),
+				bool,
+				const string&,
+				py::object>(),
 			py::arg("num_envs"),
 			py::arg("rom_path"),
 			py::arg("data_path"),
@@ -2149,7 +2264,9 @@ PYBIND11_MODULE(_retro, m) {
 			py::arg("reward_clip_high"),
 			py::arg("num_threads") = 0,
 			py::arg("info_mode") = "all",
-			py::arg("unsafe_zero_copy") = false
+			py::arg("unsafe_zero_copy") = false,
+			py::arg("obs_layout") = "hwc",
+			py::arg("info_keys") = py::none()
 		)
 		.def("reset", &PyNativeVectorEnv::reset, py::arg("seed") = py::none())
 		.def("step", &PyNativeVectorEnv::step)

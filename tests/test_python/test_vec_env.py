@@ -129,6 +129,33 @@ def test_stable_retro_native_vec_env_same_process(tmp_path):
         env.close()
 
 
+def test_stable_retro_native_vec_env_chw_observation_layout(tmp_path):
+    pytest.importorskip("stable_baselines3")
+
+    env = _make_test_native_vec_env(
+        tmp_path,
+        obs_layout="chw",
+        info_mode="terminal",
+    )
+    try:
+        obs = env.reset()
+        assert obs.shape == (2, 4, 84, 84)
+        assert obs.dtype == np.uint8
+        assert env.observation_space.shape == (4, 84, 84)
+        assert all(env.observation_space.contains(obs[i]) for i in range(env.num_envs))
+
+        actions = np.asarray([env.action_space.sample() for _ in range(env.num_envs)])
+        obs, rewards, dones, infos = env.step(actions)
+        assert obs.shape == (2, 4, 84, 84)
+        assert rewards.shape == (2,)
+        assert rewards.dtype == np.float32
+        assert dones.tolist() == [False, False]
+        assert len(infos) == 2
+        assert all(env.observation_space.contains(obs[i]) for i in range(env.num_envs))
+    finally:
+        env.close()
+
+
 @pytest.mark.parametrize("info_mode", ["terminal", "none"])
 def test_stable_retro_native_vec_env_fast_info_modes(info_mode, tmp_path):
     pytest.importorskip("stable_baselines3")
@@ -144,6 +171,52 @@ def test_stable_retro_native_vec_env_fast_info_modes(info_mode, tmp_path):
         assert infos == [{}, {}]
     finally:
         env.close()
+
+
+def test_stable_retro_native_vec_env_selected_info_keys(tmp_path):
+    pytest.importorskip("stable_baselines3")
+    import stable_retro as retro
+    from stable_retro.vec_env import StableRetroNativeVecEnv
+
+    root = Path(__file__).resolve().parents[1]
+    rom_path = root / "roms" / "Dr88-FamiconIntro.nes"
+    info_path = _time_reward_info_path(tmp_path)
+
+    common_kwargs = dict(
+        state=retro.State.NONE,
+        rom_path=str(rom_path),
+        info=str(info_path),
+        scenario=str(info_path),
+        obs_resize=(84, 84),
+        obs_grayscale=True,
+        frame_skip=2,
+        frame_stack=4,
+        num_threads=1,
+        info_mode="all",
+    )
+    default_env = StableRetroNativeVecEnv("Dr88-FamiconIntro", 1, **common_kwargs)
+    selected_env = StableRetroNativeVecEnv(
+        "Dr88-FamiconIntro",
+        1,
+        info_keys=["frame_reward_source"],
+        **common_kwargs,
+    )
+    try:
+        default_env.reset()
+        selected_env.reset()
+        action = np.zeros((1, default_env.num_buttons), dtype=np.uint8)
+        default_obs, default_rewards, default_dones, default_infos = default_env.step(action)
+        selected_obs, selected_rewards, selected_dones, selected_infos = selected_env.step(action)
+
+        np.testing.assert_array_equal(default_obs, selected_obs)
+        np.testing.assert_array_equal(default_rewards, selected_rewards)
+        np.testing.assert_array_equal(default_dones, selected_dones)
+        assert selected_infos == [
+            {"frame_reward_source": default_infos[0]["frame_reward_source"]},
+        ]
+    finally:
+        default_env.close()
+        selected_env.close()
 
 
 def test_stable_retro_native_vec_env_observations_do_not_alias_previous_step(tmp_path):
@@ -396,6 +469,101 @@ def test_stable_retro_native_vec_env_nes_render_skip_matches_full_render(
     _assert_native_traces_equal(baseline, render_skip)
 
 
+def _as_hwc_observation(obs, obs_layout):
+    obs = np.asarray(obs)
+    if obs_layout == "chw":
+        return np.transpose(obs, (0, 2, 3, 1))
+    return obs
+
+
+def _as_hwc_terminal_observation(obs, obs_layout):
+    obs = np.asarray(obs)
+    if obs_layout == "chw":
+        return np.transpose(obs, (1, 2, 0))
+    return obs
+
+
+def _normalize_infos_as_hwc(infos, obs_layout):
+    normalized = []
+    for info in infos:
+        normalized_info = {}
+        for key, value in info.items():
+            if key == "terminal_observation":
+                normalized_info["terminal_observation_sha"] = _sha(
+                    _as_hwc_terminal_observation(value, obs_layout),
+                )
+                continue
+            if key == "reset_info":
+                continue
+            if hasattr(value, "item"):
+                value = value.item()
+            normalized_info[key] = value
+        normalized.append(normalized_info)
+    return normalized
+
+
+def _native_layout_trace(tmp_path, obs_layout, actions):
+    import stable_retro as retro
+    from stable_retro.vec_env import StableRetroNativeVecEnv
+
+    root = Path(__file__).resolve().parents[1]
+    rom_path = root / "roms" / "Dr88-FamiconIntro.nes"
+    done_info = _done_on_frame_info_path(tmp_path)
+    env = StableRetroNativeVecEnv(
+        "Dr88-FamiconIntro",
+        4,
+        state=retro.State.NONE,
+        rom_path=str(rom_path),
+        info=str(done_info),
+        scenario=str(done_info),
+        obs_resize=(84, 84),
+        obs_grayscale=True,
+        frame_skip=4,
+        frame_stack=4,
+        maxpool_last_two=True,
+        num_threads=2,
+        copy_observations=False,
+        info_mode="all",
+        obs_layout=obs_layout,
+    )
+    try:
+        env.seed(20260617)
+        obs = env.reset()
+        trace = [(_sha(_as_hwc_observation(obs, obs_layout)), None, None, None)]
+        terminal_count = 0
+        for action in actions:
+            obs, rewards, dones, infos = env.step(action)
+            terminal_count += sum("terminal_observation" in info for info in infos)
+            trace.append(
+                (
+                    _sha(_as_hwc_observation(obs, obs_layout)),
+                    rewards.copy(),
+                    dones.copy(),
+                    _normalize_infos_as_hwc(infos, obs_layout),
+                ),
+            )
+        assert terminal_count > 0
+        return trace
+    finally:
+        env.close()
+
+
+def test_stable_retro_native_vec_env_chw_matches_hwc_trace(tmp_path):
+    pytest.importorskip("stable_baselines3")
+
+    actions = np.random.default_rng(20260617).integers(
+        0,
+        2,
+        size=(12, 4, 9),
+        dtype=np.uint8,
+    )
+
+    hwc = _native_layout_trace(tmp_path, "hwc", actions)
+    chw = _native_layout_trace(tmp_path, "chw", actions)
+
+    _assert_native_traces_equal(hwc, chw)
+
+
 def test_stable_retro_native_vec_env_mario_infos_if_rom_present():
     pytest.importorskip("stable_baselines3")
     import stable_retro as retro
@@ -459,6 +627,33 @@ def test_stable_retro_native_vec_env_mario_infos_if_rom_present():
     finally:
         env.close()
         terminal_env.close()
+
+
+def test_stable_retro_native_vec_env_mario_all_info_keys_match_default():
+    pytest.importorskip("stable_baselines3")
+
+    mario_keys = [
+        "coins",
+        "levelHi",
+        "levelLo",
+        "lives",
+        "score",
+        "scrolling",
+        "time",
+        "xscrollHi",
+        "xscrollLo",
+    ]
+    actions = np.random.default_rng(20260618).integers(
+        0,
+        2,
+        size=(48, 8, 9),
+        dtype=np.uint8,
+    )
+
+    baseline = _mario_native_trace(True, 4, 321, actions)
+    selected = _mario_native_trace(True, 4, 321, actions, info_keys=mario_keys)
+
+    _assert_native_traces_equal(baseline, selected)
 
 
 def _mario_native_trace(copy_observations, num_threads, seed, actions, **env_kwargs):

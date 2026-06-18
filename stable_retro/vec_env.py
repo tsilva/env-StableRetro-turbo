@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import gymnasium as gym
 
 try:
     from stable_baselines3.common.vec_env import VecEnv
@@ -55,7 +56,16 @@ class StableRetroNativeVecEnv(VecEnv):
 
         env_kwargs = dict(env_kwargs)
         info_mode = str(env_kwargs.pop("info_mode", "all"))
+        info_keys = env_kwargs.pop("info_keys", None)
+        if isinstance(info_keys, str):
+            raise ValueError("info_keys must be a sequence of strings, not a string")
+        if info_keys is not None:
+            info_keys = [str(key) for key in info_keys]
         unsafe_zero_copy = bool(env_kwargs.pop("unsafe_zero_copy", False))
+        obs_layout = str(env_kwargs.pop("obs_layout", "hwc")).lower()
+        if obs_layout not in {"hwc", "chw"}:
+            raise ValueError("obs_layout must be 'hwc' or 'chw'")
+        self.obs_layout = obs_layout
         self.copy_observations = bool(copy_observations)
         self.unsafe_zero_copy = unsafe_zero_copy
         if self.copy_observations and self.unsafe_zero_copy:
@@ -97,7 +107,10 @@ class StableRetroNativeVecEnv(VecEnv):
             crop = template._effective_crop(0, height, width)
             initial_state = template.initial_state if template.initial_state else None
             self.action_space = template.action_space
-            self.observation_space = template.observation_space
+            self.observation_space = self._observation_space_for_layout(
+                template.observation_space,
+                obs_layout,
+            )
             self.num_buttons = template.num_buttons
             self.button_combos = [
                 [int(action) for action in combo] for combo in template.button_combos
@@ -137,8 +150,24 @@ class StableRetroNativeVecEnv(VecEnv):
             int(num_threads),
             info_mode,
             unsafe_zero_copy,
+            obs_layout,
+            info_keys,
         )
         super().__init__(int(num_envs), self.observation_space, self.action_space)
+
+    @staticmethod
+    def _observation_space_for_layout(observation_space, obs_layout):
+        if obs_layout == "hwc":
+            return observation_space
+        if len(observation_space.shape) != 3:
+            raise ValueError("obs_layout='chw' requires image observations")
+        height, width, channels = observation_space.shape
+        return gym.spaces.Box(
+            low=0,
+            high=255,
+            shape=(channels, height, width),
+            dtype=np.uint8,
+        )
 
     @staticmethod
     def _resolve_info_path(retro, game, info, inttype):
