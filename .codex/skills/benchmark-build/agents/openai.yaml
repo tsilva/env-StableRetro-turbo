@@ -1,0 +1,4 @@
+interface:
+  display_name: "Benchmark Build"
+  short_description: "Run stable-retro-turbo wheel benchmarks"
+  default_prompt: "Use $benchmark-build to benchmark the current stable-retro-turbo build on SuperMarioBros-NES."

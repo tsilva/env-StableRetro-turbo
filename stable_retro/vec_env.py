@@ -20,6 +20,11 @@ class StableRetroNativeVecEnv(VecEnv):
     frame skip, preprocessing, frame stacking, autoreset, reward/done
     evaluation, and batched observation buffer.
 
+    Life-loss termination is opt-in and game/config-specific. Enable it only
+    for games whose info data has a life counter with the intended semantics,
+    by passing terminate_on_life_loss=True and an explicit life_variable such
+    as "lives" for SuperMarioBros-Nes-v0.
+
     With copy_observations=False, returned observations are double-buffered so
     the previous observation survives the next step for SB3 rollout collection.
     unsafe_zero_copy=True restores single-buffer aliasing for benchmarks only.
@@ -62,6 +67,20 @@ class StableRetroNativeVecEnv(VecEnv):
         if info_keys is not None:
             info_keys = [str(key) for key in info_keys]
         unsafe_zero_copy = bool(env_kwargs.pop("unsafe_zero_copy", False))
+        terminate_on_life_loss = bool(
+            env_kwargs.pop("terminate_on_life_loss", False),
+        )
+        life_variable = env_kwargs.pop("life_variable", None)
+        if terminate_on_life_loss:
+            if life_variable is None or str(life_variable) == "":
+                raise ValueError(
+                    "life_variable is required when terminate_on_life_loss=True",
+                )
+            life_variable = str(life_variable)
+        elif life_variable is None:
+            life_variable = ""
+        else:
+            life_variable = str(life_variable)
         obs_layout = str(env_kwargs.pop("obs_layout", "hwc")).lower()
         if obs_layout not in {"hwc", "chw"}:
             raise ValueError("obs_layout must be 'hwc' or 'chw'")
@@ -152,6 +171,8 @@ class StableRetroNativeVecEnv(VecEnv):
             unsafe_zero_copy,
             obs_layout,
             info_keys,
+            terminate_on_life_loss,
+            life_variable,
         )
         super().__init__(int(num_envs), self.observation_space, self.action_space)
 

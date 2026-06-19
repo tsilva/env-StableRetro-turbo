@@ -1278,7 +1278,9 @@ public:
 		const string& infoMode,
 		bool unsafeZeroCopy,
 		const string& obsLayout,
-		py::object infoKeysObj
+		py::object infoKeysObj,
+		bool terminateOnLifeLoss,
+		const string& lifeVariable
 	)
 		: m_numButtons(numButtons)
 		, m_frameSkip(frameSkip)
@@ -1297,6 +1299,8 @@ public:
 		, m_fullInfo(infoMode == "all")
 		, m_noInfo(infoMode == "none")
 		, m_unsafeZeroCopy(unsafeZeroCopy)
+		, m_terminateOnLifeLoss(terminateOnLifeLoss)
+		, m_lifeVariableName(lifeVariable)
 		, m_numThreads(numThreads) {
 		if (numEnvs == 0) {
 			throw std::runtime_error("num_envs must be positive");
@@ -1329,6 +1333,9 @@ public:
 		} else {
 			throw std::runtime_error("obs_layout must be hwc or chw");
 		}
+		if (m_terminateOnLifeLoss && m_lifeVariableName.empty()) {
+			throw std::runtime_error("life_variable is required when terminate_on_life_loss=True");
+		}
 		if (!infoKeysObj.is_none()) {
 			py::sequence infoKeys = py::reinterpret_borrow<py::sequence>(infoKeysObj);
 			m_infoKeys.reserve(static_cast<size_t>(infoKeys.size()));
@@ -1351,8 +1358,15 @@ public:
 				slot->usesIndexedVideo = slot->emulator->m_re.setIndexedVideoEnabled(true);
 			}
 			if (i == 0) {
+				const auto variables = slot->data.m_data.listVariables();
+				if (m_terminateOnLifeLoss) {
+					auto lifeVariableIt = variables.find(m_lifeVariableName);
+					if (lifeVariableIt == variables.end()) {
+						throw std::runtime_error("unknown life_variable: " + m_lifeVariableName);
+					}
+					m_lifeVariable = std::make_unique<Variable>(lifeVariableIt->second);
+				}
 				if (!m_infoKeys.empty()) {
-					const auto variables = slot->data.m_data.listVariables();
 					for (const std::string& key : m_infoKeys) {
 						auto variable = variables.find(key);
 						if (variable == variables.end()) {
@@ -1387,8 +1401,9 @@ public:
 		const auto obsShape = observationBatchShape();
 		m_obsArrays[0] = py::array_t<uint8_t>(obsShape);
 		m_obsArrays[1] = m_unsafeZeroCopy ? m_obsArrays[0] : py::array_t<uint8_t>(obsShape);
-		m_rewardArray = py::array_t<float>({ static_cast<py::ssize_t>(m_slots.size()) });
-		m_doneArray = py::array_t<bool>({ static_cast<py::ssize_t>(m_slots.size()) });
+		py::array::ShapeContainer vecShape{ static_cast<py::ssize_t>(m_slots.size()) };
+		m_rewardArray = py::array_t<float>(vecShape);
+		m_doneArray = py::array_t<bool>(vecShape);
 		for (size_t i = 0; i < m_slots.size(); ++i) {
 			m_emptyInfos.append(py::dict());
 		}
@@ -1445,8 +1460,6 @@ public:
 		}
 		py::array_t<uint8_t>& obsArray = nextObservationArray();
 		uint8_t* obsData = obsArray.mutable_data();
-		auto rewards = m_rewardArray.mutable_unchecked<1>();
-		auto dones = m_doneArray.mutable_unchecked<1>();
 		std::vector<StepOutput> outputs(m_slots.size());
 		clearErrors();
 		clearTerminalObservations();
@@ -1469,9 +1482,11 @@ public:
 			});
 		}
 		throwFirstError(m_errors);
+		float* rewardData = m_rewardArray.mutable_data();
+		bool* doneData = m_doneArray.mutable_data();
 		for (size_t i = 0; i < outputs.size(); ++i) {
-			rewards(static_cast<py::ssize_t>(i)) = outputs[i].reward;
-			dones(static_cast<py::ssize_t>(i)) = outputs[i].done;
+			rewardData[i] = outputs[i].reward;
+			doneData[i] = outputs[i].done;
 			if (outputs[i].done) {
 				m_terminalObservations[i] = std::move(outputs[i].terminalObservation);
 			}
@@ -1491,6 +1506,13 @@ public:
 				info["terminal_observation"] = terminal;
 				info["reset_info"] = py::dict();
 				info["TimeLimit.truncated"] = false;
+			}
+			if (outputs[i].lifeLoss) {
+				info["life_loss"] = true;
+				info["died"] = true;
+				info["life_variable"] = m_lifeVariableName;
+				info["previous_lives"] = outputs[i].previousLifeValue;
+				info["current_lives"] = outputs[i].currentLifeValue;
 			}
 			infos.append(info);
 		}
@@ -1588,12 +1610,17 @@ private:
 		std::vector<uint8_t> lastMask;
 		bool hasLastMask = false;
 		bool usesIndexedVideo = false;
+		bool hasPreviousLifeValue = false;
+		int64_t previousLifeValue = 0;
 		std::mt19937 rng;
 	};
 
 	struct StepOutput {
 		float reward = 0.0f;
 		bool done = false;
+		bool lifeLoss = false;
+		int64_t previousLifeValue = 0;
+		int64_t currentLifeValue = 0;
 		std::vector<uint8_t> terminalObservation;
 	};
 
@@ -1795,6 +1822,36 @@ private:
 		readProcessedFrame(slot);
 		resetFrameStack(slot, slot.singleObs);
 		writeStackedObservation(slot, dst);
+		initializeLifeValue(slot);
+	}
+
+	void initializeLifeValue(Slot& slot) {
+		if (!m_terminateOnLifeLoss) {
+			return;
+		}
+		slot.previousLifeValue = slot.data.m_data.lookupValue(*m_lifeVariable);
+		slot.hasPreviousLifeValue = true;
+	}
+
+	bool checkLifeLoss(Slot& slot, StepOutput& output) {
+		if (!m_terminateOnLifeLoss) {
+			return false;
+		}
+		const int64_t currentLifeValue = slot.data.m_data.lookupValue(*m_lifeVariable);
+		if (!slot.hasPreviousLifeValue) {
+			slot.previousLifeValue = currentLifeValue;
+			slot.hasPreviousLifeValue = true;
+			return false;
+		}
+		const int64_t previousLifeValue = slot.previousLifeValue;
+		if (currentLifeValue < previousLifeValue) {
+			output.lifeLoss = true;
+			output.previousLifeValue = previousLifeValue;
+			output.currentLifeValue = currentLifeValue;
+			return true;
+		}
+		slot.previousLifeValue = currentLifeValue;
+		return false;
 	}
 
 	void stepSlot(Slot& slot, const std::vector<uint8_t>& requestedAction, uint8_t* dst, StepOutput& output, bool captureTerminalObservation) {
@@ -1843,7 +1900,9 @@ private:
 			slot.data.m_data.updateRam();
 			slot.data.m_scen.update(1);
 			totalReward += slot.data.m_scen.currentReward();
-			done = slot.data.m_scen.isDone();
+			const bool scenarioDone = slot.data.m_scen.isDone();
+			const bool lifeLoss = checkLifeLoss(slot, output);
+			done = scenarioDone || lifeLoss;
 			if (done && skippedRender && captureTerminalObservation) {
 				if (!slot.emulator->m_re.unserialize(preSkipState.data(), preSkipState.size())) {
 					throw std::runtime_error("failed to restore pre-render-skip terminal state");
@@ -2008,6 +2067,9 @@ private:
 	bool m_unsafeZeroCopy = false;
 	bool m_channelsFirst = false;
 	bool m_renderSkipEnabled = false;
+	bool m_terminateOnLifeLoss = false;
+	std::string m_lifeVariableName;
+	std::unique_ptr<Variable> m_lifeVariable;
 	std::vector<std::string> m_infoKeys;
 	std::vector<std::pair<std::string, Variable>> m_infoVariables;
 	int m_numThreads = 1;
@@ -2242,7 +2304,9 @@ PYBIND11_MODULE(_retro, m) {
 				const string&,
 				bool,
 				const string&,
-				py::object>(),
+				py::object,
+				bool,
+				const string&>(),
 			py::arg("num_envs"),
 			py::arg("rom_path"),
 			py::arg("data_path"),
@@ -2266,7 +2330,9 @@ PYBIND11_MODULE(_retro, m) {
 			py::arg("info_mode") = "all",
 			py::arg("unsafe_zero_copy") = false,
 			py::arg("obs_layout") = "hwc",
-			py::arg("info_keys") = py::none()
+			py::arg("info_keys") = py::none(),
+			py::arg("terminate_on_life_loss") = false,
+			py::arg("life_variable") = ""
 		)
 		.def("reset", &PyNativeVectorEnv::reset, py::arg("seed") = py::none())
 		.def("step", &PyNativeVectorEnv::step)
