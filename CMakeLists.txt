@@ -92,7 +92,14 @@ if(NOT BUILD_MANYLINUX)
   find_package(CapnProto QUIET)
 endif()
 
-pkg_search_module(LIBZIP QUIET libzip)
+option(USE_SYSTEM_LIBZIP "Use system libzip when available" ON)
+if(APPLE)
+  set(USE_SYSTEM_LIBZIP OFF)
+endif()
+
+if(USE_SYSTEM_LIBZIP)
+  pkg_search_module(LIBZIP QUIET libzip)
+endif()
 
 if(NOT BUILD_LUAJIT)
   find_package(Lua 5.1 EXACT REQUIRED)
@@ -206,11 +213,16 @@ function(add_core platform core_name)
         "${core_fpic_flags} -mmacosx-version-min=10.7 -stdlib=libc++")
   endif()
 
+  set(core_archflags)
+  if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+    set(core_archflags "-arch arm64")
+  endif()
+
   add_custom_command(
     OUTPUT "${TARGET_PATH}"
     COMMAND
       ${CMAKE_COMMAND} -E env CFLAGS=${core_cflags} CXXFLAGS=${core_cxxflags}
-      LDFLAGS=${core_ldflags} $(MAKE) -f ${makefile} CC="${CMAKE_C_COMPILER}"
+      LDFLAGS=${core_ldflags} ARCHFLAGS=${core_archflags} $(MAKE) -f ${makefile} CC="${CMAKE_C_COMPILER}"
       CXX="${CMAKE_CXX_COMPILER}" fpic=${core_fpic_flags} ${libretro_platform}
     COMMAND ${CMAKE_COMMAND} -E copy "${core_name}_libretro${DYNLIB_SUFFIX}"
             "${TARGET_PATH}"
@@ -249,12 +261,7 @@ add_core(snes snes9x)
 add_core(genesis genesis_plus_gx)
 add_core(nes fceumm)
 add_core(atari2600 stella)
-
-if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
-  message(warning "Detected Apple Silicon, skipping gambatte (gb)")
-else()
-  add_core(gb gambatte)
-endif()
+add_core(gb gambatte)
 
 add_core(gba mgba)
 add_core(pce mednafen_pce_fast)
@@ -357,7 +364,7 @@ set(BUILD_STATIC_LIBS
     ON
     CACHE BOOL "" FORCE)
 
-if(LIBZIP_FOUND AND NOT LIBZIP_VERSION VERSION_LESS 1.0.0)
+if(USE_SYSTEM_LIBZIP AND LIBZIP_FOUND AND NOT LIBZIP_VERSION VERSION_LESS 1.0.0)
   include_directories(${LIBZIP_INCLUDE_DIRS})
   link_directories(${LIBZIP_LIBRARY_DIRS})
 else()

@@ -1,4 +1,5 @@
 import os
+import platform
 import shlex
 import subprocess
 import sys
@@ -6,6 +7,7 @@ import sysconfig
 
 from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
+from setuptools.command.bdist_wheel import bdist_wheel
 
 VERSION_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
@@ -73,6 +75,21 @@ class CMakeBuild(build_ext):
         subprocess.check_call(["make", jobs, "stable_retro"])
 
 
+class BdistWheel(bdist_wheel):
+    def _macos_arm64_tag(self):
+        if (
+            sys.platform == "darwin"
+            and platform.machine() == "arm64"
+            and not self.plat_name_supplied
+        ):
+            impl, abi, _plat = super().get_tag()
+            return impl, abi, "macosx_11_0_arm64"
+        return None
+
+    def get_tag(self):
+        return self._macos_arm64_tag() or super().get_tag()
+
+
 platforms = [
     "Nes",
     "Snes",
@@ -127,7 +144,7 @@ setup(
         "Programming Language :: Python :: 3.14",
     ],
     ext_modules=[Extension("stable_retro._retro", ["CMakeLists.txt", "src/*.cpp"])],
-    cmdclass={"build_ext": CMakeBuild},
+    cmdclass={"build_ext": CMakeBuild, "bdist_wheel": BdistWheel},
     packages=[
         "retro",  # Compatibility shim
         "stable_retro",

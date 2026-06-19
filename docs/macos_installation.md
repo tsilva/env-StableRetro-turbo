@@ -35,10 +35,6 @@ pip3 install -e .
 
 Tested on Python 3.10.
 
-```{note}
-The Game Boy (gambatte) emulator is not supported on Apple Silicon.
-```
-
 ### Build from Source
 
 1. Install build dependencies:
@@ -109,4 +105,3 @@ env.close()
 - **Import errors**: Ensure you have the correct Python version (3.10-3.14)
 - **Build failures on Apple Silicon**: Make sure you've set `SDKROOT` correctly
 - **Qt not found**: Verify Qt is in your PATH after running the export command
-- **Game Boy games not working on Apple Silicon**: This is expected; the gambatte core is not supported on arm64
