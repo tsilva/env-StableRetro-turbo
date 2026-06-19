@@ -9,7 +9,7 @@ description: Build and validate the next stable-retro-turbo post-version release
 
 Use this skill to create publish-ready `stable_retro_turbo` wheels for the next `.postN` version on macOS arm64 and Linux x86_64. Treat `stable_retro/VERSION.txt` as the source of truth for the current version.
 
-The expected final output is two wheel paths, SHA256 hashes, validation results, notable warnings, and the exact `twine upload` command.
+The expected final output is two wheel paths, SHA256 hashes, validation results, notable warnings, and the exact deploy command for uploading the built wheels with `twine`.
 
 ## Version And Worktree
 
@@ -141,7 +141,7 @@ When subagents are available and the user asks to parallelize, split macOS and L
 - The version string
 - The platform-specific command and validation checklist from this skill
 
-Keep the main agent responsible for final host-side validation and the final upload command.
+Keep the main agent responsible for final host-side validation and the final deploy command.
 
 ## Final Validation
 
@@ -159,10 +159,20 @@ Also inspect wheel contents with Python `zipfile` or an equivalent command to co
 - No `cp311` extension exists
 - All four public cores are present
 
-Finish with this command shape:
+## Post-Build Deploy Command
+
+Always include the concrete `twine upload` command in the final response after a successful build. Do this even if the user only asked for builds, because the next action is usually publishing.
+
+Use the exact wheel paths and version that were just built:
 
 ```bash
 .venv314/bin/python -m twine upload \
   wheelhouse-post<N>-repaired/stable_retro_turbo-<version>-cp314-cp314-macosx_14_0_arm64.whl \
   wheelhouse-post<N>-linux/stable_retro_turbo-<version>-cp314-cp314-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl
+```
+
+If `twine` is not installed in `.venv314` or the user asks how to deploy, also include this setup command before the upload command:
+
+```bash
+.venv314/bin/python -m pip install twine
 ```
