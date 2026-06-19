@@ -283,7 +283,7 @@ class CMakeBuild(build_ext):
 
 
 setup(
-    name="stable-retro",
+    name="stable-retro-turbo",
     long_description=README,
     long_description_content_type="text/markdown",
     author="Farama Foundation",

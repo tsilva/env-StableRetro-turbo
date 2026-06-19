@@ -1,4 +1,4 @@
-"""Benchmark the supported native stable-retro vector rollout path."""
+"""Benchmark stable-retro vector rollout paths."""
 
 from __future__ import annotations
 
@@ -8,6 +8,9 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
+
+import gymnasium as gym
+import numpy as np
 
 
 @dataclass
@@ -132,10 +135,216 @@ def _parse_info_keys(value, *, game, info, retro):
     return sorted(str(key) for key in info_data)
 
 
+def _add_rewards(left, right):
+    if left is None:
+        return right
+    if isinstance(left, (list, tuple, np.ndarray)) or isinstance(
+        right,
+        (list, tuple, np.ndarray),
+    ):
+        return (
+            np.asarray(left, dtype=np.float32) + np.asarray(right, dtype=np.float32)
+        ).tolist()
+    return left + right
+
+
+class BenchmarkRetroPreprocessWrapper(gym.Wrapper):
+    """Benchmark-only wrapper matching the native profile for classic RetroEnv."""
+
+    def __init__(
+        self,
+        env,
+        *,
+        obs_resize,
+        obs_crop,
+        obs_grayscale,
+        obs_resize_algorithm,
+        frame_skip,
+        frame_stack,
+        maxpool_last_two,
+    ):
+        super().__init__(env)
+        self.action_space = env.action_space
+        self.metadata = getattr(env, "metadata", {})
+        self._obs_resize = obs_resize
+        self._obs_crop = obs_crop
+        self._obs_grayscale = bool(obs_grayscale)
+        self._obs_resize_algorithm = str(obs_resize_algorithm).lower()
+        if self._obs_resize_algorithm == "box":
+            self._obs_resize_algorithm = "area"
+        if self._obs_resize_algorithm == "linear":
+            self._obs_resize_algorithm = "bilinear"
+        if self._obs_resize_algorithm not in {"nearest", "bilinear", "area"}:
+            raise ValueError(
+                "obs_resize_algorithm must be one of: nearest, bilinear, area",
+            )
+        self._frame_skip = int(frame_skip)
+        self._frame_stack = int(frame_stack)
+        self._maxpool_last_two = bool(maxpool_last_two)
+        if self._frame_skip <= 0:
+            raise ValueError("frame_skip must be positive")
+        if self._frame_stack <= 0:
+            raise ValueError("frame_stack must be positive")
+        self._frame_stack_buffer = []
+        sample = np.zeros(env.observation_space.shape, dtype=np.uint8)
+        processed = self._process_observation(sample)
+        self.observation_space = gym.spaces.Box(
+            low=0,
+            high=255,
+            shape=self._stacked_obs_shape(processed.shape),
+            dtype=np.uint8,
+        )
+
+    def __getattr__(self, name):
+        return getattr(self.env, name)
+
+    def _stacked_obs_shape(self, shape):
+        if self._frame_stack == 1:
+            return shape
+        if len(shape) == 1:
+            return (shape[0] * self._frame_stack,)
+        return (*shape[:-1], shape[-1] * self._frame_stack)
+
+    def _stack_frames(self):
+        if self._frame_stack == 1:
+            return self._frame_stack_buffer[-1]
+        if self._frame_stack_buffer[-1].ndim == 1:
+            return np.concatenate(self._frame_stack_buffer, axis=0)
+        return np.concatenate(self._frame_stack_buffer, axis=-1)
+
+    def _reset_frame_stack(self, obs):
+        obs = np.asarray(obs, dtype=np.uint8)
+        if self._frame_stack == 1:
+            self._frame_stack_buffer = [obs]
+            return obs
+        self._frame_stack_buffer = [obs.copy() for _ in range(self._frame_stack)]
+        return self._stack_frames()
+
+    def _append_frame_stack(self, obs):
+        obs = np.asarray(obs, dtype=np.uint8)
+        if not self._frame_stack_buffer:
+            return self._reset_frame_stack(obs)
+        self._frame_stack_buffer.append(obs.copy())
+        del self._frame_stack_buffer[: -self._frame_stack]
+        return self._stack_frames()
+
+    def _apply_obs_crop(self, image):
+        if self._obs_crop is None:
+            return image
+        top, bottom, left, right = self._obs_crop
+        height, width = image.shape[:2]
+        y2 = height - bottom if bottom else height
+        x2 = width - right if right else width
+        if top >= y2 or left >= x2:
+            raise ValueError("obs_crop removes the entire observation")
+        return image[top:y2, left:x2]
+
+    def _apply_obs_grayscale(self, image):
+        if image.ndim == 2:
+            image = image[:, :, None]
+        if not self._obs_grayscale:
+            return image
+        gray = (
+            image[:, :, 0].astype(np.uint16) * 77
+            + image[:, :, 1].astype(np.uint16) * 150
+            + image[:, :, 2].astype(np.uint16) * 29
+            + 128
+        ) >> 8
+        return gray.astype(np.uint8)[:, :, None]
+
+    def _resize_obs(self, image):
+        if self._obs_resize is None:
+            return image
+        height, width = self._obs_resize
+        src_height, src_width = image.shape[:2]
+        if self._obs_resize_algorithm == "nearest":
+            y_idx = np.linspace(0, src_height - 1, height).astype(np.intp)
+            x_idx = np.linspace(0, src_width - 1, width).astype(np.intp)
+            return image[y_idx][:, x_idx]
+        if self._obs_resize_algorithm == "bilinear":
+            y = np.linspace(0, src_height - 1, height, dtype=np.float32)
+            x = np.linspace(0, src_width - 1, width, dtype=np.float32)
+            y0 = np.floor(y).astype(np.intp)
+            x0 = np.floor(x).astype(np.intp)
+            y1 = np.minimum(y0 + 1, src_height - 1)
+            x1 = np.minimum(x0 + 1, src_width - 1)
+            wy = (y - y0).astype(np.float32)[:, None, None]
+            wx = (x - x0).astype(np.float32)[None, :, None]
+            top = (
+                image[y0][:, x0].astype(np.float32) * (1.0 - wx)
+                + image[y0][:, x1].astype(np.float32) * wx
+            )
+            bottom = (
+                image[y1][:, x0].astype(np.float32) * (1.0 - wx)
+                + image[y1][:, x1].astype(np.float32) * wx
+            )
+            return np.clip(top * (1.0 - wy) + bottom * wy, 0, 255).astype(np.uint8)
+        if height > src_height or width > src_width:
+            raise ValueError("area resize only supports downscaling")
+        y_edges = np.linspace(0, src_height, height + 1).astype(np.intp)
+        x_edges = np.linspace(0, src_width, width + 1).astype(np.intp)
+        y_edges[1:] = np.maximum(y_edges[1:], y_edges[:-1] + 1)
+        x_edges[1:] = np.maximum(x_edges[1:], x_edges[:-1] + 1)
+        y_edges[-1] = src_height
+        x_edges[-1] = src_width
+        integral = image.astype(np.uint32).cumsum(axis=0).cumsum(axis=1)
+        integral = np.pad(integral, ((1, 0), (1, 0), (0, 0)), mode="constant")
+        y0 = y_edges[:-1]
+        y1 = y_edges[1:]
+        x0 = x_edges[:-1]
+        x1 = x_edges[1:]
+        sums = (
+            integral[y1[:, None], x1[None, :]]
+            - integral[y0[:, None], x1[None, :]]
+            - integral[y1[:, None], x0[None, :]]
+            + integral[y0[:, None], x0[None, :]]
+        )
+        pixels = ((y1 - y0)[:, None] * (x1 - x0)[None, :])[:, :, None]
+        return (sums // pixels).astype(np.uint8)
+
+    def _process_observation(self, obs):
+        obs = np.asarray(obs, dtype=np.uint8)
+        obs = self._apply_obs_crop(obs)
+        obs = self._apply_obs_grayscale(obs)
+        return self._resize_obs(obs)
+
+    def reset(self, seed=None, options=None):
+        obs, info = self.env.reset(seed=seed, options=options)
+        return self._reset_frame_stack(self._process_observation(obs)), info
+
+    def step(self, action):
+        total_reward = None
+        terminated = False
+        truncated = False
+        info = {}
+        obs = None
+        recent_obs = []
+        for _ in range(self._frame_skip):
+            obs, reward, terminated, truncated, info = self.env.step(action)
+            total_reward = _add_rewards(total_reward, reward)
+            if self._maxpool_last_two:
+                recent_obs.append(np.asarray(obs, dtype=np.uint8))
+                del recent_obs[:-2]
+            if terminated or truncated:
+                break
+        if obs is None:
+            raise RuntimeError("RetroEnv step did not produce an observation")
+        if self._maxpool_last_two and len(recent_obs) == 2:
+            obs = np.maximum(recent_obs[0], recent_obs[1])
+        processed = self._process_observation(obs)
+        reward = total_reward if total_reward is not None else 0.0
+        return self._append_frame_stack(processed), reward, terminated, truncated, info
+
+    def render(self):
+        return self.env.render()
+
+    def close(self):
+        return self.env.close()
+
+
 def _sample_actions(env, fixed_actions=None):
     if fixed_actions is not None:
         return fixed_actions
-    import numpy as np
 
     return np.asarray([env.action_space.sample() for _ in range(env.num_envs)])
 
@@ -185,6 +394,80 @@ def _build_native_vec(
     )
 
 
+def _make_regular_retro_env(game, state, info, scenario, env_kwargs):
+    import stable_retro as retro
+
+    preprocess_kwargs = {
+        "obs_resize": env_kwargs["obs_resize"],
+        "obs_crop": env_kwargs["obs_crop"],
+        "obs_grayscale": env_kwargs["obs_grayscale"],
+        "obs_resize_algorithm": env_kwargs["obs_resize_algorithm"],
+        "frame_skip": env_kwargs["frame_skip"],
+        "frame_stack": env_kwargs["frame_stack"],
+        "maxpool_last_two": env_kwargs["maxpool_last_two"],
+    }
+    env = retro.make(
+        game,
+        state=state,
+        inttype=retro.data.Integrations.DEFAULT,
+        info=info,
+        scenario=scenario,
+        render_mode=env_kwargs.get("render_mode", "rgb_array"),
+    )
+    return BenchmarkRetroPreprocessWrapper(env, **preprocess_kwargs)
+
+
+def _build_regular_vec(
+    backend,
+    game,
+    state,
+    num_envs,
+    env_kwargs,
+    *,
+    rom_path=None,
+    info=None,
+    scenario=None,
+    start_method="fork",
+):
+    if rom_path is not None:
+        raise SystemExit("--rom-path is only supported with --backend=native")
+    if env_kwargs.get("info_keys") is not None:
+        raise SystemExit("--info-keys is only supported with --backend=native")
+    if env_kwargs.get("obs_layout", "hwc") != "hwc":
+        raise SystemExit("--obs-layout=chw requires --backend=native")
+    from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
+
+    env_fns = [
+        (
+            lambda game=game, state=state, info=info, scenario=scenario: (
+                _make_regular_retro_env(game, state, info, scenario, env_kwargs)
+            )
+        )
+        for _ in range(num_envs)
+    ]
+    if backend == "dummy":
+        return DummyVecEnv(env_fns)
+    if backend == "subproc":
+        return SubprocVecEnv(env_fns, start_method=start_method)
+    raise ValueError(f"Unsupported regular backend: {backend}")
+
+
+def _native_vec_available():
+    try:
+        from stable_retro.vec_env import StableRetroNativeVecEnv  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def _resolve_backend(requested):
+    if requested != "auto":
+        return requested
+    if _native_vec_available():
+        return "native"
+    return "subproc"
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--profiles-json", default=str(_default_profiles_json_path()))
@@ -197,6 +480,23 @@ def main(argv=None) -> int:
     parser.add_argument("--scenario", default=None)
     parser.add_argument("--num-envs", type=int, default=None)
     parser.add_argument("--num-threads", type=int, default=None)
+    parser.add_argument(
+        "--backend",
+        choices=("auto", "native", "subproc", "dummy"),
+        default="auto",
+        help=(
+            "Vector backend. 'native' uses StableRetroNativeVecEnv; 'subproc' and "
+            "'dummy' use classic RetroEnv plus benchmark preprocessing wrappers. "
+            "'auto' chooses native when available, otherwise subproc for vanilla "
+            "post0-style builds."
+        ),
+    )
+    parser.add_argument(
+        "--subproc-start-method",
+        choices=("fork", "forkserver", "spawn"),
+        default="fork",
+        help="Multiprocessing start method for --backend=subproc.",
+    )
     parser.add_argument("--seconds", type=float, default=10.0)
     parser.add_argument("--warmup-steps", type=int, default=16)
     parser.add_argument("--resize", default=None)
@@ -313,12 +613,18 @@ def main(argv=None) -> int:
         env_kwargs["info_keys"] = info_keys
     if args.vec_transpose_image and args.obs_layout != "hwc":
         raise SystemExit("--vec-transpose-image requires --obs-layout=hwc")
+    backend = _resolve_backend(args.backend)
 
     state_label = "State.NONE" if state is retro.State.NONE else str(state)
     action_label = "fixed" if args.fixed_actions else "sampled"
+    parallel_label = (
+        f"threads={num_threads or num_envs}"
+        if backend == "native"
+        else f"workers={num_envs}"
+    )
     print(
-        f"profile={args.profile} game={game} state={state_label} "
-        f"envs={num_envs} threads={num_threads or num_envs} "
+        f"profile={args.profile} backend={backend} game={game} state={state_label} "
+        f"envs={num_envs} {parallel_label} "
         f"resize={resize} grayscale={grayscale} crop={obs_crop} "
         f"resize_algorithm={resize_algorithm} frame_skip={frame_skip} "
         f"frame_stack={frame_stack} info_mode={args.info_mode} "
@@ -332,18 +638,33 @@ def main(argv=None) -> int:
     old_disable_audio = os.environ.get("STABLE_RETRO_DISABLE_AUDIO")
     os.environ["STABLE_RETRO_DISABLE_AUDIO"] = "1"
     try:
-        env = _build_native_vec(
-            game,
-            state,
-            retro.data.Integrations.DEFAULT,
-            num_envs,
-            env_kwargs,
-            rom_path=rom_path,
-            info=info,
-            scenario=scenario,
-            num_threads=num_threads,
-            copy_observations=args.copy_observations,
-        )
+        if backend == "native":
+            env = _build_native_vec(
+                game,
+                state,
+                retro.data.Integrations.DEFAULT,
+                num_envs,
+                env_kwargs,
+                rom_path=rom_path,
+                info=info,
+                scenario=scenario,
+                num_threads=num_threads,
+                copy_observations=args.copy_observations,
+            )
+            result_name = "native_vec_fused"
+        else:
+            env = _build_regular_vec(
+                backend,
+                game,
+                state,
+                num_envs,
+                env_kwargs,
+                rom_path=rom_path,
+                info=info,
+                scenario=scenario,
+                start_method=args.subproc_start_method,
+            )
+            result_name = f"{backend}_vec_retro"
         if args.vec_transpose_image:
             from stable_baselines3.common.vec_env import VecTransposeImage
 
@@ -352,7 +673,7 @@ def main(argv=None) -> int:
         if args.fixed_actions:
             fixed_actions = _sample_actions(env)
         result = _run_vec(
-            "native_vec_fused",
+            result_name,
             env,
             args.seconds,
             args.warmup_steps,

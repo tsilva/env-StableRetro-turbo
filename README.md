@@ -69,6 +69,20 @@ autoreset, and the batched NumPy observation buffer.
 Latest local benchmark: Super Mario Bros Level 1-1 with PPO-style Atari
 preprocessing.
 
+Latest benchmark comparison, updated from the standard benchmark protocol on
+macOS 26.5.1 / arm64. Each row uses `SuperMarioBros-Nes-v0` / `Level1-1`,
+`32` envs, sampled actions, crop `(32,0,0,0)`, resize `84x84` area,
+grayscale, frame skip `4`, frame stack `4`, max-pool last two frames, and
+audio disabled.
+
+| Version / build | Backend | Samples (steps/s) | Mean steps/s | Std steps/s | Speedup vs `.post0` |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `1.0.0.post14` current/latest | `native_vec_fused` | `6614.1`, `5825.1`, `8842.6` | `7093.9` | `1564.9` | `3.77x` |
+| `1.0.0.post0` vanilla baseline | `subproc_vec_retro` | `2288.7`, `2099.6`, `1254.6` | `1881.0` | `550.6` | `1.00x` |
+
+When running a new release benchmark, update the comparison table above with
+the requested/current build first and the `.post0` baseline second.
+
 | Run | Computer | OS / arch | Emulated platform | Game / state | Envs | Threads | Preprocessing | Throughput |
 | --- | --- | --- | --- | --- | ---: | ---: | --- | ---: |
 | Baseline native vec | MacBook Pro, Apple M1 Pro, 8 cores, 16 GB RAM | macOS 26.5.1 / arm64 | NES via `fceumm` | `SuperMarioBros-Nes-v0` / `Level1-1` | 32 | 16 | crop `(32,0,0,0)`, resize `84x84` area, grayscale, frame skip `4`, frame stack `4`, max-pool last two frames, sampled actions, audio disabled | 4,434.7 steps/s |
@@ -82,6 +96,12 @@ Re-run the default profile:
 ```bash
 python3 scripts/benchmark_vec_env.py --profile supermario-level1-1
 ```
+
+The benchmarker defaults to `--backend auto`: current wheels use
+`StableRetroNativeVecEnv`, while vanilla `.post0` wheels fall back to
+`SubprocVecEnv` over classic `RetroEnv` with the same profile-level preprocessing
+applied by the benchmark script. Force a path with `--backend native`,
+`--backend subproc`, or `--backend dummy`.
 
 Override scale when comparing machines:
 
@@ -105,6 +125,21 @@ env = retro.StableRetroNativeVecEnv(
     frame_skip=4,
     frame_stack=4,
     maxpool_last_two=True,
+)
+```
+
+First-life-loss episode termination can be enabled in the native vector path
+for games whose data files expose a suitable life counter. This is opt-in
+because not every game has a valid `lives` variable, and similarly named
+variables are not guaranteed to mean the same thing across games:
+
+```python
+env = retro.StableRetroNativeVecEnv(
+    "SuperMarioBros-Nes-v0",
+    num_envs=32,
+    state="Level1-1",
+    terminate_on_life_loss=True,
+    life_variable="lives",
 )
 ```
 

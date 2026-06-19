@@ -14,8 +14,16 @@ The expected final output is two wheel paths, SHA256 hashes, validation results,
 ## Version And Worktree
 
 1. Read `stable_retro/VERSION.txt` and bump to the next post version with `apply_patch`. For example, `1.0.0.post13` becomes `1.0.0.post14`.
-2. Run `git status --short --branch` before building. Preserve unrelated user changes and do not create or switch branches.
-3. If the source changes in the current turn have not been regression-tested, run focused tests before building:
+2. Confirm the distribution name before building:
+
+```bash
+.venv314/bin/python setup.py --name
+```
+
+It must print `stable-retro-turbo`. The import package remains `stable_retro`, but the publish target and wheel basename must be `stable_retro_turbo`.
+
+3. Run `git status --short --branch` before building. Preserve unrelated user changes and do not create or switch branches.
+4. If the source changes in the current turn have not been regression-tested, run focused tests before building:
 
 ```bash
 MPLCONFIGDIR=/tmp/matplotlib-stable-retro PYTHONPATH=. .venv314/bin/python -m pytest tests/test_python/test_vec_env.py -q
@@ -43,12 +51,37 @@ dist
 CMakeCache.txt
 CMakeFiles
 wheelhouse*
+*.o
+*.a
+*.so
+*.dylib
+*.d
 stable_retro/_retro*.so
+stable_retro/data/stable/*/rom.nes
+stable_retro/data/stable/*/rom.sfc
+stable_retro/data/stable/*/rom.smc
+stable_retro/data/stable/*/rom.gb
+stable_retro/data/stable/*/rom.gbc
+stable_retro/data/stable/*/rom.md
+stable_retro/data/stable/*/rom.gen
+stable_retro/data/stable/*/rom.sms
+stable_retro/data/stable/*/rom.bin
 __pycache__
 .pytest_cache
 ```
 
 The `dist` and root `CMakeCache.txt` exclusions are important. Previous builds surfaced stale wheels and root CMake cache contamination when these were copied.
+
+Exclude actual ROM payloads copied in during local ROM testing. Keep `rom.sha` metadata; it is part of the game metadata and does not contain the ROM. Also exclude compiled object, static library, and shared library artifacts from any prior local build. Copying macOS object files into `linux-src-clean` can break the Linux wheel build with errors like `file format not recognized`.
+
+Before starting the Linux build, verify the clean copy has no copied compiled artifacts or ROM payloads:
+
+```bash
+find /private/tmp/<build-root>/linux-src-clean \( -name '*.o' -o -name '*.a' -o -name '*.so' -o -name '*.dylib' -o -name '*.d' \) | wc -l
+find /private/tmp/<build-root>/linux-src-clean/stable_retro/data/stable -type f \( -name 'rom.nes' -o -name 'rom.sfc' -o -name 'rom.smc' -o -name 'rom.gb' -o -name 'rom.gbc' -o -name 'rom.md' -o -name 'rom.gen' -o -name 'rom.sms' -o -name 'rom.bin' \) | wc -l
+```
+
+Both commands should print `0`.
 
 ## Output Directories
 
@@ -158,6 +191,7 @@ Also inspect wheel contents with Python `zipfile` or an equivalent command to co
 - The expected `cp314` extension exists for each platform
 - No `cp311` extension exists
 - All four public cores are present
+- No ROM payloads such as `stable_retro/data/**/rom.nes`, `rom.sfc`, `rom.smc`, `rom.gb`, `rom.gbc`, `rom.md`, `rom.gen`, `rom.sms`, or `rom.bin` are present. `rom.sha` metadata is allowed.
 
 ## Post-Build Deploy Command
 
