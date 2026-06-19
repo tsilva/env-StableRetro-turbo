@@ -283,20 +283,28 @@ class CMakeBuild(build_ext):
 
 
 setup(
-    name="stable-retro-turbo",
-    description="Fast Python 3.14 wheels for stable-retro RL workloads",
+    name="stable-retro",
     long_description=README,
     long_description_content_type="text/markdown",
-    author="tsilva",
-    url="https://github.com/tsilva/stable-retro-turbo",
+    author="Farama Foundation",
+    author_email="contact@farama.org",
+    url="https://github.com/Farama-Foundation/stable-retro",
     version=VERSION_PATH.read_text(encoding="utf-8").strip(),
     license="MIT",
     install_requires=[
-        "gymnasium>=0.27.1",
-        "pyglet>=1.3.2,==1.*",
+        "gymnasium>=1.0.0",
+        "pyglet>=1.5.27,<2",
         "farama-notifications>=0.0.1",
     ],
-    python_requires=">=3.14.0,<3.15",
+    python_requires=">=3.10.0,<3.15",
+    classifiers=[
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
+        "Programming Language :: Python :: 3.14",
+    ],
     ext_modules=[Extension("stable_retro._retro", ["CMakeLists.txt", "src/*.cpp"])],
     cmdclass={"build_ext": CMakeBuild},
     packages=[

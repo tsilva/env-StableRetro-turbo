@@ -46,26 +46,6 @@ jobs:
           name: ${{ matrix.artifact }}
           path: wheelhouse/*.whl
 
-  publish_pypi:
-    name: Publish to PyPI
-    needs: build_wheels
-    runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write
-    if: github.event_name == 'release' && github.event.action == 'published'
-
-    steps:
-      - name: Download wheel artifacts
-        uses: actions/download-artifact@v7
-        with:
-          pattern: wheels-*
-          path: dist
-          merge-multiple: true
-
-      - name: Publish wheel
-        uses: pypa/gh-action-pypi-publish@release/v1
-
   upload_release_assets:
     name: Upload Release Assets
     needs: build_wheels

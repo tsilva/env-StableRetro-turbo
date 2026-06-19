@@ -1,31 +1,70 @@
-<div align="center">
-  <img src="./logo.png" alt="stable-retro-turbo" width="512" />
+[![Python](https://img.shields.io/pypi/pyversions/stable-retro.svg)](https://pypi.org/project/stable-retro/) [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://pre-commit.com/) [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-  **Fast Python 3.14 wheels for stable-retro RL workloads**
-</div>
+<p align="center">
+    <a href="https://gymnasium.farama.org/" target = "_blank">
+    <img src="docs/_static/img/stable-retro-text.png" width="500px" />
+</a></p>
 
-`stable-retro-turbo` is a performance fork of
-[`stable-retro`](https://github.com/Farama-Foundation/stable-retro). Use it when
-you want the upstream API, but need much faster image rollouts for reinforcement
-learning.
+A fork of [gym-retro](https://github.com/openai/retro) ('lets you turn classic video games into Gymnasium environments for reinforcement learning') with additional games, emulators and supported platforms. Since gym-retro is in maintenance now, you can instead submit PRs with new games or features here in stable-retro.
+
+This repository tracks upstream Stable Retro while carrying experimental performance work for reinforcement-learning rollouts.
+
+- [Supported emulators](docs/supported_emulators.md)
+- [Supported games/envs](docs/supported_games.md)
+
+## Emulated Systems
+
+| System| Linux | Windows | Apple |
+| --- | --- | --- | --- |
+| Atari 2600 | ✓ | ✓ | ✓ |
+| NES | ✓ | ✓ | ✓ |
+| SNES| ✓ | ✓ | ✓ |
+| Nintendo 64 | ✓† | ✓† | — |
+| Nintendo DS | ✓ | ✓ | ✓ |
+| Gameboy/Color | ✓ | ✓ | ✓* |
+| Gameboy Advance| ✓ | ✓ | ✓ |
+| Sega Genesis | ✓ | ✓ | ✓ |
+| Sega Master System | ✓ | ✓ | ✓ |
+| Sega CD | ✓ | ✓ | ✓ |
+| Sega 32X | ✓ | ✓ | ✓ |
+| Sega Saturn | ✓ | ✓ | ✓ |
+| Sega Dreamcast | ✓‡ | — | — |
+| PC Engine | ✓ | ✓ | ✓ |
+| Arcade Machines | ✓ | ✓ | — |
+
+\* On Apple Silicon (arm64), Gambatte (GB) is skipped by default in the CMake build.
+
+† Built by default when BUILD_N64=ON and OpenGL headers are available. If headers are missing, the build skips the N64 core.
+
+‡ Only available when hardware rendering is enabled (ENABLE_HW_RENDER=ON). Hardware rendering support is currently Linux-only in this project.
+
+## Supported Games
+
+Currently over 1000 games are integrated including:
+
+| Category | Games |
+| --- | --- |
+| Platformers | Super Mario World, Sonic The Hedgehog 2, Mega Man 2, Castlevania IV |
+| Fighters | Mortal Kombat Trilogy, Street Fighter II, Fatal Fury, King of Fighters '98 |
+| Sports | NHL94, NBA Jam, Baseball Stars |
+| Puzzle | Tetris, Columns |
+| Shmups | 1943, Thunder Force IV, Gradius III, R-Type |
+| BeatEmUps | Streets Of Rage, Double Dragon, TMNT 2: The Arcade Game, Golden Axe, Final Fight |
+| Racing | Super Hang On, F-Zero, OutRun |
+| RPGs (experimental) | Pokemon Red, Legend Of Zelda, Final Fantasy, Dragon Warrior |
+
+> **Note:** If the game you want is not included but is supported by one of the systems in the list above, an integration tool is provided to help add new games.
+
+## Performance Work In This Repository
 
 The main fast path is `StableRetroNativeVecEnv`: C++ owns the emulator pool,
 frame skip, image preprocessing, frame stacking, reward/done evaluation,
 autoreset, and the batched NumPy observation buffer.
 
-## Why Use This
-
 - Native vector rollouts for homogeneous single-player image environments.
-- Fused stepping and preprocessing, so Python is not looping over envs and
-  frames.
-- Native crop, resize, grayscale, frame skip, frame stack, and two-frame
-  max-pool.
-- Indexed-video preprocessing for NES cores that can expose palette indices,
-  avoiding full RGB conversion before grayscale/resize.
-- Prebuilt public cores in the wheels: `gambatte`, `fceumm`, `snes9x`, and
-  `genesis_plus_gx`.
-
-## Benchmark
+- Fused stepping and preprocessing, so Python is not looping over envs and frames.
+- Native crop, resize, grayscale, frame skip, frame stack, and two-frame max-pool.
+- Indexed-video preprocessing for NES cores that can expose palette indices, avoiding full RGB conversion before grayscale/resize.
 
 Latest local benchmark: Super Mario Bros Level 1-1 with PPO-style Atari
 preprocessing.
@@ -41,19 +80,13 @@ configuration above.
 Re-run the default profile:
 
 ```bash
-python3.14 scripts/benchmark_vec_env.py --profile supermario-level1-1
+python3 scripts/benchmark_vec_env.py --profile supermario-level1-1
 ```
 
 Override scale when comparing machines:
 
 ```bash
-python3.14 scripts/benchmark_vec_env.py --profile supermario-level1-1 --num-envs 256 --num-threads 80
-```
-
-## Install
-
-```bash
-python3.14 -m pip install stable-retro-turbo
+python3 scripts/benchmark_vec_env.py --profile supermario-level1-1 --num-envs 256 --num-threads 80
 ```
 
 ```python
@@ -75,38 +108,129 @@ env = retro.StableRetroNativeVecEnv(
 )
 ```
 
-## Development
+## Installation
 
-```bash
-git clone https://github.com/tsilva/stable-retro-turbo.git
-cd stable-retro-turbo
-brew install cmake pkg-config lua@5.4 libzip
-python3.14 -m pip install -U pip build cibuildwheel pytest pre-commit
-python3.14 -m pip install -e .
+Stable Retro supports Python 3.10 through 3.14.
+
+```
+pip3 install stable-retro
 ```
 
-Useful commands:
+or if the above doesn't work for your platform:
 
-```bash
-pytest                                            # run Python tests
-python3.14 -m build --wheel                           # build a local wheel
-python3.14 -m cibuildwheel . --output-dir wheelhouse  # build release-style wheels
-python3.14 scripts/benchmark_vec_env.py --list-profiles
-python3.14 scripts/record_frame_stack_video.py --profile supermario-level1-1
+```
+pip3 install git+https://github.com/Farama-Foundation/stable-retro.git
 ```
 
-## Notes
+If you plan to integrate new ROMs, states or emulator cores or plan to edit an existing env:
 
-- Published wheels target Python `3.14` on macOS Apple Silicon `arm64` and
-  Linux `x86_64`.
-- ROM files are not bundled.
-- Set `STABLE_RETRO_DISABLE_AUDIO=1` for image-only training benchmarks.
-- Set `STABLE_RETRO_DISABLE_NATIVE_IMAGEOPS=1` or
-  `STABLE_RETRO_DISABLE_NATIVE_FUSED_STEP=1` when comparing against fallback
-  paths.
-- `StableRetroNativeVecEnv` currently targets image observations with one
-  player, no movie recording, and no screen rotation.
+```
+git clone https://github.com/Farama-Foundation/stable-retro.git
+cd stable-retro
+pip3 install -e .
+```
 
-## License
+For platform-specific instructions including building from source, optional core dependencies, and the Integration UI:
+- [Linux Installation](docs/linux_installation.md) - Ubuntu/Debian dependencies, N64 and Dreamcast core setup, WSL2 guide
+- [macOS Installation](docs/macos_installation.md) - Apple Silicon build instructions, Homebrew dependencies
 
-[MIT](LICENSE). Bundled third-party notices are listed in [`LICENSES.md`](LICENSES.md).
+## Example
+
+'Nature CNN' model trained using PPO on Airstriker-Genesis env (rom already included in the repo)
+
+```
+sudo apt-get update
+sudo apt-get install python3 python3-pip git zlib1g-dev libopenmpi-dev ffmpeg
+```
+
+You need to install a stable baselines 3 version that supports gymnasium
+
+```
+pip3 install git+https://github.com/Farama-Foundation/stable-retro.git
+pip3 install stable_baselines3[extra]
+```
+
+Start training:
+
+```
+cd retro/examples
+python3 ppo.py --game='Airstriker-Genesis-v0'
+```
+
+More advanced examples:
+[https://github.com/MatPoliquin/stable-retro-scripts](https://github.com/MatPoliquin/stable-retro-scripts)
+
+## Documentation & Tutorials
+
+Documentation is available at [https://stable-retro.farama.org/](https://stable-retro.farama.org/) (work in progress)
+
+See [LICENSES.md](https://github.com/Farama-Foundation/stable-retro/blob/master/LICENSES.md) for information on the licenses of the individual cores.
+
+| Topic | Description |
+| --- | --- |
+| [Windows WSL2 Setup](https://www.youtube.com/watch?v=vPnJiUR21Og) | Step-by-step guide for setting up stable-retro on Windows 11 with WSL2 and Ubuntu 22.04 |
+| [Game Integration Tool](https://www.youtube.com/playlist?list=PLmwlWbdWpZVvWqzOxu0jVBy-CaRpYha0t) | Playlist covering how to use the integration tool to add new games |
+| [RetroArch + ML Models](https://www.youtube.com/watch?v=hkOcxJvJVjk) | Running a custom RetroArch build that supports overriding player input with trained models |
+
+## ROMs and BIOS files
+
+Each game integration has files listing memory locations for in-game variables, reward functions based on those variables, episode end conditions, savestates at the beginning of levels and a file containing hashes of ROMs that work with these files.
+
+Please note that ROMs are not included and you must obtain them yourself. Most ROM hashes are sourced from their respective No-Intro SHA-1 sums.
+
+Run this script in the roms folder you want to import. If the checksum matches it will import them in the related game folder in stable-retro.
+
+```bash
+python3 -m retro.import .
+```
+
+Some platforms like Sega Saturn and Dreamcast also need to be provided a BIOS.
+ [List of BIOS names and checksums](docs/core_bios.md).
+
+The following non-commercial Sega Genesis ROM is included with Stable Retro for testing purposes:
+- [Airstriker](https://pdroms.de/genesis/airstriker-v1-50-genesis-game) by Electrokinesis
+
+ [List of other included ROMs](docs/included_roms.md).
+
+## Contributing & Support
+
+[See CONTRIBUTING.md](https://github.com/Farama-Foundation/stable-retro/blob/master/CONTRIBUTING.md)
+
+For any issues, suggestions, or discussions related to Stable-Retro, please use [GitHub Issues](https://github.com/Farama-Foundation/stable-retro/issues) or the Farama Foundation's [Discord](https://discord.gg/aPjhD5cf).
+
+## Supported specs:
+
+Platforms:
+- Windows 10, 11 (via WSL2)
+- macOS 10.13 (High Sierra), 10.14 (Mojave)
+- Linux (manylinux1). Ubuntu 24.04 is recommended
+
+Python:
+- Python 3.10 through 3.14
+
+CPU with `SSE3` or better
+
+## Citation
+
+```
+@misc{stable-retro,
+  author = {Poliquin, Mathieu},
+  title = {Stable Retro, a maintained fork of OpenAI's gym-retro},
+  year = {2026},
+  publisher = {GitHub},
+  journal = {GitHub repository},
+  howpublished = {\url{https://github.com/Farama-Foundation/stable-retro}},
+}
+```
+
+## Papers
+
+List of papers mentioning stable-retro. If you want your paper to be added here please open a github issue.
+
+* [Exploration-Driven Generative Interactive Environments](https://arxiv.org/pdf/2504.02515)
+* [Gymnasium: A Standardized Interface for Reinforcement Learning Environments](https://openreview.net/pdf?id=qPMLvJxtPK)
+* [IPR-1: Interactive Physical Reasoner](https://arxiv.org/html/2511.15407v1)
+* [SAFE-SMART: Safety Analysis and Formal Evaluation using STL Metrics for Autonomous RoboTs](https://arxiv.org/html/2511.17781v1)
+* [General Modular Harness for LLM Agents in Multi-Turn Gaming Environments](https://arxiv.org/abs/2507.11633v1)
+* [ReactiveGWM: Steering NPC in Reactive Game World Models](https://arxiv.org/pdf/2605.15256)
+* [Dissecting Discrete Soft Actor-Critic: Limitations and Principled Alternatives](https://arxiv.org/pdf/2509.09838)
