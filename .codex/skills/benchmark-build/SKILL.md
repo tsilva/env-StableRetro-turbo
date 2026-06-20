@@ -1,13 +1,13 @@
 ---
 name: benchmark-build
-description: Run and report stable-retro-turbo vector benchmarks from built artifacts. Use when the user asks to benchmark a stable-retro-turbo version/build, compare wheel throughput against vanilla post0, benchmark SuperMarioBros-NES/Mario, verify benchmark numbers after a release build, or run the repo's standardized benchmark profiles.
+description: Run and report stable-retro-turbo vector benchmarks from the current checkout or built artifacts. Use when the user asks to benchmark a stable-retro-turbo version/build, compare current throughput against vanilla post0, benchmark SuperMarioBros-NES/Mario, verify benchmark numbers after a release build, or run the repo's standardized benchmark profiles.
 ---
 
 # Benchmark Build
 
 ## Overview
 
-Use this skill to benchmark `stable-retro-turbo` artifacts with the repo's standardized vector benchmark profiles. Prefer measuring the built wheel the user is about to publish or just built, not the source checkout, unless the user explicitly asks for source-tree timing.
+Use this skill to benchmark `stable-retro-turbo` with the repo's standardized vector benchmark profiles. By default, benchmark the current source checkout against vanilla `.post0`; this keeps ordinary benchmark requests aligned with the code currently under review. Measure a built wheel only when the user explicitly asks for a wheel/release benchmark or when the turn follows `$create-build` and the artifact is the object being validated.
 
 Default Mario benchmark: `SuperMarioBros-Nes-v0`, state `Level1-1`, profile `supermario-level1-1` from `scripts/benchmark_vec_env.json`. Do not use `State.NONE` for ordinary user-facing benchmark numbers.
 
@@ -18,7 +18,7 @@ The benchmarker supports both the current fused native vector path and vanilla `
 
 ## Default Comparison Protocol
 
-Whenever the user asks to benchmark a version, benchmark the requested version first. If the user does not name a version, treat the latest/current build as the requested version.
+Whenever the user asks to benchmark without naming a wheel or published version, benchmark the current checkout first. When the user names a version, wheel, or release artifact, benchmark that requested artifact first.
 
 Then benchmark vanilla `stable-retro-turbo==1.0.0.post0` with the same SuperMarioBros-NES profile and report the comparison. The purpose is to compare the current native vector path against the original upstream-style `.post0` regular vector path.
 
@@ -57,7 +57,13 @@ rg -n "supermario-level1-1|megaman-level1" scripts/benchmark_vec_env.json script
 
 2. Use `scripts/benchmark_vec_env.py` as the benchmark entrypoint and `scripts/benchmark_vec_env.json` as the profile source.
 3. Prefer leaving `--backend auto` unless the user asks for a specific path. Force `--backend native` for fused `StableRetroNativeVecEnv`; force `--backend subproc` for the vanilla upstream comparison path; use `--backend dummy` only for single-process debugging.
-4. If measuring a wheel, verify the exact import path before timing:
+4. If measuring the current checkout, verify that `stable_retro.__file__` points inside the repo checkout and that `stable_retro._retro` imports successfully:
+
+```bash
+python -c "import stable_retro, stable_retro._retro; print(stable_retro.__file__); print(stable_retro._retro.__file__)"
+```
+
+5. If measuring a wheel, verify the exact import path before timing:
 
 ```bash
 python -c "import stable_retro, stable_retro._retro; import importlib.metadata as md; print(stable_retro.__file__); print(md.metadata('stable-retro-turbo')['Name']); print(md.version('stable-retro-turbo'))"
@@ -65,9 +71,27 @@ python -c "import stable_retro, stable_retro._retro; import importlib.metadata a
 
 The path must point to the benchmark environment's `site-packages`, not the repository source tree.
 
+## Current Checkout Benchmark Workflow
+
+Use this workflow for ordinary benchmark requests.
+
+1. Use the repo's Python environment, normally `.venv314`, and run from the repo root so imports resolve to this checkout:
+
+```bash
+"/Users/tsilva/repos/tsilva/stable-retro-turbo/.venv314/bin/python" -c "import stable_retro, stable_retro._retro; print(stable_retro.__file__); print(stable_retro._retro.__file__)"
+```
+
+2. Check whether the ROM is available:
+
+```bash
+"/Users/tsilva/repos/tsilva/stable-retro-turbo/.venv314/bin/python" -c "import stable_retro as retro; print(retro.data.get_romfile_path('SuperMarioBros-Nes-v0'))"
+```
+
+3. Run the standard Mario smoke and timing commands from the repo root with `.venv314/bin/python`.
+
 ## Wheel Benchmark Workflow
 
-Use this workflow when a wheel exists, especially after `$create-build`.
+Use this workflow when the user asks for a wheel/release benchmark or when validating artifacts after `$create-build`.
 
 1. Pick the exact wheel path. For macOS arm64 post releases, expect a path like:
 
