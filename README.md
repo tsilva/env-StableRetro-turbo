@@ -77,8 +77,8 @@ audio disabled.
 
 | Version / build | Backend | Samples (steps/s) | Mean steps/s | Std steps/s | Speedup vs `.post0` |
 | --- | --- | ---: | ---: | ---: | ---: |
-| `1.0.0.post14` current/latest | `native_vec_fused` | `6614.1`, `5825.1`, `8842.6` | `7093.9` | `1564.9` | `3.77x` |
-| `1.0.0.post0` vanilla baseline | `subproc_vec_retro` | `2288.7`, `2099.6`, `1254.6` | `1881.0` | `550.6` | `1.00x` |
+| current checkout (`VERSION.txt` `1.0.0.post15`) | `native_vec_fused` | `7995.0`, `8759.3`, `6411.0` | `7721.8` | `1197.8` | `3.98x` |
+| `1.0.0.post0` vanilla baseline | `subproc_vec_retro` | `1530.3`, `2110.1`, `2173.2` | `1937.9` | `354.4` | `1.00x` |
 
 When running a new release benchmark, update the comparison table above with
 the requested/current build first and the `.post0` baseline second.
