@@ -1,0 +1,4 @@
+interface:
+  display_name: "Generate Mario States"
+  short_description: "Generate and validate SMB state files"
+  default_prompt: "Use $generate-mario-states to generate missing Super Mario Bros NES state files."

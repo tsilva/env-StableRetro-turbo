@@ -121,6 +121,20 @@ def _make_test_native_vec_env(tmp_path, **kwargs):
     )
 
 
+@pytest.mark.parametrize("sticky_action_prob", [-0.01, 1.01])
+def test_stable_retro_native_vec_env_rejects_invalid_sticky_action_prob(
+    tmp_path,
+    sticky_action_prob,
+):
+    pytest.importorskip("stable_baselines3")
+
+    with pytest.raises((RuntimeError, ValueError), match="sticky_action_prob"):
+        _make_test_native_vec_env(
+            tmp_path,
+            sticky_action_prob=sticky_action_prob,
+        )
+
+
 def _make_dr88_native_vec_env(tmp_path, info_path, **kwargs):
     import stable_retro as retro
     from stable_retro.vec_env import StableRetroNativeVecEnv
@@ -886,18 +900,22 @@ def _mario_native_trace(copy_observations, num_threads, seed, actions, **env_kwa
     except FileNotFoundError:
         pytest.skip("SuperMarioBros-Nes-v0 ROM is not imported locally")
 
+    num_envs = int(env_kwargs.pop("num_envs", 8))
+    frame_skip = int(env_kwargs.pop("frame_skip", 4))
+    maxpool_last_two = bool(env_kwargs.pop("maxpool_last_two", True))
+
     env = StableRetroNativeVecEnv(
         "SuperMarioBros-Nes-v0",
-        8,
+        num_envs,
         state="Level1-1",
         rom_path=rom_path,
         obs_crop=(32, 0, 0, 0),
         obs_resize=(84, 84),
         obs_grayscale=True,
         obs_resize_algorithm="area",
-        frame_skip=4,
+        frame_skip=frame_skip,
         frame_stack=4,
-        maxpool_last_two=True,
+        maxpool_last_two=maxpool_last_two,
         num_threads=num_threads,
         copy_observations=copy_observations,
         info_mode="all",
@@ -908,6 +926,7 @@ def _mario_native_trace(copy_observations, num_threads, seed, actions, **env_kwa
         obs = env.reset()
         trace = [(_sha(obs), None, None, None)]
         for action in actions:
+            assert action.shape == (num_envs, env.num_buttons)
             obs, rewards, dones, infos = env.step(action)
             trace.append(
                 (
@@ -967,6 +986,59 @@ def _native_traces_equal(left, right):
         if left_infos != right_infos:
             return False
     return True
+
+
+@pytest.mark.parametrize(
+    ("num_envs", "frame_skip"),
+    [
+        (1, 1),
+        (4, 1),
+        (4, 4),
+    ],
+)
+def test_stable_retro_native_vec_env_mario_sticky_extremes_match_effective_actions(
+    num_envs,
+    frame_skip,
+):
+    pytest.importorskip("stable_baselines3")
+
+    rng = np.random.default_rng(20260619 + num_envs + frame_skip)
+    actions = rng.integers(0, 2, size=(40, num_envs, 9), dtype=np.uint8)
+    actions[0] = 0
+    repeated_first_action = np.repeat(actions[:1], actions.shape[0], axis=0)
+    trace_kwargs = dict(
+        num_envs=num_envs,
+        frame_skip=frame_skip,
+        maxpool_last_two=False,
+    )
+
+    sticky_trace = _mario_native_trace(
+        True,
+        max(1, num_envs),
+        123,
+        actions,
+        sticky_action_prob=1.0,
+        **trace_kwargs,
+    )
+    expected_trace = _mario_native_trace(
+        True,
+        max(1, num_envs),
+        123,
+        repeated_first_action,
+        sticky_action_prob=0.0,
+        **trace_kwargs,
+    )
+    non_sticky_trace = _mario_native_trace(
+        True,
+        max(1, num_envs),
+        123,
+        actions,
+        sticky_action_prob=0.0,
+        **trace_kwargs,
+    )
+
+    _assert_native_traces_equal(sticky_trace, expected_trace)
+    assert not _native_traces_equal(sticky_trace, non_sticky_trace)
 
 
 @pytest.mark.parametrize("copy_observations", [True, False])
