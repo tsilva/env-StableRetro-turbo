@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import math
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -14,11 +17,15 @@ except ImportError:  # pragma: no cover - import remains cheap without SB3.
 
 
 class StableRetroNativeVecEnv(VecEnv):
-    """SB3-compatible native vector env for homogeneous stable-retro rollouts.
+    """SB3-compatible native vector env for stable-retro rollouts.
 
     This is the supported high-throughput path. C++ owns the emulator pool,
     frame skip, preprocessing, frame stacking, autoreset, reward/done
     evaluation, and batched observation buffer.
+
+    ``state`` accepts a single state name, a sequence of one state per env slot,
+    or a mapping of state names to positive sampling weights. Mapping weights are
+    normalized and sampled independently for each env on every episode reset.
 
     Life-loss termination is opt-in and game/config-specific. Enable it only
     for games whose info data has a life counter with the intended semantics,
@@ -50,8 +57,27 @@ class StableRetroNativeVecEnv(VecEnv):
         import stable_retro as retro
         from stable_retro import _retro
 
+        legacy_state_args = {"states", "state_probs"} & set(env_kwargs)
+        if legacy_state_args:
+            names = ", ".join(sorted(legacy_state_args))
+            raise TypeError(
+                f"{names} are not supported; pass a string, sequence, or "
+                "mapping via state",
+            )
+
         if state is None:
             state = retro.State.DEFAULT
+        (
+            state_values,
+            state_labels,
+            state_probs,
+            state_collection,
+        ) = self._resolve_state_config(
+            retro,
+            game,
+            num_envs,
+            state,
+        )
         if inttype is None:
             inttype = retro.data.Integrations.DEFAULT
         self.waiting = False
@@ -110,7 +136,7 @@ class StableRetroNativeVecEnv(VecEnv):
         template = self._make_template_env(
             retro,
             game,
-            state,
+            state_values[0],
             inttype,
             rom_path,
             info_path,
@@ -139,6 +165,48 @@ class StableRetroNativeVecEnv(VecEnv):
             reward_clip, reward_low, reward_high = self._reward_clip_config(template)
         finally:
             template.close()
+
+        initial_state_labels = None
+        initial_state_weights = None
+        if state_collection:
+            initial_states = [initial_state]
+            state_cache = {state_labels[0]: initial_state}
+            for value, label in zip(state_values[1:], state_labels[1:]):
+                cached = state_cache.get(label)
+                if cached is not None:
+                    initial_states.append(cached)
+                    continue
+                state_template = self._make_template_env(
+                    retro,
+                    game,
+                    value,
+                    inttype,
+                    rom_path,
+                    info_path,
+                    scenario_path,
+                    env_kwargs,
+                )
+                try:
+                    serialized = (
+                        state_template.initial_state
+                        if state_template.initial_state
+                        else None
+                    )
+                finally:
+                    state_template.close()
+                if not serialized:
+                    raise ValueError(
+                        f"state {label!r} did not resolve to a non-empty state",
+                    )
+                state_cache[label] = serialized
+                initial_states.append(serialized)
+            if any(not value for value in initial_states):
+                raise ValueError("states must resolve to non-empty start states")
+            initial_state = initial_states
+            initial_state_labels = state_labels
+            initial_state_weights = state_probs
+        elif initial_state is not None:
+            initial_state_labels = state_labels
 
         resolved_rom_path = rom_path or retro.data.get_original_romfile_path(
             game,
@@ -173,8 +241,31 @@ class StableRetroNativeVecEnv(VecEnv):
             info_keys,
             terminate_on_life_loss,
             life_variable,
+            initial_state_labels,
+            initial_state_weights,
         )
         super().__init__(int(num_envs), self.observation_space, self.action_space)
+        self.initial_state_names = tuple(self.native.initial_state_names)
+        self._active_state_indices = self.native.active_state_indices()
+        self._active_state_indices.setflags(write=False)
+
+    def active_state_indices(self):
+        """Return a read-only int32 NumPy view of active initial-state indices.
+
+        The returned array is owned by the native vector env and mutates in place
+        after ``reset()`` and after per-lane automatic resets inside
+        ``step_wait()``. Copy it when a stable snapshot is needed.
+        Lanes without a serialized initial state report ``-1``.
+        """
+        return self._active_state_indices
+
+    def active_states(self):
+        """Return active initial-state names for each lane."""
+        names = self.initial_state_names
+        return tuple(
+            None if int(index) < 0 else names[int(index)]
+            for index in self._active_state_indices
+        )
 
     @staticmethod
     def _observation_space_for_layout(observation_space, obs_layout):
@@ -189,6 +280,64 @@ class StableRetroNativeVecEnv(VecEnv):
             shape=(channels, height, width),
             dtype=np.uint8,
         )
+
+    @staticmethod
+    def _resolve_state_config(retro, game, num_envs, state):
+        if isinstance(state, Mapping):
+            states = list(state.keys())
+            state_probs = list(state.values())
+            state_collection = True
+        elif (
+            isinstance(state, Sequence)
+            and not isinstance(state, (str, bytes, bytearray))
+        ):
+            states = list(state)
+            state_probs = None
+            state_collection = True
+        else:
+            return [state], [str(state)], None, False
+
+        if not states:
+            raise ValueError("state must contain at least one state")
+
+        available_states = set(retro.data.list_states(game))
+        state_values = []
+        state_labels = []
+        for value in states:
+            label = str(value).strip()
+            if not label:
+                raise ValueError("state must not contain empty state names")
+            if (
+                value not in (retro.State.DEFAULT, retro.State.NONE)
+                and label not in available_states
+                and not Path(label).exists()
+            ):
+                raise ValueError(f"unknown state {label!r} for game {game}")
+            state_values.append(value)
+            state_labels.append(label)
+
+        if state_probs is None:
+            if len(state_values) != int(num_envs):
+                raise ValueError(
+                    "state sequence length must match num_envs",
+                )
+            return state_values, state_labels, None, state_collection
+
+        probs = list(state_probs)
+        if len(probs) != len(state_values):
+            raise ValueError("state weight count must match state count")
+
+        normalized_probs = []
+        for prob in probs:
+            value = float(prob)
+            if not math.isfinite(value) or value <= 0.0:
+                raise ValueError("state weights must contain positive finite numbers")
+            normalized_probs.append(value)
+        total = math.fsum(normalized_probs)
+        if not math.isfinite(total) or total <= 0.0:
+            raise ValueError("state weights must sum to a positive finite number")
+        normalized_probs = [value / total for value in normalized_probs]
+        return state_values, state_labels, normalized_probs, state_collection
 
     @staticmethod
     def _resolve_info_path(retro, game, info, inttype):

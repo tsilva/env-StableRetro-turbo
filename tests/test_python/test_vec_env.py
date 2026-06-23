@@ -246,6 +246,86 @@ def test_stable_retro_native_vec_env_life_loss_requires_variable(tmp_path):
         )
 
 
+def test_stable_retro_native_vec_env_validates_mixed_state_config():
+    pytest.importorskip("stable_baselines3")
+    import stable_retro as retro
+    from stable_retro.vec_env import StableRetroNativeVecEnv
+
+    resolve = StableRetroNativeVecEnv._resolve_state_config
+    game = "SuperMarioBros-Nes-v0"
+
+    with pytest.raises(ValueError, match="state sequence length must match num_envs"):
+        resolve(retro, game, 4, ["Level1-1", "Level1-2"])
+
+    with pytest.raises(ValueError, match="positive finite"):
+        resolve(
+            retro,
+            game,
+            4,
+            {"Level1-1": 1.0, "Level1-2": 0.0},
+        )
+
+    with pytest.raises(ValueError, match="unknown state"):
+        resolve(
+            retro,
+            game,
+            4,
+            {"Level1-1": 0.5, "DefinitelyMissing": 0.5},
+        )
+
+    with pytest.raises(ValueError, match="empty state"):
+        resolve(
+            retro,
+            game,
+            4,
+            {"Level1-1": 0.5, "": 0.5},
+        )
+
+    states, labels, probs, state_collection = resolve(
+        retro,
+        game,
+        4,
+        {"Level1-1": 1.0, "Level1-2": 3.0},
+    )
+    assert states == ["Level1-1", "Level1-2"]
+    assert labels == ["Level1-1", "Level1-2"]
+    assert probs == [0.25, 0.75]
+    assert state_collection is True
+
+    states, labels, probs, state_collection = resolve(
+        retro,
+        game,
+        2,
+        ["Level1-1", "Level1-2"],
+    )
+    assert states == ["Level1-1", "Level1-2"]
+    assert labels == ["Level1-1", "Level1-2"]
+    assert probs is None
+    assert state_collection is True
+
+    states, labels, probs, state_collection = resolve(
+        retro,
+        game,
+        4,
+        ["Level1-1", "Level1-2", "Level1-1", "Level1-2"],
+    )
+    assert states == ["Level1-1", "Level1-2", "Level1-1", "Level1-2"]
+    assert labels == ["Level1-1", "Level1-2", "Level1-1", "Level1-2"]
+    assert probs is None
+    assert state_collection is True
+
+    states, labels, probs, state_collection = resolve(retro, game, 1, "Level1-1")
+    assert states == ["Level1-1"]
+    assert labels == ["Level1-1"]
+    assert probs is None
+    assert state_collection is False
+
+    with pytest.raises(TypeError, match="states.*not supported"):
+        StableRetroNativeVecEnv(game, 1, states=["Level1-1"])
+    with pytest.raises(TypeError, match="state_probs.*not supported"):
+        StableRetroNativeVecEnv(game, 1, state_probs=[1.0])
+
+
 def _mario_rom_path_or_skip():
     import stable_retro as retro
 
@@ -358,6 +438,187 @@ def test_stable_retro_native_vec_env_life_loss_autoresets_only_one_lane():
     finally:
         life_env.close()
         baseline_env.close()
+
+
+def test_stable_retro_native_vec_env_single_state_active_indices_if_rom_present():
+    pytest.importorskip("stable_baselines3")
+
+    rom_path = _mario_rom_path_or_skip()
+    env = _make_mario_native_vec_env(
+        4,
+        rom_path,
+        info_mode="none",
+    )
+    try:
+        indices = env.active_state_indices()
+        assert indices.dtype == np.int32
+        assert indices.shape == (4,)
+        assert not indices.flags.writeable
+        assert env.active_state_indices() is indices
+        assert env.initial_state_names == ("Level1-1",)
+
+        env.reset()
+        np.testing.assert_array_equal(indices, np.zeros(4, dtype=np.int32))
+        assert env.active_states() == ("Level1-1",) * 4
+        with pytest.raises(ValueError):
+            indices[0] = 1
+    finally:
+        env.close()
+
+
+def test_stable_retro_native_vec_env_mixed_states_reset_infos_if_rom_present():
+    pytest.importorskip("stable_baselines3")
+    from stable_retro.vec_env import StableRetroNativeVecEnv
+
+    rom_path = _mario_rom_path_or_skip()
+    states = ["Level1-1", "Level1-2", "Level1-3"]
+    env = StableRetroNativeVecEnv(
+        "SuperMarioBros-Nes-v0",
+        3,
+        state=states,
+        rom_path=rom_path,
+        obs_resize=(84, 84),
+        obs_grayscale=True,
+        frame_skip=4,
+        frame_stack=4,
+        maxpool_last_two=True,
+        num_threads=3,
+        info_mode="terminal",
+    )
+    try:
+        env.reset()
+        np.testing.assert_array_equal(
+            env.active_state_indices(),
+            np.arange(len(states), dtype=np.int32),
+        )
+        assert env.initial_state_names == tuple(states)
+        assert env.active_states() == tuple(states)
+        assert [info["start_state"] for info in env.reset_infos] == states
+        assert [info["state"] for info in env.reset_infos] == states
+
+        env.reset()
+        np.testing.assert_array_equal(
+            env.active_state_indices(),
+            np.arange(len(states), dtype=np.int32),
+        )
+        assert [info["start_state"] for info in env.reset_infos] == states
+    finally:
+        env.close()
+
+
+def test_stable_retro_native_vec_env_fixed_duplicate_states_are_canonical_if_rom_present():
+    pytest.importorskip("stable_baselines3")
+    from stable_retro.vec_env import StableRetroNativeVecEnv
+
+    rom_path = _mario_rom_path_or_skip()
+    states = ["Level1-1", "Level1-2", "Level1-1", "Level1-2"]
+    env = StableRetroNativeVecEnv(
+        "SuperMarioBros-Nes-v0",
+        4,
+        state=states,
+        rom_path=rom_path,
+        obs_resize=(84, 84),
+        obs_grayscale=True,
+        frame_skip=4,
+        frame_stack=4,
+        maxpool_last_two=True,
+        num_threads=4,
+        info_mode="terminal",
+    )
+    try:
+        env.reset()
+        assert env.initial_state_names == ("Level1-1", "Level1-2")
+        np.testing.assert_array_equal(
+            env.active_state_indices(),
+            np.array([0, 1, 0, 1], dtype=np.int32),
+        )
+        assert env.active_states() == tuple(states)
+        assert [info["start_state"] for info in env.reset_infos] == states
+    finally:
+        env.close()
+
+
+def test_stable_retro_native_vec_env_weighted_states_sample_on_reset_if_rom_present():
+    pytest.importorskip("stable_baselines3")
+    from stable_retro.vec_env import StableRetroNativeVecEnv
+
+    rom_path = _mario_rom_path_or_skip()
+    states = ["Level1-1", "Level1-2", "Level1-3"]
+    env = StableRetroNativeVecEnv(
+        "SuperMarioBros-Nes-v0",
+        12,
+        state={state: 1.0 for state in states},
+        rom_path=rom_path,
+        obs_resize=(84, 84),
+        obs_grayscale=True,
+        frame_skip=4,
+        frame_stack=4,
+        maxpool_last_two=True,
+        num_threads=4,
+        info_mode="terminal",
+    )
+    try:
+        env.seed(20260620)
+        indices = env.active_state_indices()
+        assert env.initial_state_names == tuple(states)
+        seen = set()
+        for _ in range(20):
+            env.reset()
+            reset_indices = indices.copy()
+            assert reset_indices.dtype == np.int32
+            assert np.all((0 <= reset_indices) & (reset_indices < len(states)))
+            reset_states = [info["start_state"] for info in env.reset_infos]
+            assert set(reset_states).issubset(states)
+            assert tuple(reset_states) == env.active_states()
+            assert reset_states == [
+                env.initial_state_names[int(index)] for index in reset_indices
+            ]
+            seen.update(reset_states)
+        assert seen == set(states)
+    finally:
+        env.close()
+
+
+def test_stable_retro_native_vec_env_active_indices_update_after_autoreset_if_rom_present(
+    tmp_path,
+):
+    pytest.importorskip("stable_baselines3")
+    from stable_retro.vec_env import StableRetroNativeVecEnv
+
+    rom_path = _mario_rom_path_or_skip()
+    done_info = _done_on_frame_info_path(tmp_path)
+    states = ["Level1-1", "Level1-2", "Level1-3"]
+    env = StableRetroNativeVecEnv(
+        "SuperMarioBros-Nes-v0",
+        6,
+        state={state: 1.0 for state in states},
+        rom_path=rom_path,
+        info=str(done_info),
+        scenario=str(done_info),
+        obs_resize=(84, 84),
+        obs_grayscale=True,
+        frame_skip=4,
+        frame_stack=4,
+        maxpool_last_two=True,
+        num_threads=3,
+        info_mode="terminal",
+    )
+    try:
+        env.seed(20260623)
+        env.reset()
+        action = np.zeros((env.num_envs, env.num_buttons), dtype=np.uint8)
+        _, _, dones, infos = env.step(action)
+
+        assert np.any(dones)
+        active_indices = env.active_state_indices().copy()
+        assert np.all((0 <= active_indices) & (active_indices < len(states)))
+        for lane, done in enumerate(dones):
+            if not bool(done):
+                continue
+            reset_state = infos[lane]["reset_info"]["start_state"]
+            assert reset_state == env.initial_state_names[int(active_indices[lane])]
+    finally:
+        env.close()
 
 
 def test_stable_retro_native_vec_env_selected_info_keys(tmp_path):
