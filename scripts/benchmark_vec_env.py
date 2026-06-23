@@ -369,6 +369,8 @@ def _run_vec(name, env, seconds, warmup_steps, fixed_actions=None) -> Result:
 def _build_native_vec(
     game,
     state,
+    states,
+    state_probs,
     inttype,
     num_envs,
     env_kwargs,
@@ -380,10 +382,18 @@ def _build_native_vec(
 ):
     from stable_retro.vec_env import StableRetroNativeVecEnv
 
+    state_arg = state
+    if states is not None:
+        state_arg = (
+            dict(zip(states, state_probs, strict=True))
+            if state_probs is not None
+            else list(states)
+        )
+
     return StableRetroNativeVecEnv(
         game,
         num_envs,
-        state=state,
+        state=state_arg,
         inttype=inttype,
         rom_path=rom_path,
         info=info,
@@ -475,6 +485,16 @@ def main(argv=None) -> int:
     parser.add_argument("--list-profiles", action="store_true")
     parser.add_argument("--game", default=None)
     parser.add_argument("--state", default=None)
+    parser.add_argument(
+        "--states",
+        default=None,
+        help="Comma-separated native start states. Without --state-probs, count must match --num-envs.",
+    )
+    parser.add_argument(
+        "--state-probs",
+        default=None,
+        help="Comma-separated positive probabilities for --states; normalized before sampling.",
+    )
     parser.add_argument("--rom-path", default=None)
     parser.add_argument("--info", default=None)
     parser.add_argument("--scenario", default=None)
@@ -554,8 +574,27 @@ def main(argv=None) -> int:
     import stable_retro as retro
 
     os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-stable-retro")
-    state_value = profile.state if args.state is None else args.state
-    state = _parse_state(state_value, retro, allow_state_none=args.allow_state_none)
+    if args.state is not None and args.states is not None:
+        raise SystemExit("--state and --states are mutually exclusive")
+    if args.state_probs is not None and args.states is None:
+        raise SystemExit("--state-probs requires --states")
+    states = None
+    state_probs = None
+    if args.states is not None:
+        states = [item.strip() for item in args.states.split(",")]
+        if not all(states):
+            raise SystemExit("--states must not contain empty entries")
+        if args.state_probs is not None:
+            try:
+                state_probs = [
+                    float(item.strip()) for item in args.state_probs.split(",")
+                ]
+            except ValueError as e:
+                raise SystemExit("--state-probs must be comma-separated numbers") from e
+        state = None
+    else:
+        state_value = profile.state if args.state is None else args.state
+        state = _parse_state(state_value, retro, allow_state_none=args.allow_state_none)
     game = profile.game if args.game is None else args.game
     if args.rom_path is not None:
         rom_path = str(Path(args.rom_path).resolve())
@@ -614,8 +653,17 @@ def main(argv=None) -> int:
     if args.vec_transpose_image and args.obs_layout != "hwc":
         raise SystemExit("--vec-transpose-image requires --obs-layout=hwc")
     backend = _resolve_backend(args.backend)
+    if states is not None and backend != "native":
+        raise SystemExit("--states requires --backend=native")
 
-    state_label = "State.NONE" if state is retro.State.NONE else str(state)
+    if states is not None:
+        state_label = ",".join(states)
+        if state_probs is None:
+            state_label += " slot-assigned"
+        else:
+            state_label += f" probs={state_probs}"
+    else:
+        state_label = "State.NONE" if state is retro.State.NONE else str(state)
     action_label = "fixed" if args.fixed_actions else "sampled"
     parallel_label = (
         f"threads={num_threads or num_envs}"
@@ -642,6 +690,8 @@ def main(argv=None) -> int:
             env = _build_native_vec(
                 game,
                 state,
+                states,
+                state_probs,
                 retro.data.Integrations.DEFAULT,
                 num_envs,
                 env_kwargs,

@@ -25,6 +25,7 @@ static inline T _hypot(T x, T y) {
 #include <array>
 #include <atomic>
 #include <condition_variable>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
@@ -1280,7 +1281,9 @@ public:
 		const string& obsLayout,
 		py::object infoKeysObj,
 		bool terminateOnLifeLoss,
-		const string& lifeVariable
+		const string& lifeVariable,
+		py::object initialStateLabelsObj = py::none(),
+		py::object initialStateWeightsObj = py::none()
 	)
 		: m_numButtons(numButtons)
 		, m_frameSkip(frameSkip)
@@ -1347,13 +1350,12 @@ public:
 			}
 		}
 		m_renderSkipEnabled = !envFlagEnabled("STABLE_RETRO_DISABLE_RENDER_SKIP");
-		if (!initialStateObj.is_none()) {
-			m_initialState = py::bytes(initialStateObj);
-		}
+		parseInitialStates(initialStateObj, initialStateLabelsObj, initialStateWeightsObj, numEnvs);
 		m_numThreads = std::max(1, std::min<int>(m_numThreads <= 0 ? static_cast<int>(numEnvs) : m_numThreads, static_cast<int>(numEnvs)));
+		const std::string& constructionInitialState = initialStateForConstruction();
 		m_slots.reserve(numEnvs);
 		for (size_t i = 0; i < numEnvs; ++i) {
-			auto slot = std::make_unique<Slot>(romPath, dataPath, scenarioPath, m_initialState, i);
+			auto slot = std::make_unique<Slot>(romPath, dataPath, scenarioPath, constructionInitialState, i);
 			if (m_grayscale && m_algorithm == "area") {
 				slot->usesIndexedVideo = slot->emulator->m_re.setIndexedVideoEnabled(true);
 			}
@@ -1404,11 +1406,124 @@ public:
 		py::array::ShapeContainer vecShape{ static_cast<py::ssize_t>(m_slots.size()) };
 		m_rewardArray = py::array_t<float>(vecShape);
 		m_doneArray = py::array_t<bool>(vecShape);
+		m_activeInitialStateIndices.assign(m_slots.size(), -1);
 		for (size_t i = 0; i < m_slots.size(); ++i) {
 			m_emptyInfos.append(py::dict());
 		}
 		m_errors.resize(m_slots.size());
 		m_terminalObservations.resize(m_slots.size());
+	}
+
+	enum class InitialStateMode {
+		None,
+		Single,
+		Slot,
+		Sample
+	};
+
+	struct InitialStateChoice {
+		std::string state;
+		std::string label;
+		double weight = 1.0;
+		int32_t nameIndex = -1;
+	};
+
+	int32_t internInitialStateName(const std::string& label) {
+		auto it = std::find(m_initialStateNames.begin(), m_initialStateNames.end(), label);
+		if (it != m_initialStateNames.end()) {
+			return static_cast<int32_t>(std::distance(m_initialStateNames.begin(), it));
+		}
+		m_initialStateNames.push_back(label);
+		return static_cast<int32_t>(m_initialStateNames.size() - 1);
+	}
+
+	std::vector<std::string> parseInitialStateLabels(py::object labelsObj, size_t stateCount) {
+		std::vector<std::string> labels(stateCount);
+		if (labelsObj.is_none()) {
+			return labels;
+		}
+		py::sequence labelsSeq = py::reinterpret_borrow<py::sequence>(labelsObj);
+		if (static_cast<size_t>(labelsSeq.size()) != stateCount) {
+			throw std::runtime_error("initial_state_labels length must match initial_state length");
+		}
+		for (size_t i = 0; i < stateCount; ++i) {
+			labels[i] = py::str(labelsSeq[static_cast<py::ssize_t>(i)]);
+		}
+		return labels;
+	}
+
+	void parseInitialStates(py::object initialStateObj, py::object labelsObj, py::object weightsObj, size_t numEnvs) {
+		if (initialStateObj.is_none()) {
+			if (!labelsObj.is_none() || !weightsObj.is_none()) {
+				throw std::runtime_error("initial_state labels/weights require initial_state");
+			}
+			m_initialStateMode = InitialStateMode::None;
+			return;
+		}
+		if (PyBytes_Check(initialStateObj.ptr())) {
+			std::string state = py::bytes(initialStateObj);
+			std::vector<std::string> labels = parseInitialStateLabels(labelsObj, 1);
+			const int32_t nameIndex = internInitialStateName(labels[0]);
+			m_initialStates.push_back({state, labels[0], 1.0, nameIndex});
+			m_initialStateMode = InitialStateMode::Single;
+			return;
+		}
+
+		py::sequence states = py::reinterpret_borrow<py::sequence>(initialStateObj);
+		const size_t stateCount = static_cast<size_t>(states.size());
+		if (stateCount == 0) {
+			throw std::runtime_error("initial_state sequence must not be empty");
+		}
+
+		std::vector<std::string> labels = parseInitialStateLabels(labelsObj, stateCount);
+		if (!labelsObj.is_none()) {
+			m_reportInitialState = true;
+		}
+
+		std::vector<double> weights(stateCount, 1.0);
+		if (!weightsObj.is_none()) {
+			py::sequence weightsSeq = py::reinterpret_borrow<py::sequence>(weightsObj);
+			if (static_cast<size_t>(weightsSeq.size()) != stateCount) {
+				throw std::runtime_error("initial_state_weights length must match initial_state length");
+			}
+			double cumulative = 0.0;
+			for (size_t i = 0; i < stateCount; ++i) {
+				const double weight = py::float_(weightsSeq[static_cast<py::ssize_t>(i)]).cast<double>();
+				if (!std::isfinite(weight) || weight <= 0.0) {
+					throw std::runtime_error("initial_state_weights must contain positive finite numbers");
+				}
+				weights[i] = weight;
+				cumulative += weight;
+				m_initialStateCumulative.push_back(cumulative);
+			}
+			if (!std::isfinite(cumulative) || cumulative <= 0.0) {
+				throw std::runtime_error("initial_state_weights must sum to a positive finite number");
+			}
+			m_initialStateMode = InitialStateMode::Sample;
+		} else {
+			if (stateCount != numEnvs) {
+				throw std::runtime_error("initial_state sequence length must match num_envs when initial_state_weights is not provided");
+			}
+			m_initialStateMode = InitialStateMode::Slot;
+		}
+
+		m_initialStates.reserve(stateCount);
+		for (size_t i = 0; i < stateCount; ++i) {
+			std::string state = py::bytes(states[static_cast<py::ssize_t>(i)]);
+			if (state.empty()) {
+				throw std::runtime_error("initial_state entries must not be empty");
+			}
+			const int32_t nameIndex = internInitialStateName(labels[i]);
+			m_initialStates.push_back({state, labels[i], weights[i], nameIndex});
+		}
+	}
+
+	const std::string& initialStateForConstruction() const {
+		static const std::string empty;
+		if (m_initialStates.empty()) {
+			return empty;
+		}
+		return m_initialStates.front().state;
 	}
 
 	py::tuple reset(py::object seedObj = py::none()) {
@@ -1447,7 +1562,45 @@ public:
 			});
 		}
 		throwFirstError(m_errors);
-		return py::make_tuple(obsArray, m_emptyInfos);
+		return py::make_tuple(obsArray, resetInfos());
+	}
+
+	py::array_t<int32_t> activeStateIndices() {
+		return py::array_t<int32_t>(
+			{ static_cast<py::ssize_t>(m_activeInitialStateIndices.size()) },
+			{ static_cast<py::ssize_t>(sizeof(int32_t)) },
+			m_activeInitialStateIndices.data(),
+			py::cast(this)
+		);
+	}
+
+	py::tuple initialStateNames() const {
+		py::tuple names(m_initialStateNames.size());
+		for (size_t i = 0; i < m_initialStateNames.size(); ++i) {
+			names[static_cast<py::ssize_t>(i)] = py::str(m_initialStateNames[i]);
+		}
+		return names;
+	}
+
+	void addStartStateInfo(py::dict& info, const std::string& label) const {
+		if (!m_reportInitialState) {
+			return;
+		}
+		info["start_state"] = label;
+		info["state"] = label;
+	}
+
+	py::list resetInfos() const {
+		if (!m_reportInitialState) {
+			return m_emptyInfos;
+		}
+		py::list infos;
+		for (const auto& slot : m_slots) {
+			py::dict info = py::dict();
+			addStartStateInfo(info, slot->currentStartStateLabel);
+			infos.append(info);
+		}
+		return infos;
 	}
 
 	py::tuple step(py::array_t<uint8_t> masks) {
@@ -1500,11 +1653,16 @@ public:
 			if (m_fullInfo || !m_terminalObservations[i].empty()) {
 				info = lookupInfo(*m_slots[i]);
 			}
+			if (m_reportInitialState && (m_fullInfo || !m_terminalObservations[i].empty())) {
+				addStartStateInfo(info, outputs[i].startStateLabel);
+			}
 			if (!m_terminalObservations[i].empty()) {
 				py::array_t<uint8_t> terminal(observationShapeContainer());
 				std::memcpy(terminal.mutable_data(), m_terminalObservations[i].data(), m_stackedObsSize);
 				info["terminal_observation"] = terminal;
-				info["reset_info"] = py::dict();
+				py::dict resetInfo = py::dict();
+				addStartStateInfo(resetInfo, outputs[i].resetStartStateLabel);
+				info["reset_info"] = resetInfo;
 				info["TimeLimit.truncated"] = false;
 			}
 			if (outputs[i].lifeLoss) {
@@ -1575,6 +1733,7 @@ private:
 	struct Slot {
 		Slot(const string& romPath, const string& dataPath, const string& scenarioPath, const std::string& initialState, size_t index)
 			: emulator(std::make_unique<PyRetroEmulator>(romPath))
+			, index(index)
 			, rng(static_cast<uint32_t>(0xC0D3u + index * 9973u)) {
 			emulator->configureData(data);
 			ScriptContext::reset();
@@ -1598,6 +1757,7 @@ private:
 		}
 
 		std::unique_ptr<PyRetroEmulator> emulator;
+		size_t index = 0;
 		PyGameData data;
 		std::vector<uint8_t> frameStack;
 		std::vector<uint8_t> singleObs;
@@ -1612,6 +1772,7 @@ private:
 		bool usesIndexedVideo = false;
 		bool hasPreviousLifeValue = false;
 		int64_t previousLifeValue = 0;
+		std::string currentStartStateLabel;
 		std::mt19937 rng;
 	};
 
@@ -1621,6 +1782,8 @@ private:
 		bool lifeLoss = false;
 		int64_t previousLifeValue = 0;
 		int64_t currentLifeValue = 0;
+		std::string startStateLabel;
+		std::string resetStartStateLabel;
 		std::vector<uint8_t> terminalObservation;
 	};
 
@@ -1793,13 +1956,42 @@ private:
 		return std::max(m_rewardClipLow, std::min(m_rewardClipHigh, reward));
 	}
 
+	int32_t initialStateIndexForReset(Slot& slot) {
+		switch (m_initialStateMode) {
+		case InitialStateMode::None:
+			return -1;
+		case InitialStateMode::Single:
+			return m_initialStates.empty() ? -1 : 0;
+		case InitialStateMode::Slot:
+			return static_cast<int32_t>(slot.index);
+		case InitialStateMode::Sample: {
+			std::uniform_real_distribution<double> dist(0.0, m_initialStateCumulative.back());
+			const double sample = dist(slot.rng);
+			auto it = std::upper_bound(m_initialStateCumulative.begin(), m_initialStateCumulative.end(), sample);
+			size_t index = static_cast<size_t>(std::distance(m_initialStateCumulative.begin(), it));
+			if (index >= m_initialStates.size()) {
+				index = m_initialStates.size() - 1;
+			}
+			return static_cast<int32_t>(index);
+		}
+		}
+		return -1;
+	}
+
 	void resetSlot(Slot& slot, uint8_t* dst) {
-		if (!m_initialState.empty()) {
-			if (!slot.emulator->m_re.unserialize(m_initialState.data(), m_initialState.size())) {
+		const int32_t initialStateIndex = initialStateIndexForReset(slot);
+		const InitialStateChoice* initialState =
+			initialStateIndex >= 0 ? &m_initialStates[static_cast<size_t>(initialStateIndex)] : nullptr;
+		if (initialState && !initialState->state.empty()) {
+			if (!slot.emulator->m_re.unserialize(initialState->state.data(), initialState->state.size())) {
 				throw std::runtime_error("failed to load initial state");
 			}
+			slot.currentStartStateLabel = initialState->label;
+			m_activeInitialStateIndices[slot.index] = initialState->nameIndex;
 		} else {
 			slot.emulator->m_re.reset();
+			slot.currentStartStateLabel.clear();
+			m_activeInitialStateIndices[slot.index] = -1;
 		}
 		slot.hasLastMask = false;
 		std::fill(slot.lastMask.begin(), slot.lastMask.end(), 0);
@@ -1955,12 +2147,17 @@ private:
 					pushFrame(slot, slot.singleObs);
 					output.reward = clipReward(totalReward);
 					output.done = done;
+					if (m_reportInitialState && (m_fullInfo || done)) {
+						output.startStateLabel = slot.currentStartStateLabel;
+					}
 					if (done && captureTerminalObservation) {
 						output.terminalObservation.resize(m_stackedObsSize);
 						writeStackedObservation(slot, output.terminalObservation.data());
 						resetSlot(slot, dst);
+						output.resetStartStateLabel = slot.currentStartStateLabel;
 					} else if (done) {
 						resetSlot(slot, dst);
+						output.resetStartStateLabel = slot.currentStartStateLabel;
 					} else {
 						writeStackedObservation(slot, dst);
 					}
@@ -2015,12 +2212,17 @@ private:
 		pushFrame(slot, slot.singleObs);
 		output.reward = clipReward(totalReward);
 		output.done = done;
+		if (m_reportInitialState && (m_fullInfo || done)) {
+			output.startStateLabel = slot.currentStartStateLabel;
+		}
 		if (done && captureTerminalObservation) {
 			output.terminalObservation.resize(m_stackedObsSize);
 			writeStackedObservation(slot, output.terminalObservation.data());
 			resetSlot(slot, dst);
+			output.resetStartStateLabel = slot.currentStartStateLabel;
 		} else if (done) {
 			resetSlot(slot, dst);
+			output.resetStartStateLabel = slot.currentStartStateLabel;
 		} else {
 			writeStackedObservation(slot, dst);
 		}
@@ -2047,7 +2249,12 @@ private:
 	}
 
 	std::vector<std::unique_ptr<Slot>> m_slots;
-	std::string m_initialState;
+	std::vector<InitialStateChoice> m_initialStates;
+	std::vector<std::string> m_initialStateNames;
+	std::vector<double> m_initialStateCumulative;
+	std::vector<int32_t> m_activeInitialStateIndices;
+	InitialStateMode m_initialStateMode = InitialStateMode::None;
+	bool m_reportInitialState = false;
 	int m_numButtons = 0;
 	int m_frameSkip = 1;
 	int m_frameStack = 1;
@@ -2306,7 +2513,9 @@ PYBIND11_MODULE(_retro, m) {
 				const string&,
 				py::object,
 				bool,
-				const string&>(),
+				const string&,
+				py::object,
+				py::object>(),
 			py::arg("num_envs"),
 			py::arg("rom_path"),
 			py::arg("data_path"),
@@ -2332,11 +2541,15 @@ PYBIND11_MODULE(_retro, m) {
 			py::arg("obs_layout") = "hwc",
 			py::arg("info_keys") = py::none(),
 			py::arg("terminate_on_life_loss") = false,
-			py::arg("life_variable") = ""
+			py::arg("life_variable") = "",
+			py::arg("initial_state_labels") = py::none(),
+			py::arg("initial_state_weights") = py::none()
 		)
 		.def("reset", &PyNativeVectorEnv::reset, py::arg("seed") = py::none())
 		.def("step", &PyNativeVectorEnv::step)
+		.def("active_state_indices", &PyNativeVectorEnv::activeStateIndices)
 		.def("observation_shape", &PyNativeVectorEnv::observationShape)
+		.def_property_readonly("initial_state_names", &PyNativeVectorEnv::initialStateNames)
 		.def_property_readonly("num_envs", &PyNativeVectorEnv::numEnvs);
 
 	m.def("core_path", &::corePath, py::arg("hint") = py::none());

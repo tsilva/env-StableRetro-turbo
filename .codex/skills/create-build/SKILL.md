@@ -133,6 +133,27 @@ Validate that the final wheel:
 - Passes import smoke tests for `stable_retro` and `stable_retro._retro`
 - Passes `twine check`
 
+Run macOS wheel import smoke tests from outside the repository, such as
+`/private/tmp`, with the wheel installed into a temporary target directory.
+Do not run the smoke import from the repo root, because the checkout package can
+shadow the installed wheel and give a false pass.
+
+```bash
+TMP=$(mktemp -d /private/tmp/stable-retro-macos-wheel-smoke.XXXXXX)
+"$PY" -m pip install --no-deps --target "$TMP" "$REPO/wheelhouse-post<N>-repaired/<macos-wheel>"
+(
+  cd /private/tmp
+  PYTHONPATH="$TMP" "$PY" - <<'PY'
+import stable_retro
+from stable_retro import _retro
+print(stable_retro.__file__)
+print(_retro.__file__)
+assert "stable-retro-macos-wheel-smoke" in stable_retro.__file__
+assert hasattr(_retro, "NativeVectorEnv")
+PY
+)
+```
+
 The build may emit `fatal: not a git repository` metadata warnings from the temp copy and third-party compiler warnings. Report them, but they are not failures by themselves.
 
 ## Linux Manylinux Wheel
@@ -192,6 +213,11 @@ Also inspect wheel contents with Python `zipfile` or an equivalent command to co
 - No `cp311` extension exists
 - All four public cores are present
 - No ROM payloads such as `stable_retro/data/**/rom.nes`, `rom.sfc`, `rom.smc`, `rom.gb`, `rom.gbc`, `rom.md`, `rom.gen`, `rom.sms`, or `rom.bin` are present. `rom.sha` metadata is allowed.
+
+For any host-side import smoke that installs a wheel into a temporary target,
+run Python from outside the repository and print `stable_retro.__file__` and
+`stable_retro._retro.__file__` so it is clear the installed wheel was imported,
+not the local checkout.
 
 ## Post-Build Deploy Command
 

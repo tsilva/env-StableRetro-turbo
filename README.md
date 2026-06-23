@@ -77,7 +77,7 @@ audio disabled.
 
 | Version / build | Backend | Samples (steps/s) | Mean steps/s | Std steps/s | Speedup vs `.post0` |
 | --- | --- | ---: | ---: | ---: | ---: |
-| current checkout (`VERSION.txt` `1.0.0.post15`) | `native_vec_fused` | `7995.0`, `8759.3`, `6411.0` | `7721.8` | `1197.8` | `3.98x` |
+| current checkout (`VERSION.txt` `1.0.0.post16`) | `native_vec_fused` | `9639.4`, `10956.4`, `10830.4` | `10475.4` | `726.7` | `5.41x` |
 | `1.0.0.post0` vanilla baseline | `subproc_vec_retro` | `1530.3`, `2110.1`, `2173.2` | `1937.9` | `354.4` | `1.00x` |
 
 When running a new release benchmark, update the comparison table above with
@@ -126,6 +126,70 @@ env = retro.StableRetroNativeVecEnv(
     frame_stack=4,
     maxpool_last_two=True,
 )
+```
+
+Mixed start-state training can stay on the native vector path by passing a list
+or dict to `state`. A list means fixed per-env slot assignment and must have one
+entry per env. A dict maps state names to positive finite sampling weights;
+weights are normalized before sampling. Sampling happens independently for each
+env on every reset, and reset infos include both `start_state` and `state`.
+
+```python
+env = retro.StableRetroNativeVecEnv(
+    "SuperMarioBros-Nes-v0",
+    num_envs=32,
+    num_threads=16,
+    state={"Level1-1": 1.0, "Level1-2": 1.0, "Level1-3": 1.0},
+    render_mode="rgb_array",
+    obs_crop=(32, 0, 0, 0),
+    obs_resize=(84, 84),
+    obs_resize_algorithm="area",
+    obs_grayscale=True,
+    frame_skip=4,
+    frame_stack=4,
+    maxpool_last_two=True,
+)
+```
+
+For task-conditioned PPO, use the integer state-index view instead of per-step
+`info` dict strings:
+
+```python
+import numpy as np
+
+state_names = env.initial_state_names
+state_indices = env.active_state_indices()
+
+obs = env.reset()
+task_ids = state_indices.copy()
+task_one_hot = np.eye(len(state_names), dtype=np.float32)[task_ids]
+
+obs, rewards, dones, infos = env.step(actions)
+task_ids = state_indices.copy()
+```
+
+`active_state_indices()` returns the same read-only `int32` NumPy view each
+time. It is owned by the native vector env and mutates in place after `reset()`
+and after any per-lane automatic reset before the next observation is returned.
+Call `.copy()` when code needs a stable snapshot.
+
+In fixed per-env slot mode, duplicated state labels share one task index:
+
+```python
+env = retro.StableRetroNativeVecEnv(
+    "SuperMarioBros-Nes-v0",
+    num_envs=4,
+    state=["Level1-1", "Level1-2", "Level1-1", "Level1-2"],
+)
+
+env.initial_state_names      # ("Level1-1", "Level1-2")
+env.active_state_indices()   # [0, 1, 0, 1]
+```
+
+Benchmark the same mixed-level profile with:
+
+```bash
+python3 scripts/benchmark_vec_env.py --profile supermario-level1-1 --backend native --states Level1-1,Level1-2,Level1-3 --state-probs 1,1,1
 ```
 
 First-life-loss episode termination can be enabled in the native vector path
