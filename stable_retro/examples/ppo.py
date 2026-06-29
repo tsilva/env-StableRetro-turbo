@@ -18,7 +18,7 @@ def main():
     args = parser.parse_args()
 
     venv = VecTransposeImage(
-        retro.StableRetroNativeVecEnv(
+        retro.RetroVecEnv(
             args.game,
             num_envs=args.num_envs,
             state=args.state,

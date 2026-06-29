@@ -98,17 +98,17 @@ def _life_counter_info_path(tmp_path):
 
 def _make_test_native_vec_env(tmp_path, **kwargs):
     import stable_retro as retro
-    from stable_retro.vec_env import StableRetroNativeVecEnv
+    from stable_retro.vec_env import RetroVecEnv
 
     num_envs = kwargs.pop("num_envs", 2)
     root = Path(__file__).resolve().parents[1]
     rom_path = root / "roms" / "Dr88-FamiconIntro.nes"
     empty_info = _empty_info_path(tmp_path)
 
-    return StableRetroNativeVecEnv(
+    return RetroVecEnv(
         "Dr88-FamiconIntro",
-        num_envs,
         state=retro.State.NONE,
+        num_envs=num_envs,
         rom_path=str(rom_path),
         info=str(empty_info),
         scenario=str(empty_info),
@@ -137,16 +137,16 @@ def test_stable_retro_native_vec_env_rejects_invalid_sticky_action_prob(
 
 def _make_dr88_native_vec_env(tmp_path, info_path, **kwargs):
     import stable_retro as retro
-    from stable_retro.vec_env import StableRetroNativeVecEnv
+    from stable_retro.vec_env import RetroVecEnv
 
     num_envs = kwargs.pop("num_envs", 2)
     root = Path(__file__).resolve().parents[1]
     rom_path = root / "roms" / "Dr88-FamiconIntro.nes"
 
-    return StableRetroNativeVecEnv(
+    return RetroVecEnv(
         "Dr88-FamiconIntro",
-        num_envs,
         state=retro.State.NONE,
+        num_envs=num_envs,
         rom_path=str(rom_path),
         info=str(info_path),
         scenario=str(info_path),
@@ -229,6 +229,22 @@ def test_stable_retro_native_vec_env_fast_info_modes(info_mode, tmp_path):
         env.close()
 
 
+def test_stable_retro_native_vec_env_no_rule_no_done_omits_done_on_info(tmp_path):
+    pytest.importorskip("stable_baselines3")
+
+    env = _make_test_native_vec_env(tmp_path, info_mode="all")
+    try:
+        env.reset()
+        actions = np.zeros((env.num_envs, env.num_buttons), dtype=np.uint8)
+        _, _, dones, infos = env.step(actions)
+
+        assert dones.tolist() == [False, False]
+        assert "done_on_info" not in infos[0]
+        assert "done_on_info" not in infos[1]
+    finally:
+        env.close()
+
+
 def test_stable_retro_native_vec_env_life_loss_requires_variable(tmp_path):
     pytest.importorskip("stable_baselines3")
 
@@ -246,12 +262,45 @@ def test_stable_retro_native_vec_env_life_loss_requires_variable(tmp_path):
         )
 
 
+def test_stable_retro_native_vec_env_done_on_info_validation():
+    pytest.importorskip("stable_baselines3")
+    from stable_retro.vec_env import RetroVecEnv
+
+    normalize = RetroVecEnv._normalize_done_on_info
+
+    assert normalize(
+        {"level_change": [["levelHi", "levelLo"], "change"]},
+        terminate_on_life_loss=False,
+        life_variable="",
+    ) == (("level_change", ("levelHi", "levelLo"), "change"),)
+
+    assert normalize(
+        {"life_loss": ("health", "decrease")},
+        terminate_on_life_loss=True,
+        life_variable="lives",
+    ) == (("life_loss", ("health",), "decrease"),)
+
+    with pytest.raises(ValueError, match="done_on_info ops"):
+        normalize(
+            {"bad": ("lives", "less")},
+            terminate_on_life_loss=False,
+            life_variable="",
+        )
+
+    with pytest.raises(ValueError, match="at least one key"):
+        normalize(
+            {"bad": ((), "change")},
+            terminate_on_life_loss=False,
+            life_variable="",
+        )
+
+
 def test_stable_retro_native_vec_env_validates_mixed_state_config():
     pytest.importorskip("stable_baselines3")
     import stable_retro as retro
-    from stable_retro.vec_env import StableRetroNativeVecEnv
+    from stable_retro.vec_env import RetroVecEnv
 
-    resolve = StableRetroNativeVecEnv._resolve_state_config
+    resolve = RetroVecEnv._resolve_state_config
     game = "SuperMarioBros-Nes-v0"
 
     with pytest.raises(ValueError, match="state sequence length must match num_envs"):
@@ -320,10 +369,10 @@ def test_stable_retro_native_vec_env_validates_mixed_state_config():
     assert probs is None
     assert state_collection is False
 
-    with pytest.raises(TypeError, match="states.*not supported"):
-        StableRetroNativeVecEnv(game, 1, states=["Level1-1"])
-    with pytest.raises(TypeError, match="state_probs.*not supported"):
-        StableRetroNativeVecEnv(game, 1, state_probs=[1.0])
+    with pytest.raises(TypeError, match="unexpected keyword argument 'states'"):
+        RetroVecEnv(game, num_envs=1, states=["Level1-1"])
+    with pytest.raises(TypeError, match="unexpected keyword argument 'state_probs'"):
+        RetroVecEnv(game, num_envs=1, state_probs=[1.0])
 
 
 def _mario_rom_path_or_skip():
@@ -336,12 +385,13 @@ def _mario_rom_path_or_skip():
 
 
 def _make_mario_native_vec_env(num_envs, rom_path, **kwargs):
-    from stable_retro.vec_env import StableRetroNativeVecEnv
+    from stable_retro.vec_env import RetroVecEnv
 
-    return StableRetroNativeVecEnv(
+    state = kwargs.pop("state", "Level1-1")
+    return RetroVecEnv(
         "SuperMarioBros-Nes-v0",
-        num_envs,
-        state="Level1-1",
+        state=state,
+        num_envs=num_envs,
         rom_path=rom_path,
         obs_resize=(84, 84),
         obs_grayscale=True,
@@ -440,6 +490,188 @@ def test_stable_retro_native_vec_env_life_loss_autoresets_only_one_lane():
         baseline_env.close()
 
 
+def test_stable_retro_native_vec_env_done_on_info_life_loss_matches_legacy():
+    pytest.importorskip("stable_baselines3")
+
+    rom_path = _mario_rom_path_or_skip()
+    explicit_env = _make_mario_native_vec_env(
+        1,
+        rom_path,
+        info_mode="terminal",
+        done_on_info={"life_loss": ["lives", "decrease"]},
+    )
+    legacy_env = _make_mario_native_vec_env(
+        1,
+        rom_path,
+        info_mode="terminal",
+        terminate_on_life_loss=True,
+        life_variable="lives",
+    )
+    try:
+        explicit_env.reset()
+        legacy_env.reset()
+        actions = np.zeros((1, explicit_env.num_buttons), dtype=np.uint8)
+        actions[0, 7] = 1
+        for _ in range(180):
+            _, _, explicit_dones, explicit_infos = explicit_env.step(actions)
+            _, _, legacy_dones, legacy_infos = legacy_env.step(actions)
+            np.testing.assert_array_equal(explicit_dones, legacy_dones)
+            if not bool(explicit_dones[0]):
+                continue
+
+            assert explicit_infos[0]["life_loss"] is True
+            assert explicit_infos[0]["died"] is True
+            assert explicit_infos[0]["life_variable"] == "lives"
+            assert explicit_infos[0]["current_lives"] < explicit_infos[0]["previous_lives"]
+            assert explicit_infos[0]["done_on_info"] == {
+                "life_loss": {
+                    "op": "decrease",
+                    "keys": ["lives"],
+                    "prev": [explicit_infos[0]["previous_lives"]],
+                    "next": [explicit_infos[0]["current_lives"]],
+                },
+            }
+            assert legacy_infos[0]["done_on_info"] == explicit_infos[0]["done_on_info"]
+            assert "terminal_observation" in explicit_infos[0]
+            return
+
+        pytest.fail("Mario did not lose a life within the test step budget")
+    finally:
+        explicit_env.close()
+        legacy_env.close()
+
+
+def test_stable_retro_native_vec_env_done_on_info_autoresets_only_changed_lane():
+    pytest.importorskip("stable_baselines3")
+
+    rom_path = _mario_rom_path_or_skip()
+    env = _make_mario_native_vec_env(
+        2,
+        rom_path,
+        state=["Level1-1", "Level1-1"],
+        info_mode="terminal",
+        done_on_info={"scroll_change": [["xscrollHi", "xscrollLo"], "change"]},
+    )
+    baseline_env = _make_mario_native_vec_env(
+        2,
+        rom_path,
+        state=["Level1-1", "Level1-1"],
+        info_mode="terminal",
+    )
+    try:
+        env.reset()
+        baseline_env.reset()
+        actions = np.zeros((2, env.num_buttons), dtype=np.uint8)
+        actions[0, 7] = 1
+
+        for _ in range(80):
+            obs, _, dones, infos = env.step(actions)
+            baseline_obs, _, baseline_dones, _ = baseline_env.step(actions)
+            assert baseline_dones.tolist() == [False, False]
+            if not bool(dones[0]):
+                assert dones.tolist() == [False, False]
+                continue
+
+            assert dones.tolist() == [True, False]
+            np.testing.assert_array_equal(obs[1], baseline_obs[1])
+            payload = infos[0]["done_on_info"]["scroll_change"]
+            assert payload["op"] == "change"
+            assert payload["keys"] == ["xscrollHi", "xscrollLo"]
+            assert len(payload["prev"]) == 2
+            assert len(payload["next"]) == 2
+            assert payload["prev"] != payload["next"]
+            assert "terminal_observation" in infos[0]
+            assert "terminal_observation" not in infos[1]
+            assert "done_on_info" not in infos[1]
+            return
+
+        pytest.fail("Mario xscroll did not change within the test step budget")
+    finally:
+        env.close()
+        baseline_env.close()
+
+
+def test_stable_retro_native_vec_env_done_on_info_reports_multiple_rules_same_step():
+    pytest.importorskip("stable_baselines3")
+
+    rom_path = _mario_rom_path_or_skip()
+    env = _make_mario_native_vec_env(
+        1,
+        rom_path,
+        info_mode="terminal",
+        done_on_info={
+            "life_loss": ["lives", "decrease"],
+            "level_change": ["lives", "change"],
+        },
+    )
+    try:
+        env.reset()
+        actions = np.zeros((1, env.num_buttons), dtype=np.uint8)
+        actions[0, 7] = 1
+        for _ in range(180):
+            _, _, dones, infos = env.step(actions)
+            if not bool(dones[0]):
+                continue
+
+            assert infos[0]["done_on_info"] == {
+                "life_loss": {
+                    "op": "decrease",
+                    "keys": ["lives"],
+                    "prev": [infos[0]["previous_lives"]],
+                    "next": [infos[0]["current_lives"]],
+                },
+                "level_change": {
+                    "op": "change",
+                    "keys": ["lives"],
+                    "prev": [infos[0]["previous_lives"]],
+                    "next": [infos[0]["current_lives"]],
+                },
+            }
+            assert infos[0]["life_loss"] is True
+            assert infos[0]["died"] is True
+            return
+
+        pytest.fail("Mario did not lose a life within the test step budget")
+    finally:
+        env.close()
+
+
+def test_stable_retro_native_vec_env_done_on_info_weighted_state_autoreset_updates_active_index():
+    pytest.importorskip("stable_baselines3")
+
+    rom_path = _mario_rom_path_or_skip()
+    env = _make_mario_native_vec_env(
+        2,
+        rom_path,
+        state={"Level1-1": 1.0},
+        info_mode="terminal",
+        done_on_info={"scroll_change": [["xscrollHi", "xscrollLo"], "change"]},
+    )
+    try:
+        env.seed(20260624)
+        env.reset()
+        actions = np.zeros((2, env.num_buttons), dtype=np.uint8)
+        actions[0, 7] = 1
+
+        for _ in range(80):
+            _, _, dones, infos = env.step(actions)
+            if not bool(dones[0]):
+                continue
+
+            assert dones.tolist() == [True, False]
+            assert env.initial_state_names == ("Level1-1",)
+            np.testing.assert_array_equal(
+                env.active_state_indices(),
+                np.zeros(2, dtype=np.int32),
+            )
+            assert infos[0]["reset_info"]["start_state"] == "Level1-1"
+            return
+
+        pytest.fail("Mario xscroll did not change within the test step budget")
+    finally:
+        env.close()
+
+
 def test_stable_retro_native_vec_env_single_state_active_indices_if_rom_present():
     pytest.importorskip("stable_baselines3")
 
@@ -468,14 +700,14 @@ def test_stable_retro_native_vec_env_single_state_active_indices_if_rom_present(
 
 def test_stable_retro_native_vec_env_mixed_states_reset_infos_if_rom_present():
     pytest.importorskip("stable_baselines3")
-    from stable_retro.vec_env import StableRetroNativeVecEnv
+    from stable_retro.vec_env import RetroVecEnv
 
     rom_path = _mario_rom_path_or_skip()
     states = ["Level1-1", "Level1-2", "Level1-3"]
-    env = StableRetroNativeVecEnv(
+    env = RetroVecEnv(
         "SuperMarioBros-Nes-v0",
-        3,
         state=states,
+        num_envs=3,
         rom_path=rom_path,
         obs_resize=(84, 84),
         obs_grayscale=True,
@@ -508,14 +740,14 @@ def test_stable_retro_native_vec_env_mixed_states_reset_infos_if_rom_present():
 
 def test_stable_retro_native_vec_env_fixed_duplicate_states_are_canonical_if_rom_present():
     pytest.importorskip("stable_baselines3")
-    from stable_retro.vec_env import StableRetroNativeVecEnv
+    from stable_retro.vec_env import RetroVecEnv
 
     rom_path = _mario_rom_path_or_skip()
     states = ["Level1-1", "Level1-2", "Level1-1", "Level1-2"]
-    env = StableRetroNativeVecEnv(
+    env = RetroVecEnv(
         "SuperMarioBros-Nes-v0",
-        4,
         state=states,
+        num_envs=4,
         rom_path=rom_path,
         obs_resize=(84, 84),
         obs_grayscale=True,
@@ -540,14 +772,14 @@ def test_stable_retro_native_vec_env_fixed_duplicate_states_are_canonical_if_rom
 
 def test_stable_retro_native_vec_env_weighted_states_sample_on_reset_if_rom_present():
     pytest.importorskip("stable_baselines3")
-    from stable_retro.vec_env import StableRetroNativeVecEnv
+    from stable_retro.vec_env import RetroVecEnv
 
     rom_path = _mario_rom_path_or_skip()
     states = ["Level1-1", "Level1-2", "Level1-3"]
-    env = StableRetroNativeVecEnv(
+    env = RetroVecEnv(
         "SuperMarioBros-Nes-v0",
-        12,
         state={state: 1.0 for state in states},
+        num_envs=12,
         rom_path=rom_path,
         obs_resize=(84, 84),
         obs_grayscale=True,
@@ -583,15 +815,15 @@ def test_stable_retro_native_vec_env_active_indices_update_after_autoreset_if_ro
     tmp_path,
 ):
     pytest.importorskip("stable_baselines3")
-    from stable_retro.vec_env import StableRetroNativeVecEnv
+    from stable_retro.vec_env import RetroVecEnv
 
     rom_path = _mario_rom_path_or_skip()
     done_info = _done_on_frame_info_path(tmp_path)
     states = ["Level1-1", "Level1-2", "Level1-3"]
-    env = StableRetroNativeVecEnv(
+    env = RetroVecEnv(
         "SuperMarioBros-Nes-v0",
-        6,
         state={state: 1.0 for state in states},
+        num_envs=6,
         rom_path=rom_path,
         info=str(done_info),
         scenario=str(done_info),
@@ -624,7 +856,7 @@ def test_stable_retro_native_vec_env_active_indices_update_after_autoreset_if_ro
 def test_stable_retro_native_vec_env_selected_info_keys(tmp_path):
     pytest.importorskip("stable_baselines3")
     import stable_retro as retro
-    from stable_retro.vec_env import StableRetroNativeVecEnv
+    from stable_retro.vec_env import RetroVecEnv
 
     root = Path(__file__).resolve().parents[1]
     rom_path = root / "roms" / "Dr88-FamiconIntro.nes"
@@ -642,10 +874,10 @@ def test_stable_retro_native_vec_env_selected_info_keys(tmp_path):
         num_threads=1,
         info_mode="all",
     )
-    default_env = StableRetroNativeVecEnv("Dr88-FamiconIntro", 1, **common_kwargs)
-    selected_env = StableRetroNativeVecEnv(
+    default_env = RetroVecEnv("Dr88-FamiconIntro", num_envs=1, **common_kwargs)
+    selected_env = RetroVecEnv(
         "Dr88-FamiconIntro",
-        1,
+        num_envs=1,
         info_keys=["frame_reward_source"],
         **common_kwargs,
     )
@@ -714,7 +946,7 @@ def test_stable_retro_native_vec_env_unsafe_zero_copy_aliases_observations(tmp_p
 
 def test_stable_retro_native_vec_env_forwards_per_env_reset_seeds():
     pytest.importorskip("stable_baselines3")
-    from stable_retro.vec_env import StableRetroNativeVecEnv
+    from stable_retro.vec_env import RetroVecEnv
 
     class FakeNative:
         def __init__(self):
@@ -724,7 +956,7 @@ def test_stable_retro_native_vec_env_forwards_per_env_reset_seeds():
             self.reset_seeds.append(seed)
             return np.zeros((3, 2, 2, 1), dtype=np.uint8), [{}, {}, {}]
 
-    env = StableRetroNativeVecEnv.__new__(StableRetroNativeVecEnv)
+    env = RetroVecEnv.__new__(RetroVecEnv)
     env.native = FakeNative()
     env.num_envs = 3
     env.copy_observations = True
@@ -764,16 +996,16 @@ def test_stable_retro_native_vec_env_frame_stack_order(tmp_path):
 
 def _native_test_rom_trace(tmp_path, copy_observations, num_threads, seed, actions):
     import stable_retro as retro
-    from stable_retro.vec_env import StableRetroNativeVecEnv
+    from stable_retro.vec_env import RetroVecEnv
 
     root = Path(__file__).resolve().parents[1]
     rom_path = root / "roms" / "Dr88-FamiconIntro.nes"
     reward_info = _time_reward_info_path(tmp_path)
 
-    env = StableRetroNativeVecEnv(
+    env = RetroVecEnv(
         "Dr88-FamiconIntro",
-        8,
         state=retro.State.NONE,
+        num_envs=8,
         rom_path=str(rom_path),
         info=str(reward_info),
         scenario=str(reward_info),
@@ -846,7 +1078,7 @@ def test_stable_retro_native_vec_env_seed_determinism_ci_rom(
 
 def _native_render_skip_trace(tmp_path, *, disable_render_skip, maxpool_last_two):
     import stable_retro as retro
-    from stable_retro.vec_env import StableRetroNativeVecEnv
+    from stable_retro.vec_env import RetroVecEnv
 
     if disable_render_skip:
         os.environ["STABLE_RETRO_DISABLE_RENDER_SKIP"] = "1"
@@ -856,10 +1088,10 @@ def _native_render_skip_trace(tmp_path, *, disable_render_skip, maxpool_last_two
     root = Path(__file__).resolve().parents[1]
     rom_path = root / "roms" / "Dr88-FamiconIntro.nes"
     done_info = _done_on_frame_info_path(tmp_path)
-    env = StableRetroNativeVecEnv(
+    env = RetroVecEnv(
         "Dr88-FamiconIntro",
-        4,
         state=retro.State.NONE,
+        num_envs=4,
         rom_path=str(rom_path),
         info=str(done_info),
         scenario=str(done_info),
@@ -952,15 +1184,15 @@ def _normalize_infos_as_hwc(infos, obs_layout):
 
 def _native_layout_trace(tmp_path, obs_layout, actions):
     import stable_retro as retro
-    from stable_retro.vec_env import StableRetroNativeVecEnv
+    from stable_retro.vec_env import RetroVecEnv
 
     root = Path(__file__).resolve().parents[1]
     rom_path = root / "roms" / "Dr88-FamiconIntro.nes"
     done_info = _done_on_frame_info_path(tmp_path)
-    env = StableRetroNativeVecEnv(
+    env = RetroVecEnv(
         "Dr88-FamiconIntro",
-        4,
         state=retro.State.NONE,
+        num_envs=4,
         rom_path=str(rom_path),
         info=str(done_info),
         scenario=str(done_info),
@@ -1015,7 +1247,7 @@ def test_stable_retro_native_vec_env_chw_matches_hwc_trace(tmp_path):
 def test_stable_retro_native_vec_env_mario_infos_if_rom_present():
     pytest.importorskip("stable_baselines3")
     import stable_retro as retro
-    from stable_retro.vec_env import StableRetroNativeVecEnv
+    from stable_retro.vec_env import RetroVecEnv
 
     try:
         rom_path = retro.data.get_original_romfile_path("SuperMarioBros-Nes-v0")
@@ -1034,10 +1266,10 @@ def test_stable_retro_native_vec_env_mario_infos_if_rom_present():
         "xscrollLo",
     }
 
-    env = StableRetroNativeVecEnv(
+    env = RetroVecEnv(
         "SuperMarioBros-Nes-v0",
-        1,
         state="Level1-1",
+        num_envs=1,
         rom_path=rom_path,
         obs_resize=(84, 84),
         obs_grayscale=True,
@@ -1046,10 +1278,10 @@ def test_stable_retro_native_vec_env_mario_infos_if_rom_present():
         maxpool_last_two=True,
         num_threads=1,
     )
-    terminal_env = StableRetroNativeVecEnv(
+    terminal_env = RetroVecEnv(
         "SuperMarioBros-Nes-v0",
-        1,
         state="Level1-1",
+        num_envs=1,
         rom_path=rom_path,
         obs_resize=(84, 84),
         obs_grayscale=True,
@@ -1080,17 +1312,17 @@ def test_stable_retro_native_vec_env_mario_infos_if_rom_present():
 def test_stable_retro_native_vec_env_mario_life_decrease_terminates_if_rom_present():
     pytest.importorskip("stable_baselines3")
     import stable_retro as retro
-    from stable_retro.vec_env import StableRetroNativeVecEnv
+    from stable_retro.vec_env import RetroVecEnv
 
     try:
         rom_path = retro.data.get_original_romfile_path("SuperMarioBros-Nes-v0")
     except FileNotFoundError:
         pytest.skip("SuperMarioBros-Nes-v0 ROM is not imported locally")
 
-    env = StableRetroNativeVecEnv(
+    env = RetroVecEnv(
         "SuperMarioBros-Nes-v0",
-        1,
         state="Level1-1",
+        num_envs=1,
         rom_path=rom_path,
         obs_resize=(84, 84),
         obs_grayscale=True,
@@ -1154,7 +1386,7 @@ def test_stable_retro_native_vec_env_mario_all_info_keys_match_default():
 
 def _mario_native_trace(copy_observations, num_threads, seed, actions, **env_kwargs):
     import stable_retro as retro
-    from stable_retro.vec_env import StableRetroNativeVecEnv
+    from stable_retro.vec_env import RetroVecEnv
 
     try:
         rom_path = retro.data.get_original_romfile_path("SuperMarioBros-Nes-v0")
@@ -1165,10 +1397,10 @@ def _mario_native_trace(copy_observations, num_threads, seed, actions, **env_kwa
     frame_skip = int(env_kwargs.pop("frame_skip", 4))
     maxpool_last_two = bool(env_kwargs.pop("maxpool_last_two", True))
 
-    env = StableRetroNativeVecEnv(
+    env = RetroVecEnv(
         "SuperMarioBros-Nes-v0",
-        num_envs,
         state="Level1-1",
+        num_envs=num_envs,
         rom_path=rom_path,
         obs_crop=(32, 0, 0, 0),
         obs_resize=(84, 84),

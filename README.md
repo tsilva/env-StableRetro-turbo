@@ -57,7 +57,7 @@ Currently over 1000 games are integrated including:
 
 ## Performance Work In This Repository
 
-The main fast path is `StableRetroNativeVecEnv`: C++ owns the emulator pool,
+The main fast path is `RetroVecEnv`: C++ owns the emulator pool,
 frame skip, image preprocessing, frame stacking, reward/done evaluation,
 autoreset, and the batched NumPy observation buffer.
 
@@ -98,7 +98,7 @@ python3 scripts/benchmark_vec_env.py --profile supermario-level1-1
 ```
 
 The benchmarker defaults to `--backend auto`: current wheels use
-`StableRetroNativeVecEnv`, while vanilla `.post0` wheels fall back to
+`RetroVecEnv`, while vanilla `.post0` wheels fall back to
 `SubprocVecEnv` over classic `RetroEnv` with the same profile-level preprocessing
 applied by the benchmark script. Force a path with `--backend native`,
 `--backend subproc`, or `--backend dummy`.
@@ -112,7 +112,7 @@ python3 scripts/benchmark_vec_env.py --profile supermario-level1-1 --num-envs 25
 ```python
 import stable_retro as retro
 
-env = retro.StableRetroNativeVecEnv(
+env = retro.RetroVecEnv(
     "SuperMarioBros-Nes-v0",
     num_envs=32,
     num_threads=16,
@@ -128,6 +128,88 @@ env = retro.StableRetroNativeVecEnv(
 )
 ```
 
+`RetroVecEnv` keeps the leading constructor fields aligned with upstream
+`RetroEnv`, so existing Stable Retro call patterns keep their positional
+meaning. Vector/native controls are keyword-only additions after `*`:
+
+```python
+retro.RetroVecEnv(
+    game,
+    state=retro.State.DEFAULT,
+    scenario=None,
+    info=None,
+    use_restricted_actions=retro.Actions.FILTERED,
+    record=False,
+    players=1,
+    inttype=retro.data.Integrations.STABLE,
+    obs_type=retro.Observations.IMAGE,
+    render_mode="human",
+    *,
+    num_envs=1,
+    num_threads=None,
+    rom_path=None,
+    copy_observations=True,
+    obs_resize=None,
+    obs_crop=None,
+    obs_grayscale=False,
+    obs_resize_algorithm="nearest",
+    frame_skip=1,
+    frame_stack=1,
+    maxpool_last_two=False,
+    noop_reset_max=0,
+    sticky_action_prob=0.0,
+    reward_clip=False,
+    info_mode="all",
+    info_keys=None,
+    obs_layout="hwc",
+    terminate_on_life_loss=False,
+    life_variable=None,
+    done_on_info=None,
+    unsafe_zero_copy=False,
+)
+```
+
+Original Stable Retro fields:
+
+| Field | Meaning |
+| --- | --- |
+| `game` | Integration/game id, such as `"SuperMarioBros-Nes-v0"`. |
+| `state` | Initial save-state. In addition to upstream string/enum values, `RetroVecEnv` accepts a per-env sequence or a `{state: weight}` sampling mapping. |
+| `scenario` | Scenario JSON name or path. |
+| `info` | Data/info JSON name or path. |
+| `use_restricted_actions` | Action-space mode from `retro.Actions`. |
+| `record` | Upstream movie-recording option. `RetroVecEnv` rejects recording because the native vector path does not write BK2 movies. |
+| `players` | Player count. `RetroVecEnv` currently supports `players=1`. |
+| `inttype` | Integration set, such as `retro.data.Integrations.STABLE`. |
+| `obs_type` | Observation source. `RetroVecEnv` currently supports image observations. |
+| `render_mode` | Upstream render mode field. Native vector rollouts normally use `"rgb_array"` for training. |
+
+Turbo-only fields:
+
+| Field | Meaning |
+| --- | --- |
+| `num_envs` | Number of emulator lanes in the vector environment. |
+| `num_threads` | Worker threads for native stepping; defaults to `num_envs` and is clamped by the native layer. |
+| `rom_path` | Explicit ROM path, useful for direct-ROM tests or external integrations. |
+| `copy_observations` | Return copied observation arrays. Disable to reduce copies while keeping SB3-safe double buffering. |
+| `obs_resize` | Resize observations to `(width, height)` in the native preprocessing path. |
+| `obs_crop` | Crop observations before resize, using the same crop contract as `RetroEnv`. |
+| `obs_grayscale` | Convert image observations to grayscale natively. |
+| `obs_resize_algorithm` | Resize algorithm: `"nearest"`, `"bilinear"`, or `"area"`. |
+| `frame_skip` | Repeat each action for this many emulator frames. |
+| `frame_stack` | Stack this many processed frames in each returned observation. |
+| `maxpool_last_two` | Max-pool the last two skipped frames before preprocessing, Atari-style. |
+| `noop_reset_max` | Apply up to this many random no-op frames after reset. |
+| `sticky_action_prob` | Probability of repeating the previous lane action instead of the requested action. |
+| `reward_clip` | Clip rewards with the same semantics as the single-env preprocessing path. |
+| `info_mode` | Info payload mode: `"all"`, `"terminal"`, or `"none"`. |
+| `info_keys` | Optional list of info variables to include when `info_mode` emits info. |
+| `obs_layout` | Observation layout: `"hwc"` or `"chw"`. |
+| `terminate_on_life_loss` | Enable first-life-loss terminal transitions using `life_variable`. |
+| `life_variable` | Info/data variable name used by `terminate_on_life_loss`, for example `"lives"`. |
+| `done_on_info` | General per-lane terminal rules keyed by info-variable changes, increases, or decreases. |
+| `unsafe_zero_copy` | Benchmark-only single-buffer observation aliasing; requires `copy_observations=False`. |
+
 Mixed start-state training can stay on the native vector path by passing a list
 or dict to `state`. A list means fixed per-env slot assignment and must have one
 entry per env. A dict maps state names to positive finite sampling weights;
@@ -135,7 +217,7 @@ weights are normalized before sampling. Sampling happens independently for each
 env on every reset, and reset infos include both `start_state` and `state`.
 
 ```python
-env = retro.StableRetroNativeVecEnv(
+env = retro.RetroVecEnv(
     "SuperMarioBros-Nes-v0",
     num_envs=32,
     num_threads=16,
@@ -176,7 +258,7 @@ Call `.copy()` when code needs a stable snapshot.
 In fixed per-env slot mode, duplicated state labels share one task index:
 
 ```python
-env = retro.StableRetroNativeVecEnv(
+env = retro.RetroVecEnv(
     "SuperMarioBros-Nes-v0",
     num_envs=4,
     state=["Level1-1", "Level1-2", "Level1-1", "Level1-2"],
@@ -198,7 +280,7 @@ because not every game has a valid `lives` variable, and similarly named
 variables are not guaranteed to mean the same thing across games:
 
 ```python
-env = retro.StableRetroNativeVecEnv(
+env = retro.RetroVecEnv(
     "SuperMarioBros-Nes-v0",
     num_envs=32,
     state="Level1-1",
@@ -206,6 +288,43 @@ env = retro.StableRetroNativeVecEnv(
     life_variable="lives",
 )
 ```
+
+For more general per-lane terminal transitions, use `done_on_info`. Each rule
+compares the current info values against that lane's post-reset baseline. The
+supported ops are `change`, `increase`, and `decrease`; keys can be a string or
+a sequence of strings:
+
+```python
+env = retro.RetroVecEnv(
+    "SuperMarioBros-Nes-v0",
+    num_envs=16,
+    state={"Level1-1": 0.5, "Level1-2": 0.5},
+    done_on_info={
+        "life_loss": ["lives", "decrease"],
+        "level_change": [["levelHi", "levelLo"], "change"],
+    },
+)
+```
+
+Terminal info includes only the rules that fired. The `keys`, `prev`, and
+`next` fields are always lists, including single-key rules, so metric code can
+handle single-key and multi-key transitions the same way:
+
+```python
+info["done_on_info"] == {
+    "level_change": {
+        "keys": ["levelHi", "levelLo"],
+        "op": "change",
+        "prev": [0, 0],
+        "next": [0, 1],
+    },
+}
+```
+
+The legacy `terminate_on_life_loss=True, life_variable="lives"` arguments are
+still accepted and are compiled into the same `life_loss` rule internally. If
+both legacy life loss and an explicit `done_on_info["life_loss"]` are provided,
+the explicit rule wins.
 
 ## Installation
 

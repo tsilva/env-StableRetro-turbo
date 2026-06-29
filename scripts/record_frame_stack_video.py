@@ -114,7 +114,7 @@ def main(argv=None) -> int:
     os.environ["STABLE_RETRO_DISABLE_AUDIO"] = "1"
 
     import stable_retro as retro
-    from stable_retro.vec_env import StableRetroNativeVecEnv
+    from stable_retro.vec_env import RetroVecEnv
 
     resize_h, resize_w = (int(part) for part in str(profile["resize"]).lower().split("x", 1))
     crop = _parse_crop(profile.get("obs_crop"))
@@ -133,10 +133,10 @@ def main(argv=None) -> int:
         frame_skip = int(profile["frame_skip"])
         frame_stack = int(profile["frame_stack"])
         maxpool_last_two = bool(profile.get("maxpool_last_two", True))
-    env = StableRetroNativeVecEnv(
+    env = RetroVecEnv(
         profile["game"],
-        1,
         state=profile["state"],
+        num_envs=1,
         rom_path=None if args.rom_path is None else str(Path(args.rom_path).resolve()),
         num_threads=1,
         copy_observations=False,

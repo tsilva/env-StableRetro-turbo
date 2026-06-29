@@ -29,17 +29,17 @@ __all__ = [
     "is_fbneo_game",
     "make",
     "RetroEnv",
-    "StableRetroNativeVecEnv",
+    "RetroVecEnv",
 ]
 
 stable_retro.data.init_core_info(core_path())
 
 
 def __getattr__(name):
-    if name == "StableRetroNativeVecEnv":
-        from stable_retro.vec_env import StableRetroNativeVecEnv
+    if name == "RetroVecEnv":
+        from stable_retro.vec_env import RetroVecEnv
 
-        return StableRetroNativeVecEnv
+        return RetroVecEnv
     raise AttributeError(name)
 
 

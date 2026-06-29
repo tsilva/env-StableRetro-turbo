@@ -1282,6 +1282,7 @@ public:
 		py::object infoKeysObj,
 		bool terminateOnLifeLoss,
 		const string& lifeVariable,
+		py::object doneOnInfoObj = py::none(),
 		py::object initialStateLabelsObj = py::none(),
 		py::object initialStateWeightsObj = py::none()
 	)
@@ -1339,6 +1340,8 @@ public:
 		if (m_terminateOnLifeLoss && m_lifeVariableName.empty()) {
 			throw std::runtime_error("life_variable is required when terminate_on_life_loss=True");
 		}
+		parseDoneOnInfoRules(doneOnInfoObj);
+		addLegacyLifeLossRuleIfNeeded();
 		if (!infoKeysObj.is_none()) {
 			py::sequence infoKeys = py::reinterpret_borrow<py::sequence>(infoKeysObj);
 			m_infoKeys.reserve(static_cast<size_t>(infoKeys.size()));
@@ -1361,13 +1364,7 @@ public:
 			}
 			if (i == 0) {
 				const auto variables = slot->data.m_data.listVariables();
-				if (m_terminateOnLifeLoss) {
-					auto lifeVariableIt = variables.find(m_lifeVariableName);
-					if (lifeVariableIt == variables.end()) {
-						throw std::runtime_error("unknown life_variable: " + m_lifeVariableName);
-					}
-					m_lifeVariable = std::make_unique<Variable>(lifeVariableIt->second);
-				}
+				resolveDoneOnInfoVariables(variables);
 				if (!m_infoKeys.empty()) {
 					for (const std::string& key : m_infoKeys) {
 						auto variable = variables.find(key);
@@ -1398,6 +1395,7 @@ public:
 			slot->frameStack.resize(static_cast<size_t>(m_frameStack) * m_singleObsSize);
 			slot->action.resize(static_cast<size_t>(m_numButtons));
 			slot->lastMask.assign(static_cast<size_t>(m_numButtons), 0);
+			slot->doneOnInfoBaselines.resize(m_doneOnInfoRules.size());
 			m_slots.emplace_back(std::move(slot));
 		}
 		const auto obsShape = observationBatchShape();
@@ -1570,7 +1568,7 @@ public:
 			{ static_cast<py::ssize_t>(m_activeInitialStateIndices.size()) },
 			{ static_cast<py::ssize_t>(sizeof(int32_t)) },
 			m_activeInitialStateIndices.data(),
-			py::cast(this)
+			py::none()
 		);
 	}
 
@@ -1668,9 +1666,33 @@ public:
 			if (outputs[i].lifeLoss) {
 				info["life_loss"] = true;
 				info["died"] = true;
-				info["life_variable"] = m_lifeVariableName;
+				info["life_variable"] = outputs[i].lifeVariableName;
 				info["previous_lives"] = outputs[i].previousLifeValue;
 				info["current_lives"] = outputs[i].currentLifeValue;
+			}
+			if (!outputs[i].firedDoneOnInfoRules.empty()) {
+				py::dict doneOnInfo = py::dict();
+				for (const DoneOnInfoFiredRule& fired : outputs[i].firedDoneOnInfoRules) {
+					py::dict ruleInfo = py::dict();
+					ruleInfo["op"] = py::str(doneOnInfoOpName(fired.op));
+					py::list keys;
+					py::list previousValues;
+					py::list currentValues;
+					for (size_t keyIndex = 0; keyIndex < fired.keys.size(); ++keyIndex) {
+						keys.append(py::str(fired.keys[keyIndex]));
+					}
+					for (int64_t value : fired.previousValues) {
+						previousValues.append(value);
+					}
+					for (int64_t value : fired.currentValues) {
+						currentValues.append(value);
+					}
+					ruleInfo["keys"] = keys;
+					ruleInfo["prev"] = previousValues;
+					ruleInfo["next"] = currentValues;
+					doneOnInfo[py::str(fired.name)] = ruleInfo;
+				}
+				info["done_on_info"] = doneOnInfo;
 			}
 			infos.append(info);
 		}
@@ -1730,6 +1752,120 @@ private:
 		return m_obsArrays[index];
 	}
 
+	enum class DoneOnInfoOp {
+		Change,
+		Increase,
+		Decrease
+	};
+
+	struct DoneOnInfoRule {
+		std::string name;
+		DoneOnInfoOp op = DoneOnInfoOp::Change;
+		std::vector<std::string> keyNames;
+		std::vector<Variable> variables;
+	};
+
+	struct DoneOnInfoFiredRule {
+		std::string name;
+		DoneOnInfoOp op = DoneOnInfoOp::Change;
+		std::vector<std::string> keys;
+		std::vector<int64_t> previousValues;
+		std::vector<int64_t> currentValues;
+	};
+
+	const char* doneOnInfoOpName(DoneOnInfoOp op) const {
+		switch (op) {
+		case DoneOnInfoOp::Change:
+			return "change";
+		case DoneOnInfoOp::Increase:
+			return "increase";
+		case DoneOnInfoOp::Decrease:
+			return "decrease";
+		}
+		return "change";
+	}
+
+	DoneOnInfoOp parseDoneOnInfoOp(const std::string& op) const {
+		if (op == "change") {
+			return DoneOnInfoOp::Change;
+		}
+		if (op == "increase") {
+			return DoneOnInfoOp::Increase;
+		}
+		if (op == "decrease") {
+			return DoneOnInfoOp::Decrease;
+		}
+		throw std::runtime_error("done_on_info op must be change, increase, or decrease");
+	}
+
+	void parseDoneOnInfoRules(py::object doneOnInfoObj) {
+		if (doneOnInfoObj.is_none()) {
+			return;
+		}
+		py::sequence rules = py::reinterpret_borrow<py::sequence>(doneOnInfoObj);
+		m_doneOnInfoRules.reserve(static_cast<size_t>(rules.size()));
+		for (py::handle rawRule : rules) {
+			py::sequence rule = py::reinterpret_borrow<py::sequence>(rawRule);
+			if (rule.size() != 3) {
+				throw std::runtime_error("done_on_info native rules must be (name, keys, op)");
+			}
+			DoneOnInfoRule parsed;
+			parsed.name = py::str(rule[0]);
+			if (parsed.name.empty()) {
+				throw std::runtime_error("done_on_info rule names must not be empty");
+			}
+			py::sequence keys = py::reinterpret_borrow<py::sequence>(rule[1]);
+			if (keys.size() == 0) {
+				throw std::runtime_error("done_on_info rules must reference at least one key");
+			}
+			parsed.keyNames.reserve(static_cast<size_t>(keys.size()));
+			for (py::handle rawKey : keys) {
+				if (!PyUnicode_Check(rawKey.ptr())) {
+					throw std::runtime_error("done_on_info keys must contain only strings");
+				}
+				std::string key = py::str(rawKey);
+				if (key.empty()) {
+					throw std::runtime_error("done_on_info keys must not be empty");
+				}
+				parsed.keyNames.push_back(key);
+			}
+			parsed.op = parseDoneOnInfoOp(py::str(rule[2]));
+			m_doneOnInfoRules.push_back(std::move(parsed));
+		}
+	}
+
+	void addLegacyLifeLossRuleIfNeeded() {
+		if (!m_terminateOnLifeLoss) {
+			return;
+		}
+		for (const DoneOnInfoRule& rule : m_doneOnInfoRules) {
+			if (rule.name == "life_loss") {
+				return;
+			}
+		}
+		DoneOnInfoRule rule;
+		rule.name = "life_loss";
+		rule.op = DoneOnInfoOp::Decrease;
+		rule.keyNames.push_back(m_lifeVariableName);
+		m_doneOnInfoRules.push_back(std::move(rule));
+	}
+
+	void resolveDoneOnInfoVariables(const std::unordered_map<std::string, Variable>& variables) {
+		for (DoneOnInfoRule& rule : m_doneOnInfoRules) {
+			rule.variables.reserve(rule.keyNames.size());
+			for (const std::string& key : rule.keyNames) {
+				auto variable = variables.find(key);
+				if (variable == variables.end()) {
+					if (rule.name == "life_loss" && key == m_lifeVariableName) {
+						throw std::runtime_error("unknown life_variable: " + m_lifeVariableName);
+					}
+					throw std::runtime_error("unknown done_on_info key: " + key);
+				}
+				rule.variables.push_back(variable->second);
+			}
+		}
+	}
+
 	struct Slot {
 		Slot(const string& romPath, const string& dataPath, const string& scenarioPath, const std::string& initialState, size_t index)
 			: emulator(std::make_unique<PyRetroEmulator>(romPath))
@@ -1770,8 +1906,7 @@ private:
 		std::vector<uint8_t> lastMask;
 		bool hasLastMask = false;
 		bool usesIndexedVideo = false;
-		bool hasPreviousLifeValue = false;
-		int64_t previousLifeValue = 0;
+		std::vector<std::vector<int64_t>> doneOnInfoBaselines;
 		std::string currentStartStateLabel;
 		std::mt19937 rng;
 	};
@@ -1782,6 +1917,8 @@ private:
 		bool lifeLoss = false;
 		int64_t previousLifeValue = 0;
 		int64_t currentLifeValue = 0;
+		std::string lifeVariableName;
+		std::vector<DoneOnInfoFiredRule> firedDoneOnInfoRules;
 		std::string startStateLabel;
 		std::string resetStartStateLabel;
 		std::vector<uint8_t> terminalObservation;
@@ -2014,36 +2151,79 @@ private:
 		readProcessedFrame(slot);
 		resetFrameStack(slot, slot.singleObs);
 		writeStackedObservation(slot, dst);
-		initializeLifeValue(slot);
+		initializeDoneOnInfoBaselines(slot);
 	}
 
-	void initializeLifeValue(Slot& slot) {
-		if (!m_terminateOnLifeLoss) {
+	void initializeDoneOnInfoBaselines(Slot& slot) {
+		if (m_doneOnInfoRules.empty()) {
 			return;
 		}
-		slot.previousLifeValue = slot.data.m_data.lookupValue(*m_lifeVariable);
-		slot.hasPreviousLifeValue = true;
+		slot.doneOnInfoBaselines.resize(m_doneOnInfoRules.size());
+		for (size_t ruleIndex = 0; ruleIndex < m_doneOnInfoRules.size(); ++ruleIndex) {
+			const DoneOnInfoRule& rule = m_doneOnInfoRules[ruleIndex];
+			std::vector<int64_t>& baseline = slot.doneOnInfoBaselines[ruleIndex];
+			baseline.resize(rule.variables.size());
+			for (size_t keyIndex = 0; keyIndex < rule.variables.size(); ++keyIndex) {
+				baseline[keyIndex] = slot.data.m_data.lookupValue(rule.variables[keyIndex]);
+			}
+		}
 	}
 
-	bool checkLifeLoss(Slot& slot, StepOutput& output) {
-		if (!m_terminateOnLifeLoss) {
-			return false;
+	bool doneOnInfoValueFired(DoneOnInfoOp op, int64_t baseline, int64_t current) const {
+		switch (op) {
+		case DoneOnInfoOp::Change:
+			return current != baseline;
+		case DoneOnInfoOp::Increase:
+			return current > baseline;
+		case DoneOnInfoOp::Decrease:
+			return current < baseline;
 		}
-		const int64_t currentLifeValue = slot.data.m_data.lookupValue(*m_lifeVariable);
-		if (!slot.hasPreviousLifeValue) {
-			slot.previousLifeValue = currentLifeValue;
-			slot.hasPreviousLifeValue = true;
-			return false;
-		}
-		const int64_t previousLifeValue = slot.previousLifeValue;
-		if (currentLifeValue < previousLifeValue) {
-			output.lifeLoss = true;
-			output.previousLifeValue = previousLifeValue;
-			output.currentLifeValue = currentLifeValue;
-			return true;
-		}
-		slot.previousLifeValue = currentLifeValue;
 		return false;
+	}
+
+	bool checkDoneOnInfo(Slot& slot, StepOutput& output) {
+		if (m_doneOnInfoRules.empty()) {
+			return false;
+		}
+		bool firedAny = false;
+		for (size_t ruleIndex = 0; ruleIndex < m_doneOnInfoRules.size(); ++ruleIndex) {
+			const DoneOnInfoRule& rule = m_doneOnInfoRules[ruleIndex];
+			if (slot.doneOnInfoBaselines[ruleIndex].size() != rule.variables.size()) {
+				initializeDoneOnInfoBaselines(slot);
+			}
+			const std::vector<int64_t>& baseline = slot.doneOnInfoBaselines[ruleIndex];
+			bool fired = false;
+			int64_t firstCurrent = 0;
+			std::vector<int64_t> currentValues(rule.variables.size());
+			for (size_t keyIndex = 0; keyIndex < rule.variables.size(); ++keyIndex) {
+				const int64_t current = slot.data.m_data.lookupValue(rule.variables[keyIndex]);
+				currentValues[keyIndex] = current;
+				if (keyIndex == 0) {
+					firstCurrent = current;
+				}
+				if (doneOnInfoValueFired(rule.op, baseline[keyIndex], current)) {
+					fired = true;
+				}
+			}
+			if (!fired) {
+				continue;
+			}
+			firedAny = true;
+			output.firedDoneOnInfoRules.push_back({
+				rule.name,
+				rule.op,
+				rule.keyNames,
+				baseline,
+				std::move(currentValues),
+			});
+			if (rule.name == "life_loss") {
+				output.lifeLoss = true;
+				output.lifeVariableName = rule.keyNames.empty() ? m_lifeVariableName : rule.keyNames.front();
+				output.previousLifeValue = baseline.empty() ? 0 : baseline.front();
+				output.currentLifeValue = firstCurrent;
+			}
+		}
+		return firedAny;
 	}
 
 	void stepSlot(Slot& slot, const std::vector<uint8_t>& requestedAction, uint8_t* dst, StepOutput& output, bool captureTerminalObservation) {
@@ -2093,8 +2273,8 @@ private:
 			slot.data.m_scen.update(1);
 			totalReward += slot.data.m_scen.currentReward();
 			const bool scenarioDone = slot.data.m_scen.isDone();
-			const bool lifeLoss = checkLifeLoss(slot, output);
-			done = scenarioDone || lifeLoss;
+			const bool doneOnInfo = checkDoneOnInfo(slot, output);
+			done = scenarioDone || doneOnInfo;
 			if (done && skippedRender && captureTerminalObservation) {
 				if (!slot.emulator->m_re.unserialize(preSkipState.data(), preSkipState.size())) {
 					throw std::runtime_error("failed to restore pre-render-skip terminal state");
@@ -2276,7 +2456,7 @@ private:
 	bool m_renderSkipEnabled = false;
 	bool m_terminateOnLifeLoss = false;
 	std::string m_lifeVariableName;
-	std::unique_ptr<Variable> m_lifeVariable;
+	std::vector<DoneOnInfoRule> m_doneOnInfoRules;
 	std::vector<std::string> m_infoKeys;
 	std::vector<std::pair<std::string, Variable>> m_infoVariables;
 	int m_numThreads = 1;
@@ -2515,6 +2695,7 @@ PYBIND11_MODULE(_retro, m) {
 				bool,
 				const string&,
 				py::object,
+				py::object,
 				py::object>(),
 			py::arg("num_envs"),
 			py::arg("rom_path"),
@@ -2542,6 +2723,7 @@ PYBIND11_MODULE(_retro, m) {
 			py::arg("info_keys") = py::none(),
 			py::arg("terminate_on_life_loss") = false,
 			py::arg("life_variable") = "",
+			py::arg("done_on_info") = py::none(),
 			py::arg("initial_state_labels") = py::none(),
 			py::arg("initial_state_weights") = py::none()
 		)

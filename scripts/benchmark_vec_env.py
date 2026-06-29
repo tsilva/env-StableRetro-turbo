@@ -380,7 +380,7 @@ def _build_native_vec(
     num_threads=None,
     copy_observations=True,
 ):
-    from stable_retro.vec_env import StableRetroNativeVecEnv
+    from stable_retro.vec_env import RetroVecEnv
 
     state_arg = state
     if states is not None:
@@ -390,10 +390,10 @@ def _build_native_vec(
             else list(states)
         )
 
-    return StableRetroNativeVecEnv(
+    return RetroVecEnv(
         game,
-        num_envs,
         state=state_arg,
+        num_envs=num_envs,
         inttype=inttype,
         rom_path=rom_path,
         info=info,
@@ -464,7 +464,7 @@ def _build_regular_vec(
 
 def _native_vec_available():
     try:
-        from stable_retro.vec_env import StableRetroNativeVecEnv  # noqa: F401
+        from stable_retro.vec_env import RetroVecEnv  # noqa: F401
     except ImportError:
         return False
     return True
@@ -505,7 +505,7 @@ def main(argv=None) -> int:
         choices=("auto", "native", "subproc", "dummy"),
         default="auto",
         help=(
-            "Vector backend. 'native' uses StableRetroNativeVecEnv; 'subproc' and "
+            "Vector backend. 'native' uses RetroVecEnv; 'subproc' and "
             "'dummy' use classic RetroEnv plus benchmark preprocessing wrappers. "
             "'auto' chooses native when available, otherwise subproc for vanilla "
             "post0-style builds."

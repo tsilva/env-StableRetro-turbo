@@ -206,12 +206,12 @@ def _build_env(args, profile, retro):
     backend = _resolve_backend(args.backend)
 
     if backend == "native":
-        from stable_retro.vec_env import StableRetroNativeVecEnv
+        from stable_retro.vec_env import RetroVecEnv
 
-        env = StableRetroNativeVecEnv(
+        env = RetroVecEnv(
             game,
-            args.num_envs,
             state=state,
+            num_envs=args.num_envs,
             num_threads=args.num_threads,
             copy_observations=args.copy_observations,
             **env_kwargs,

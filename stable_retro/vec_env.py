@@ -9,6 +9,8 @@ from typing import Any
 
 import numpy as np
 import gymnasium as gym
+import stable_retro.data as retro_data
+from stable_retro.enums import Actions, Observations, State
 
 try:
     from stable_baselines3.common.vec_env import VecEnv
@@ -16,7 +18,7 @@ except ImportError:  # pragma: no cover - import remains cheap without SB3.
     VecEnv = object
 
 
-class StableRetroNativeVecEnv(VecEnv):
+class RetroVecEnv(VecEnv):
     """SB3-compatible native vector env for stable-retro rollouts.
 
     This is the supported high-throughput path. C++ owns the emulator pool,
@@ -27,10 +29,15 @@ class StableRetroNativeVecEnv(VecEnv):
     or a mapping of state names to positive sampling weights. Mapping weights are
     normalized and sampled independently for each env on every episode reset.
 
-    Life-loss termination is opt-in and game/config-specific. Enable it only
-    for games whose info data has a life counter with the intended semantics,
-    by passing terminate_on_life_loss=True and an explicit life_variable such
-    as "lives" for SuperMarioBros-Nes-v0.
+    Native info-transition termination is opt-in and game/config-specific.
+    Pass done_on_info={"name": ["key", "decrease"]} to terminate and autoreset
+    only lanes whose post-reset baseline changes as requested. Supported ops
+    are "change", "increase", and "decrease"; keys may be a string or a
+    sequence of strings. The legacy terminate_on_life_loss=True,
+    life_variable="lives" option is compiled into a "life_loss" decrease rule.
+    If both forms provide "life_loss", the explicit done_on_info rule wins.
+    Fired rules are reported in info["done_on_info"] with list-shaped "keys",
+    "prev", and "next" values, including one-element lists for single-key rules.
 
     With copy_observations=False, returned observations are double-buffered so
     the previous observation survives the next step for SB3 rollout collection.
@@ -40,33 +47,45 @@ class StableRetroNativeVecEnv(VecEnv):
     def __init__(
         self,
         game,
-        num_envs: int,
-        state=None,
-        inttype=None,
-        rom_path: str | None = None,
-        info=None,
+        state=State.DEFAULT,
         scenario=None,
+        info=None,
+        use_restricted_actions=Actions.FILTERED,
+        record=False,
+        players=1,
+        inttype=retro_data.Integrations.STABLE,
+        obs_type=Observations.IMAGE,
+        render_mode="human",
+        *,
+        num_envs: int = 1,
         num_threads: int | None = None,
+        rom_path: str | None = None,
         copy_observations: bool = True,
-        **env_kwargs,
+        obs_resize=None,
+        obs_crop=None,
+        obs_grayscale=False,
+        obs_resize_algorithm="nearest",
+        frame_skip=1,
+        frame_stack=1,
+        maxpool_last_two=False,
+        noop_reset_max=0,
+        sticky_action_prob=0.0,
+        reward_clip=False,
+        info_mode="all",
+        info_keys=None,
+        obs_layout="hwc",
+        terminate_on_life_loss=False,
+        life_variable=None,
+        done_on_info=None,
+        unsafe_zero_copy=False,
     ):
         if VecEnv is object:
             raise ImportError(
-                "StableRetroNativeVecEnv requires stable-baselines3 to be installed",
+                "RetroVecEnv requires stable-baselines3 to be installed",
             )
         import stable_retro as retro
         from stable_retro import _retro
 
-        legacy_state_args = {"states", "state_probs"} & set(env_kwargs)
-        if legacy_state_args:
-            names = ", ".join(sorted(legacy_state_args))
-            raise TypeError(
-                f"{names} are not supported; pass a string, sequence, or "
-                "mapping via state",
-            )
-
-        if state is None:
-            state = retro.State.DEFAULT
         (
             state_values,
             state_labels,
@@ -78,25 +97,35 @@ class StableRetroNativeVecEnv(VecEnv):
             num_envs,
             state,
         )
-        if inttype is None:
-            inttype = retro.data.Integrations.DEFAULT
         self.waiting = False
         self.closed = False
         self._actions = None
         self._observations = None
 
-        env_kwargs = dict(env_kwargs)
-        info_mode = str(env_kwargs.pop("info_mode", "all"))
-        info_keys = env_kwargs.pop("info_keys", None)
+        env_kwargs = {
+            "use_restricted_actions": use_restricted_actions,
+            "record": record,
+            "players": players,
+            "obs_type": obs_type,
+            "render_mode": render_mode,
+            "obs_resize": obs_resize,
+            "obs_crop": obs_crop,
+            "obs_grayscale": obs_grayscale,
+            "obs_resize_algorithm": obs_resize_algorithm,
+            "frame_skip": frame_skip,
+            "frame_stack": frame_stack,
+            "maxpool_last_two": maxpool_last_two,
+            "noop_reset_max": noop_reset_max,
+            "sticky_action_prob": sticky_action_prob,
+            "reward_clip": reward_clip,
+        }
+        info_mode = str(info_mode)
         if isinstance(info_keys, str):
             raise ValueError("info_keys must be a sequence of strings, not a string")
         if info_keys is not None:
             info_keys = [str(key) for key in info_keys]
-        unsafe_zero_copy = bool(env_kwargs.pop("unsafe_zero_copy", False))
-        terminate_on_life_loss = bool(
-            env_kwargs.pop("terminate_on_life_loss", False),
-        )
-        life_variable = env_kwargs.pop("life_variable", None)
+        unsafe_zero_copy = bool(unsafe_zero_copy)
+        terminate_on_life_loss = bool(terminate_on_life_loss)
         if terminate_on_life_loss:
             if life_variable is None or str(life_variable) == "":
                 raise ValueError(
@@ -107,7 +136,12 @@ class StableRetroNativeVecEnv(VecEnv):
             life_variable = ""
         else:
             life_variable = str(life_variable)
-        obs_layout = str(env_kwargs.pop("obs_layout", "hwc")).lower()
+        done_on_info_rules = self._normalize_done_on_info(
+            done_on_info,
+            terminate_on_life_loss=terminate_on_life_loss,
+            life_variable=life_variable,
+        )
+        obs_layout = str(obs_layout).lower()
         if obs_layout not in {"hwc", "chw"}:
             raise ValueError("obs_layout must be 'hwc' or 'chw'")
         self.obs_layout = obs_layout
@@ -117,18 +151,14 @@ class StableRetroNativeVecEnv(VecEnv):
             raise ValueError(
                 "unsafe_zero_copy=True is only valid with copy_observations=False",
             )
-        env_kwargs.setdefault("render_mode", "rgb_array")
-        self.render_mode = env_kwargs["render_mode"]
-        if env_kwargs.get("players", 1) != 1:
-            raise ValueError("StableRetroNativeVecEnv currently supports players=1")
-        if env_kwargs.get("record", False):
-            raise ValueError("StableRetroNativeVecEnv does not support movie recording")
-        if (
-            env_kwargs.get("obs_type", retro.Observations.IMAGE)
-            != retro.Observations.IMAGE
-        ):
+        self.render_mode = render_mode
+        if players != 1:
+            raise ValueError("RetroVecEnv currently supports players=1")
+        if record:
+            raise ValueError("RetroVecEnv does not support movie recording")
+        if obs_type != retro.Observations.IMAGE:
             raise ValueError(
-                "StableRetroNativeVecEnv currently supports image observations only",
+                "RetroVecEnv currently supports image observations only",
             )
 
         info_path = self._resolve_info_path(retro, game, info, inttype)
@@ -146,7 +176,7 @@ class StableRetroNativeVecEnv(VecEnv):
         try:
             if template._rotation_steps() != 0:
                 raise ValueError(
-                    "StableRetroNativeVecEnv does not support rotated screens",
+                    "RetroVecEnv does not support rotated screens",
                 )
             width, height = template.em.get_resolution()
             crop = template._effective_crop(0, height, width)
@@ -241,6 +271,7 @@ class StableRetroNativeVecEnv(VecEnv):
             info_keys,
             terminate_on_life_loss,
             life_variable,
+            done_on_info_rules,
             initial_state_labels,
             initial_state_weights,
         )
@@ -266,6 +297,55 @@ class StableRetroNativeVecEnv(VecEnv):
             None if int(index) < 0 else names[int(index)]
             for index in self._active_state_indices
         )
+
+    @staticmethod
+    def _normalize_done_on_info(
+        done_on_info,
+        *,
+        terminate_on_life_loss: bool,
+        life_variable: str,
+    ):
+        rules = {}
+        if terminate_on_life_loss:
+            rules["life_loss"] = ((life_variable,), "decrease")
+        if done_on_info is not None:
+            if not isinstance(done_on_info, Mapping):
+                raise ValueError("done_on_info must be a mapping of rule names to (keys, op)")
+            for raw_name, spec in done_on_info.items():
+                name = str(raw_name)
+                if not name:
+                    raise ValueError("done_on_info rule names must not be empty")
+                if not (
+                    isinstance(spec, Sequence)
+                    and not isinstance(spec, (str, bytes, bytearray))
+                    and len(spec) == 2
+                ):
+                    raise ValueError(
+                        "done_on_info values must be (key_or_keys, op) pairs",
+                    )
+                raw_keys, raw_op = spec
+                op = str(raw_op)
+                if op not in {"change", "increase", "decrease"}:
+                    raise ValueError(
+                        "done_on_info ops must be 'change', 'increase', or 'decrease'",
+                    )
+                if isinstance(raw_keys, str):
+                    keys = (raw_keys,)
+                elif (
+                    isinstance(raw_keys, Sequence)
+                    and not isinstance(raw_keys, (bytes, bytearray))
+                ):
+                    keys = tuple(str(key) for key in raw_keys)
+                else:
+                    raise ValueError(
+                        "done_on_info keys must be a string or sequence of strings",
+                    )
+                if not keys or any(not key for key in keys):
+                    raise ValueError("done_on_info rules must reference at least one key")
+                rules[name] = (keys, op)
+        if not rules:
+            return None
+        return tuple((name, keys, op) for name, (keys, op) in rules.items())
 
     @staticmethod
     def _observation_space_for_layout(observation_space, obs_layout):
@@ -507,4 +587,4 @@ class StableRetroNativeVecEnv(VecEnv):
         return [False for _ in self._get_indices(indices)]
 
 
-__all__ = ["StableRetroNativeVecEnv"]
+__all__ = ["RetroVecEnv"]
