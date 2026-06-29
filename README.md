@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./logo.png" alt="stable-retro-turbo" width="260" />
+  <img src="https://raw.githubusercontent.com/tsilva/stable-retro-turbo/turbo/logo.png" alt="stable-retro-turbo" width="260" />
 
   <p>
     <a href="https://pypi.org/project/stable-retro-turbo/">
@@ -202,14 +202,10 @@ Modal runs: full env benchmark
 
 | Source / backend | Shape | Samples steps/s | Mean | Std | Best | Speedup vs subproc / async | Artifact |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| post22 native fused `RetroVecEnv` | `32` envs, `16` native threads | `11368.0`, `11848.0`, `11947.1` | `11721.0` | `309.7` | `11947.1` | n/a | [post22 full][bench-post22-full] |
 | post22 native fused `RetroVecEnv` | `16` envs | `9403.0`, `9278.3`, `9612.2` | `9431.2` | `168.7` | `9612.2` | `10.13x` / `11.68x` | [post22 16-env][bench-post22-16env] |
-| upstream SB3 `SubprocVecEnv` / classic `RetroEnv` | `16` envs | `916.8`, `955.2`, `921.9` | `931.3` | `20.9` | `955.2` | `1.00x` / `1.15x` | [upstream subproc][bench-upstream-subproc] |
 | upstream Gymnasium `AsyncVectorEnv` / classic `RetroEnv` | `16` envs | `807.3`, `810.9`, `804.2` | `807.5` | `3.4` | `810.9` | `0.87x` / `1.00x` | [upstream async][bench-upstream-async] |
 
-[bench-post22-full]: artifacts/benchmarks/modal-1.0.0.post22-2026-06-29.json
 [bench-post22-16env]: artifacts/benchmarks/modal-1.0.0.post22-native-16env-2026-06-29.json
-[bench-upstream-subproc]: artifacts/benchmarks/modal-upstream-stable-retro-subproc-16env-2026-06-29-2025.json
 [bench-upstream-async]: artifacts/benchmarks/modal-upstream-stable-retro-async-16env-2026-06-29-2025.json
 
 ## Notes
@@ -234,7 +230,7 @@ Modal runs: full env benchmark
 
 ## Architecture
 
-![stable-retro-turbo architecture diagram](./architecture.png)
+![stable-retro-turbo architecture diagram](https://raw.githubusercontent.com/tsilva/stable-retro-turbo/turbo/architecture.png)
 
 ## License
 

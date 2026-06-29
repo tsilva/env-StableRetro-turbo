@@ -288,7 +288,7 @@ setup(
     long_description_content_type="text/markdown",
     author="Farama Foundation",
     author_email="contact@farama.org",
-    url="https://github.com/Farama-Foundation/stable-retro",
+    url="https://github.com/tsilva/stable-retro-turbo",
     version=VERSION_PATH.read_text(encoding="utf-8").strip(),
     license="MIT",
     install_requires=[
