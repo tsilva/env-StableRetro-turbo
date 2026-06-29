@@ -177,71 +177,40 @@ Use real saved states for user-facing throughput numbers. `State.NONE` is
 reserved for explicit direct-ROM hot-path diagnostics and requires
 `--allow-state-none`.
 
-### Reference Modal `stable-retro-turbo==1.0.0.post22`
+### Reference Modal Results
 
-The published `stable-retro-turbo==1.0.0.post22` wheel was measured on Modal
-CPU by installing the package from PyPI, mounting only the benchmark harness and
-profile JSON, and injecting the local `SuperMarioBros-Nes-v0` ROM at runtime.
+All rows were measured on Modal CPU with `cpu_request=16.0`,
+`memory_mb=16384`, `os_cpu_count=32`, `affinity_cpu_count=32`,
+`machine=x86_64`, platform `Linux-4.19.0-gvisor-x86_64-with-glibc2.36`, and
+Python `3.14.6`. Each env-throughput row uses `SuperMarioBros-Nes-v0` /
+`Level1-1`, a real saved state, crop `(32,0,0,0)`, resize `84x84`, grayscale,
+frame skip `4`, frame stack `4`, two-frame max-pool, sampled actions, and
+three samples.
 
-Modal runtime: `cpu_request=16.0`, `memory_mb=16384`, `os_cpu_count=32`,
-`affinity_cpu_count=32`, `machine=x86_64`, platform
-`Linux-4.19.0-gvisor-x86_64-with-glibc2.36`, Python `3.14.6`.
+The `stable-retro-turbo==1.0.0.post22` rows install the published PyPI wheel
+and mount only the benchmark harness/profile JSON. Package runtime:
+`/usr/local/lib/python3.14/site-packages/stable_retro/__init__.py`; extension
+`/usr/local/lib/python3.14/site-packages/stable_retro/_retro.cpython-314-x86_64-linux-gnu.so`.
+The upstream rows remotely build Farama `stable-retro` from
+`ec7a62718a1f99f34bf5e5d5c57255c9a53df507` (`main`) and use the classic
+`RetroEnv` path with benchmark-side preprocessing.
 
-Package runtime:
-`/usr/local/lib/python3.14/site-packages/stable_retro/__init__.py`,
-extension
-`/usr/local/lib/python3.14/site-packages/stable_retro/_retro.cpython-314-x86_64-linux-gnu.so`,
-version `1.0.0.post22`.
-
-Modal run URLs: full env/PPO benchmark
+Modal runs: full env benchmark
 [`ap-sNnRpf48gi4umUyabfrOA9`](https://modal.com/apps/eng-tiago-silva/main/ap-sNnRpf48gi4umUyabfrOA9);
 16-env env-only fairness benchmark
 [`ap-vQu3BlHG2uEeyykTbjK9pV`](https://modal.com/apps/eng-tiago-silva/main/ap-vQu3BlHG2uEeyykTbjK9pV).
 
-Full benchmark config: `SuperMarioBros-Nes-v0` / `Level1-1`, real saved state,
-crop `(32,0,0,0)`, resize `84x84`, grayscale, frame skip `4`, frame stack `4`,
-two-frame max-pool, sampled actions, three samples. The isolated env row below
-uses the profile default `32` envs and `16` native threads. The SB3 PPO row
-uses `16` envs, `4` native threads, `warmup_updates=1`, `measured_updates=10`,
-`n_steps=512`, `batch_size=512`, `n_epochs=4`, and CPU training.
+| Source / backend | Shape | Samples steps/s | Mean | Std | Best | Speedup vs subproc / async | Artifact |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| post22 native fused `RetroVecEnv` | `32` envs, `16` native threads | `11368.0`, `11848.0`, `11947.1` | `11721.0` | `309.7` | `11947.1` | n/a | [post22 full][bench-post22-full] |
+| post22 native fused `RetroVecEnv` | `16` envs | `9403.0`, `9278.3`, `9612.2` | `9431.2` | `168.7` | `9612.2` | `10.13x` / `11.68x` | [post22 16-env][bench-post22-16env] |
+| upstream SB3 `SubprocVecEnv` / classic `RetroEnv` | `16` envs | `916.8`, `955.2`, `921.9` | `931.3` | `20.9` | `955.2` | `1.00x` / `1.15x` | [upstream subproc][bench-upstream-subproc] |
+| upstream Gymnasium `AsyncVectorEnv` / classic `RetroEnv` | `16` envs | `807.3`, `810.9`, `804.2` | `807.5` | `3.4` | `810.9` | `0.87x` / `1.00x` | [upstream async][bench-upstream-async] |
 
-| Metric | Backend | Samples steps/s | Mean steps/s | Std steps/s | Best steps/s | Artifact |
-| --- | --- | ---: | ---: | ---: | ---: | --- |
-| Isolated env SPS | native fused `RetroVecEnv` | `11368.0`, `11848.0`, `11947.1` | `11721.0` | `309.7` | `11947.1` | [`modal-1.0.0.post22-2026-06-29.json`](artifacts/benchmarks/modal-1.0.0.post22-2026-06-29.json) |
-| SB3 PPO train SPS | native fused `RetroVecEnv` | `868.6`, `873.5`, `867.3` | `869.8` | `3.2` | `873.5` | [`modal-1.0.0.post22-2026-06-29.json`](artifacts/benchmarks/modal-1.0.0.post22-2026-06-29.json) |
-
-PPO attribution: rollout SPS mean `2259.4`, rollout seconds mean `36.26`,
-update seconds mean `57.93`.
-
-For a fair env-only comparison against the upstream classic baselines below,
-the native post22 path was also measured with `n_envs=16`:
-
-| Backend | Samples steps/s | Mean steps/s | Std steps/s | Best steps/s | Vs upstream subproc | Vs upstream async | Artifact |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| native fused `RetroVecEnv` | `9403.0`, `9278.3`, `9612.2` | `9431.2` | `168.7` | `9612.2` | `10.13x` | `11.68x` | [`modal-1.0.0.post22-native-16env-2026-06-29.json`](artifacts/benchmarks/modal-1.0.0.post22-native-16env-2026-06-29.json) |
-
-### Reference Modal Upstream Baseline
-
-The upstream Farama `stable-retro` reference baseline below was measured on
-Modal CPU after remotely building
-`https://github.com/Farama-Foundation/Stable-Retro.git` at
-`ec7a62718a1f99f34bf5e5d5c57255c9a53df507` (`main`). This is the classic
-`RetroEnv` path with benchmark-side preprocessing, not the turbo native-vector
-hot path. Modal injected the local `SuperMarioBros-Nes-v0` ROM at runtime.
-
-Modal runtime: `cpu_request=16.0`, `memory_mb=16384`, `os_cpu_count=32`,
-`affinity_cpu_count=32`, `machine=x86_64`, platform
-`Linux-4.19.0-gvisor-x86_64-with-glibc2.36`, Python `3.14.6`.
-
-Benchmark config for both rows: `SuperMarioBros-Nes-v0` / `Level1-1`, real
-saved state, `n_envs=16`, crop `(32,0,0,0)`, resize `84x84`, grayscale, frame
-skip `4`, frame stack `4`, two-frame max-pool, sampled actions, three
-30-second samples.
-
-| Baseline backend | Samples steps/s | Mean steps/s | Std steps/s | Artifact |
-| --- | ---: | ---: | ---: | --- |
-| SB3 `SubprocVecEnv` / classic `RetroEnv` | `916.8`, `955.2`, `921.9` | `931.3` | `20.9` | [`modal-upstream-stable-retro-subproc-16env-2026-06-29-2025.json`](artifacts/benchmarks/modal-upstream-stable-retro-subproc-16env-2026-06-29-2025.json) |
-| Gymnasium `AsyncVectorEnv` / classic `RetroEnv` | `807.3`, `810.9`, `804.2` | `807.5` | `3.4` | [`modal-upstream-stable-retro-async-16env-2026-06-29-2025.json`](artifacts/benchmarks/modal-upstream-stable-retro-async-16env-2026-06-29-2025.json) |
+[bench-post22-full]: artifacts/benchmarks/modal-1.0.0.post22-2026-06-29.json
+[bench-post22-16env]: artifacts/benchmarks/modal-1.0.0.post22-native-16env-2026-06-29.json
+[bench-upstream-subproc]: artifacts/benchmarks/modal-upstream-stable-retro-subproc-16env-2026-06-29-2025.json
+[bench-upstream-async]: artifacts/benchmarks/modal-upstream-stable-retro-async-16env-2026-06-29-2025.json
 
 ## Notes
 
