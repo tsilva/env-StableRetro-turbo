@@ -12,4 +12,4 @@ Key guardrails:
 
 ## Clean Modal Benchmarking
 
-Use the repo-local `modal-benchmark` skill when benchmark timing needs to be independent of current local machine load. This is the preferred path when macOS security/indexing work, local CPU contention, or other host noise makes local `benchmark-build` timing untrustworthy.
+Use the repo-local `modal-benchmark` skill when benchmark timing needs to be independent of current local machine load. This is the preferred path when macOS security/indexing work, local CPU contention, or other host noise makes local timing untrustworthy.

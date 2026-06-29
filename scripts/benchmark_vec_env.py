@@ -342,7 +342,8 @@ def _sample_actions(env, fixed_actions=None):
     if fixed_actions is not None:
         return fixed_actions
 
-    return np.asarray([env.action_space.sample() for _ in range(env.num_envs)])
+    action_space = getattr(env, "single_action_space", env.action_space)
+    return np.asarray([action_space.sample() for _ in range(env.num_envs)])
 
 
 def _run_vec(name, env, seconds, warmup_steps, fixed_actions=None) -> Result:
@@ -455,6 +456,10 @@ def _build_regular_vec(
         return DummyVecEnv(env_fns)
     if backend == "subproc":
         return SubprocVecEnv(env_fns, start_method=start_method)
+    if backend == "async":
+        from gymnasium.vector import AsyncVectorEnv
+
+        return AsyncVectorEnv(env_fns, context=start_method)
     raise ValueError(f"Unsupported regular backend: {backend}")
 
 
@@ -498,11 +503,12 @@ def main(argv=None) -> int:
     parser.add_argument("--num-threads", type=int, default=None)
     parser.add_argument(
         "--backend",
-        choices=("auto", "native", "subproc", "dummy"),
+        choices=("auto", "native", "subproc", "dummy", "async"),
         default="auto",
         help=(
             "Vector backend. 'native' uses RetroVecEnv; 'subproc' and "
             "'dummy' use classic RetroEnv plus benchmark preprocessing wrappers. "
+            "'async' uses Gymnasium AsyncVectorEnv with the same wrappers. "
             "'auto' chooses native when available, otherwise subproc for vanilla "
             "post0-style builds."
         ),

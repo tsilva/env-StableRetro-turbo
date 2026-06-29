@@ -7,9 +7,9 @@ description: Run and report the clean-machine Modal CPU benchmark for stable-ret
 
 ## Overview
 
-Use this skill when local benchmark timing is contaminated by host load, macOS security/indexing churn, or other competing processes. It runs either the current checkout or a named `stable-retro-turbo` package version on provisioned Modal CPU using `scripts/modal_benchmark.py`, then reports structured isolated-env and SB3 PPO train-loop throughput from the saved JSON artifact.
+Use this skill when local benchmark timing is contaminated by host load, macOS security/indexing churn, or other competing processes. It runs either the current checkout, a named `stable-retro-turbo` package version, or the upstream Farama `stable-retro` Git baseline on provisioned Modal CPU using `scripts/modal_benchmark.py`, then reports structured isolated-env and SB3 PPO train-loop throughput from the saved JSON artifact.
 
-Default to `--package-source checkout`. Use `--package-source version --package-version X.Y.Z.postN` only when the user names a package version or asks to benchmark a published release. Use `benchmark-build` for local wheel-vs-`.post0` comparison work; use this skill when the priority is a repeatable clean-machine target benchmark.
+Default to `--package-source checkout`. Use `--package-source version --package-version X.Y.Z.postN` only when the user names a package version or asks to benchmark a published release. Use `--package-source upstream-git` when benchmarking `https://github.com/Farama-Foundation/Stable-Retro.git` as the classic non-native baseline, especially when a `stable-retro-turbo` baseline wheel is unavailable for Modal Linux. Use this skill when the priority is a repeatable clean-machine target benchmark.
 
 ## Launch Approval Prompt
 
@@ -19,7 +19,7 @@ On launch, before running `git status` or any Modal command, give the user this 
 I approve $modal-benchmark to request escalated execution for Modal network/auth/upload, including uploading the benchmark harness, local Mario ROM bytes, and, for checkout targets only, a filtered current repo source archive; building and running remote Modal CPU compute; and writing the benchmark artifact locally.
 ```
 
-Explain that this covers the permissions the skill needs to run: local Git state inspection, local artifact creation, Modal network access, Modal authentication, uploading the benchmark scripts/profile in the Modal image, uploading the local Mario ROM bytes for runtime injection, remote image/build execution, remote CPU benchmark execution, and, for `--package-source checkout` only, uploading a filtered source archive for remote editable install. For `--package-source version`, the target package is downloaded from PyPI in Modal and the current checkout is not uploaded as the package under test.
+Explain that this covers the permissions the skill needs to run: local Git state inspection, local artifact creation, Modal network access, Modal authentication, uploading the benchmark scripts/profile in the Modal image, uploading the local Mario ROM bytes for runtime injection, remote image/build execution, remote CPU benchmark execution, and, for `--package-source checkout` only, uploading a filtered source archive for remote editable install. For `--package-source version`, the target package is downloaded from PyPI in Modal and the current checkout is not uploaded as the package under test. For `--package-source upstream-git`, Modal downloads `https://github.com/Farama-Foundation/Stable-Retro.git` remotely, builds/installs that upstream source, and the current checkout is not uploaded as the package under test.
 
 ## Workflow
 
@@ -50,11 +50,41 @@ modal run scripts/modal_benchmark.py \
   --output-json artifacts/benchmarks/modal-1.0.0.postN-YYYY-MM-DD.json
 ```
 
+For the upstream Farama `stable-retro` Git baseline:
+
+```bash
+modal run scripts/modal_benchmark.py \
+  --package-source upstream-git \
+  --output-json artifacts/benchmarks/modal-upstream-stable-retro-YYYY-MM-DD.json
+```
+
+The default upstream Git ref is `main`. To pin a different ref:
+
+```bash
+modal run scripts/modal_benchmark.py \
+  --package-source upstream-git \
+  --upstream-git-ref COMMIT_OR_REF \
+  --output-json artifacts/benchmarks/modal-upstream-stable-retro-COMMIT_OR_REF-YYYY-MM-DD.json
+```
+
 For a quick remote smoke, use:
 
 ```bash
 modal run scripts/modal_benchmark.py --smoke --output-json artifacts/benchmarks/modal-smoke-YYYY-MM-DD-HHMM.json
 ```
+
+For an env-only fairness check with an explicit classic backend and env count:
+
+```bash
+modal run scripts/modal_benchmark.py \
+  --package-source upstream-git \
+  --env-only \
+  --env-backend subproc \
+  --env-num-envs 16 \
+  --output-json artifacts/benchmarks/modal-upstream-stable-retro-subproc-16env-YYYY-MM-DD.json
+```
+
+Use `--env-backend async` to test Gymnasium `AsyncVectorEnv` with the same classic `RetroEnv` preprocessing wrapper. `async` is an env-throughput backend, not an SB3 PPO train-loop backend.
 
 Treat an explicit invocation of this skill or a user request for Modal benchmarking as approval to request escalated execution for Modal network/auth/upload. If escalation is blocked, report that the benchmark could not run and plainly name that Modal needs network/auth and uploads a repo snapshot plus the local Mario ROM bytes.
 
@@ -71,6 +101,8 @@ Use the launcher defaults unless the user asks otherwise:
 - Isolated env samples: `repeats=3`, `env_seconds=30`, `env_warmup_steps=32`
 - PPO train samples: `repeats=3`, `warmup_updates=1`, `measured_updates=10`, `n_steps=512`, `batch_size=512`, `n_epochs=4`, `device=cpu`
 
+`--env-num-envs` overrides the profile env count for isolated env SPS. Use it when fairness requires matching a training env count such as `16`; otherwise the profile default may be `32` envs.
+
 The launcher uses one reusable Modal image for both package modes. The image contains OS/Python/SB3/Torch dependencies plus the minimal benchmark harness (`scripts/benchmark_vec_env.py`, `scripts/benchmark_sb3_ppo.py`, and `scripts/benchmark_vec_env.json`). The package under test is installed at runtime.
 
 For `--package-source checkout`, the launcher uploads a filtered source archive of the current repo as a function input, builds the extension there, installs the checkout, writes local `stable_retro/data/stable/SuperMarioBros-Nes-v0/rom.nes` bytes into the active package data directory at runtime, and runs:
@@ -83,9 +115,14 @@ For `--package-source version`, the launcher does not upload the current checkou
 - `scripts/benchmark_vec_env.py` for isolated env SPS
 - `scripts/benchmark_sb3_ppo.py --package-source installed` for full SB3 PPO train-loop SPS
 
+For `--package-source upstream-git`, the launcher does not upload the current checkout as the package under test. The remote function installs upstream `stable-retro` from `https://github.com/Farama-Foundation/Stable-Retro.git`, writes the same ROM bytes into that installed package's data directory, and runs the classic `RetroEnv`/`SubprocVecEnv` path:
+
+- `scripts/benchmark_vec_env.py` for isolated env SPS
+- `scripts/benchmark_sb3_ppo.py --package-source installed` for full SB3 PPO train-loop SPS
+
 ## Reporting
 
-After the run completes, read the saved artifact and report the result. Start with whether it worked and name the target: current checkout with branch/commit, or `stable-retro-turbo==VERSION`. Mention that Modal built/reused the benchmark image, injected the ROM bytes at runtime, and ran both env and PPO timing samples. For checkout targets, also mention that a filtered source archive was uploaded and the native extension was built remotely from the checkout. For version targets, mention that the target package was installed from PyPI.
+After the run completes, read the saved artifact and report the result. Start with whether it worked and name the target: current checkout with branch/commit, `stable-retro-turbo==VERSION`, or upstream Farama `stable-retro` Git with ref/commit. Mention that Modal built/reused the benchmark image, injected the ROM bytes at runtime, and ran both env and PPO timing samples. For checkout targets, also mention that a filtered source archive was uploaded and the native extension was built remotely from the checkout. For version targets, mention that the target package was installed from PyPI. For upstream-git targets, mention that upstream Farama `stable-retro` was cloned/built remotely and the benchmark used classic `RetroEnv`/`SubprocVecEnv` plus benchmark-side preprocessing, so it is a different hot path from native-vector `stable-retro-turbo`.
 
 Include a file link to the saved artifact.
 
@@ -94,6 +131,8 @@ Include target metadata:
 ```text
 package_source: checkout|version
 package_version: VERSION_OR_NONE
+upstream_git_ref: REF_OR_NONE
+upstream_git_commit: COMMIT_OR_NONE
 branch: BRANCH
 commit: COMMIT
 ```
@@ -137,6 +176,9 @@ version: VERSION
 rom_path: PATH
 remote_benchmark_harness: PATH
 remote_checkout: PATH_OR_NONE
+remote_upstream_git_url: URL_OR_NONE
+remote_upstream_git_ref: REF_OR_NONE
+remote_upstream_git_commit: COMMIT_OR_NONE
 ```
 
 If Modal prints a run URL, include it. If no run URL appears in the command output, omit it rather than inventing one.

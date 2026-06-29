@@ -4,6 +4,7 @@ import hashlib
 import fnmatch
 import io
 import json
+import os
 import re
 import subprocess
 import tarfile
@@ -18,6 +19,8 @@ REMOTE_BENCH = "/root/stable-retro-bench"
 REMOTE_CHECKOUT = "/root/stable-retro-turbo"
 DEFAULT_GAME = "SuperMarioBros-Nes-v0"
 DEFAULT_PROFILE = "supermario-level1-1"
+UPSTREAM_STABLE_RETRO_GIT_URL = "https://github.com/Farama-Foundation/Stable-Retro.git"
+UPSTREAM_STABLE_RETRO_GIT_REF = "main"
 DEFAULT_ROM = (
     REPO_ROOT
     / "stable_retro"
@@ -28,7 +31,8 @@ DEFAULT_ROM = (
 )
 CPU_REQUEST = 16.0
 MEMORY_MB = 16384
-PYTHON_VERSION = "3.14"
+PYTHON_VERSION = os.environ.get("MODAL_BENCHMARK_PYTHON_VERSION", "3.14")
+NUMPY_VERSION = os.environ.get("MODAL_BENCHMARK_NUMPY_VERSION", "2.5.0")
 
 CHECKOUT_ARCHIVE_IGNORE = [
     ".codex",
@@ -103,6 +107,7 @@ image = (
         "ca-certificates",
         "cmake",
         "git",
+        "libgl1-mesa-dev",
         "pkg-config",
         "zlib1g-dev",
         "libbz2-dev",
@@ -110,7 +115,7 @@ image = (
     .pip_install(
         "setuptools==81.0.0",
         "wheel==0.45.1",
-        "numpy==2.5.0",
+        f"numpy=={NUMPY_VERSION}",
         "torch==2.12.1",
         "stable-baselines3==2.9.0",
     )
@@ -154,13 +159,24 @@ def git_text(*args: str) -> str | None:
 
 def normalize_package_source(package_source: str, package_version: str) -> str:
     source = package_source.strip().lower()
-    if source not in {"checkout", "version"}:
-        raise ValueError("--package-source must be 'checkout' or 'version'")
+    if source not in {"checkout", "version", "upstream-git"}:
+        raise ValueError(
+            "--package-source must be 'checkout', 'version', or 'upstream-git'",
+        )
     if source == "version" and not package_version.strip():
         raise ValueError("--package-version is required with --package-source=version")
-    if source == "checkout" and package_version.strip():
+    if source != "version" and package_version.strip():
         raise ValueError("--package-version requires --package-source=version")
     return source
+
+
+def normalize_upstream_git_ref(package_source: str, upstream_git_ref: str) -> str:
+    ref = upstream_git_ref.strip()
+    if package_source == "upstream-git" and not ref:
+        return UPSTREAM_STABLE_RETRO_GIT_REF
+    if package_source != "upstream-git" and ref != UPSTREAM_STABLE_RETRO_GIT_REF:
+        raise ValueError("--upstream-git-ref requires --package-source=upstream-git")
+    return ref
 
 
 def archive_path_ignored(path: Path) -> bool:
@@ -282,7 +298,10 @@ def run_benchmark(
     *,
     package_source: str,
     package_version: str,
+    upstream_git_ref: str,
     profile: str,
+    env_backend: str,
+    env_num_envs: int,
     repeats: int,
     env_seconds: float,
     env_warmup_steps: int,
@@ -292,6 +311,7 @@ def run_benchmark(
     ppo_batch_size: int,
     ppo_n_epochs: int,
     device: str,
+    env_only: bool,
 ) -> dict[str, Any]:
     import os
     import platform
@@ -299,8 +319,10 @@ def run_benchmark(
     import sys
 
     package_source = normalize_package_source(package_source, package_version)
+    upstream_git_ref = normalize_upstream_git_ref(package_source, upstream_git_ref)
     scripts_dir = Path(REMOTE_BENCH) / "scripts"
     benchmark_cwd = "/tmp"
+    upstream_git_commit = None
     if package_source == "version":
         run_checked(
             [
@@ -312,6 +334,63 @@ def run_benchmark(
                 "--no-deps",
                 f"stable-retro-turbo=={package_version}",
             ],
+        )
+        sys.path[:] = [
+            path
+            for path in sys.path
+            if Path(path or ".").resolve()
+            not in {Path(REMOTE_BENCH), Path(REMOTE_CHECKOUT)}
+        ]
+    elif package_source == "upstream-git":
+        spec = f"git+{UPSTREAM_STABLE_RETRO_GIT_URL}"
+        if upstream_git_ref:
+            spec += f"@{upstream_git_ref}"
+            resolved_ref = run_checked(
+                [
+                    "git",
+                    "ls-remote",
+                    UPSTREAM_STABLE_RETRO_GIT_URL,
+                    upstream_git_ref,
+                ],
+                cwd="/tmp",
+            ).stdout.strip()
+            upstream_git_commit = (
+                resolved_ref.split()[0] if resolved_ref else upstream_git_ref
+            )
+        run_checked(
+            [
+                "python",
+                "-m",
+                "pip",
+                "uninstall",
+                "-y",
+                "stable-retro-turbo",
+                "stable-retro",
+            ],
+        )
+        build_env = os.environ.copy()
+        build_env.update(
+            {
+                "CMAKE_ARGS": (
+                    "-DCMAKE_BUILD_TYPE=Release -DBUILD_CORES=nes "
+                    "-DBUILD_TESTS=OFF -DENABLE_CAPNPROTO=OFF -DBUILD_N64=OFF"
+                ),
+                "STABLE_RETRO_PUBLIC_CORES": "fceumm",
+                "STABLE_RETRO_PUBLIC_DATA_PLATFORMS": "Nes",
+            },
+        )
+        run_checked(
+            [
+                "python",
+                "-m",
+                "pip",
+                "install",
+                "--force-reinstall",
+                "--no-build-isolation",
+                "--no-deps",
+                spec,
+            ],
+            env=build_env,
         )
         sys.path[:] = [
             path
@@ -387,6 +466,15 @@ def run_benchmark(
         else None,
         "remote_benchmark_harness": REMOTE_BENCH,
         "remote_checkout": REMOTE_CHECKOUT if package_source == "checkout" else None,
+        "remote_upstream_git_url": (
+            UPSTREAM_STABLE_RETRO_GIT_URL
+            if package_source == "upstream-git"
+            else None
+        ),
+        "remote_upstream_git_ref": (
+            upstream_git_ref if package_source == "upstream-git" else None
+        ),
+        "remote_upstream_git_commit": upstream_git_commit,
         "remote_rom_path": str(package_rom),
     }
     profiles_json = str(scripts_dir / "benchmark_vec_env.json")
@@ -400,7 +488,17 @@ def run_benchmark(
                 "import importlib.metadata as md; "
                 "print(stable_retro.__file__); "
                 "print(stable_retro._retro.__file__); "
-                "print(md.version('stable-retro-turbo'))"
+                "print(str(getattr(stable_retro, '__version__', 'unknown')).strip()); "
+                "\nfor name in ('stable-retro-turbo', 'stable-retro'):\n"
+                "    try:\n"
+                "        print(name)\n"
+                "        print(md.version(name))\n"
+                "        break\n"
+                "    except md.PackageNotFoundError:\n"
+                "        pass\n"
+                "else:\n"
+                "    print('unknown')\n"
+                "    print('unknown')\n"
             ),
         ],
         cwd=benchmark_cwd,
@@ -420,71 +518,97 @@ def run_benchmark(
 
     env_runs = []
     for _ in range(repeats):
+        command = [
+            "python",
+            str(scripts_dir / "benchmark_vec_env.py"),
+            "--profiles-json",
+            profiles_json,
+            "--profile",
+            profile,
+            "--backend",
+            env_backend,
+            "--seconds",
+            str(env_seconds),
+            "--warmup-steps",
+            str(env_warmup_steps),
+        ]
+        if env_num_envs > 0:
+            command.extend(["--num-envs", str(env_num_envs)])
         proc = run_checked(
-            [
-                "python",
-                str(scripts_dir / "benchmark_vec_env.py"),
-                "--profiles-json",
-                profiles_json,
-                "--profile",
-                profile,
-                "--seconds",
-                str(env_seconds),
-                "--warmup-steps",
-                str(env_warmup_steps),
-            ],
+            command,
             cwd=benchmark_cwd,
         )
         env_runs.append(parse_env_output(proc.stdout))
 
     ppo_runs = []
-    for idx in range(repeats):
-        output_path = Path(f"/tmp/stable-retro-modal-ppo-{idx}.json")
-        proc = run_checked(
-            [
-                "python",
-                str(scripts_dir / "benchmark_sb3_ppo.py"),
-                "--package-source",
-                "checkout" if package_source == "checkout" else "installed",
-                "--profiles-json",
-                profiles_json,
-                "--profile",
-                profile,
-                "--warmup-updates",
-                str(ppo_warmup_updates),
-                "--measured-updates",
-                str(ppo_measured_updates),
-                "--n-steps",
-                str(ppo_n_steps),
-                "--batch-size",
-                str(ppo_batch_size),
-                "--n-epochs",
-                str(ppo_n_epochs),
-                "--device",
-                device,
-                "--json-output",
-                str(output_path),
-            ],
-            cwd=benchmark_cwd,
-        )
-        result = json.loads(output_path.read_text())
-        result["stdout"] = proc.stdout
-        ppo_runs.append(result)
+    if not env_only:
+        for idx in range(repeats):
+            output_path = Path(f"/tmp/stable-retro-modal-ppo-{idx}.json")
+            proc = run_checked(
+                [
+                    "python",
+                    str(scripts_dir / "benchmark_sb3_ppo.py"),
+                    "--package-source",
+                    "checkout" if package_source == "checkout" else "installed",
+                    "--profiles-json",
+                    profiles_json,
+                    "--profile",
+                    profile,
+                    "--warmup-updates",
+                    str(ppo_warmup_updates),
+                    "--measured-updates",
+                    str(ppo_measured_updates),
+                    "--n-steps",
+                    str(ppo_n_steps),
+                    "--batch-size",
+                    str(ppo_batch_size),
+                    "--n-epochs",
+                    str(ppo_n_epochs),
+                    "--device",
+                    device,
+                    "--json-output",
+                    str(output_path),
+                ],
+                cwd=benchmark_cwd,
+            )
+            result = json.loads(output_path.read_text())
+            result["stdout"] = proc.stdout
+            ppo_runs.append(result)
 
     return {
         "kind": "stable-retro-turbo-modal-benchmark-v2",
         "target": {
             "package_source": package_source,
             "package_version": package_version if package_source == "version" else None,
+            "upstream_git_url": (
+                UPSTREAM_STABLE_RETRO_GIT_URL
+                if package_source == "upstream-git"
+                else None
+            ),
+            "upstream_git_ref": (
+                upstream_git_ref if package_source == "upstream-git" else None
+            ),
+            "upstream_git_commit": upstream_git_commit,
         },
         "profile": profile,
         "modal": modal_info,
         "runtime": {
             "stable_retro_file": import_check[0] if len(import_check) > 0 else None,
             "stable_retro_extension": import_check[1] if len(import_check) > 1 else None,
-            "stable_retro_turbo_distribution_version": import_check[2]
+            "stable_retro_source_version": import_check[2]
             if len(import_check) > 2
             else None,
+            "stable_retro_distribution_name": import_check[3]
+            if len(import_check) > 3
+            else None,
+            "stable_retro_distribution_version": import_check[4]
+            if len(import_check) > 4
+            else None,
+            "stable_retro_turbo_distribution_version": (
+                import_check[4]
+                if len(import_check) > 4 and import_check[3] == "stable-retro-turbo"
+                else None
+            ),
             "rom_path": rom_check,
         },
         "env": {
@@ -493,7 +617,9 @@ def run_benchmark(
         },
         "sb3_ppo": {
             "runs": ppo_runs,
-            "summary": {
+            "summary": None
+            if env_only
+            else {
                 "train_steps_per_second": stat_summary(
                     [
                         run["timing"]["train_steps_per_second"]
@@ -522,7 +648,10 @@ def main(
     output_json: str = "",
     package_source: str = "checkout",
     package_version: str = "",
+    upstream_git_ref: str = UPSTREAM_STABLE_RETRO_GIT_REF,
     profile: str = DEFAULT_PROFILE,
+    env_backend: str = "auto",
+    env_num_envs: int = 0,
     repeats: int = 3,
     env_seconds: float = 30.0,
     env_warmup_steps: int = 32,
@@ -533,8 +662,10 @@ def main(
     ppo_n_epochs: int = 4,
     device: str = "cpu",
     smoke: bool = False,
+    env_only: bool = False,
 ) -> None:
     package_source = normalize_package_source(package_source, package_version)
+    upstream_git_ref = normalize_upstream_git_ref(package_source, upstream_git_ref)
     if smoke:
         repeats = 1
         env_seconds = 2.0
@@ -547,6 +678,10 @@ def main(
 
     if repeats <= 0:
         raise ValueError("repeats must be positive")
+    if env_backend not in {"auto", "native", "subproc", "dummy", "async"}:
+        raise ValueError("--env-backend must be auto, native, subproc, dummy, or async")
+    if env_num_envs < 0:
+        raise ValueError("--env-num-envs must be non-negative")
     if not DEFAULT_ROM.exists():
         raise FileNotFoundError(f"ROM not found: {DEFAULT_ROM}")
 
@@ -559,7 +694,10 @@ def main(
         checkout_archive_bytes,
         package_source=package_source,
         package_version=package_version,
+        upstream_git_ref=upstream_git_ref,
         profile=profile,
+        env_backend=env_backend,
+        env_num_envs=env_num_envs,
         repeats=repeats,
         env_seconds=env_seconds,
         env_warmup_steps=env_warmup_steps,
@@ -569,6 +707,7 @@ def main(
         ppo_batch_size=ppo_batch_size,
         ppo_n_epochs=ppo_n_epochs,
         device=device,
+        env_only=env_only,
     )
     result["local"] = {
         "repo_root": str(REPO_ROOT),
@@ -595,6 +734,16 @@ def main(
             "smoke": smoke,
             "package_source": package_source,
             "package_version": package_version if package_source == "version" else None,
+            "upstream_git_url": (
+                UPSTREAM_STABLE_RETRO_GIT_URL
+                if package_source == "upstream-git"
+                else None
+            ),
+            "upstream_git_ref": (
+                upstream_git_ref if package_source == "upstream-git" else None
+            ),
+            "env_backend": env_backend,
+            "env_num_envs": env_num_envs if env_num_envs > 0 else None,
             "checkout_archive_bytes": len(checkout_archive_bytes),
             "checkout_archive_uploaded": package_source == "checkout",
         },
@@ -606,7 +755,6 @@ def main(
         output_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
 
     env_summary = result["env"]["summary"]
-    train_summary = result["sb3_ppo"]["summary"]["train_steps_per_second"]
     print(
         "target="
         f"package_source={result['target']['package_source']} "
@@ -626,12 +774,14 @@ def main(
         f"best={env_summary['max']:.1f} "
         f"runs={[round(run['steps_per_second'], 1) for run in result['env']['runs']]}"
     )
-    print(
-        "train_steps_per_second="
-        f"mean={train_summary['mean']:.1f} "
-        f"stdev={train_summary['stdev']:.1f} "
-        f"best={train_summary['max']:.1f} "
-        f"runs={[round(run['timing']['train_steps_per_second'], 1) for run in result['sb3_ppo']['runs']]}"
-    )
+    if not env_only:
+        train_summary = result["sb3_ppo"]["summary"]["train_steps_per_second"]
+        print(
+            "train_steps_per_second="
+            f"mean={train_summary['mean']:.1f} "
+            f"stdev={train_summary['stdev']:.1f} "
+            f"best={train_summary['max']:.1f} "
+            f"runs={[round(run['timing']['train_steps_per_second'], 1) for run in result['sb3_ppo']['runs']]}"
+        )
     if output_path is not None:
         print(f"wrote_json={output_path}")
