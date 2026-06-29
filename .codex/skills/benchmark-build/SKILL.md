@@ -7,7 +7,7 @@ description: Run and report stable-retro-turbo vector benchmarks from the curren
 
 ## Overview
 
-Use this skill to benchmark `stable-retro-turbo` with the repo's standardized vector benchmark profiles. By default, benchmark the current source checkout against vanilla `.post0`; this keeps ordinary benchmark requests aligned with the code currently under review. Measure a built wheel only when the user explicitly asks for a wheel/release benchmark or when the turn follows `$create-build` and the artifact is the object being validated.
+Use this skill to benchmark `stable-retro-turbo` with the repo's standardized vector benchmark profiles. By default, benchmark the current source checkout against vanilla `.post0`; this keeps ordinary benchmark requests aligned with the code currently under review. Measure a built wheel only when the user explicitly asks for a wheel/release benchmark or when the turn follows `$build` and the artifact is the object being validated.
 
 Benchmark decisions must consider both isolated environment throughput and full SB3 PPO training-loop throughput. A candidate optimization is not considered durable unless it improves the plain vector env benchmark and the end-to-end training benchmark, because final RL experiment throughput includes rollout collection, tensor conversion, policy inference, PPO updates, logging, and synchronization overhead.
 
@@ -140,7 +140,7 @@ Use this workflow for ordinary benchmark requests.
 
 ## Wheel Benchmark Workflow
 
-Use this workflow when the user asks for a wheel/release benchmark or when validating artifacts after `$create-build`.
+Use this workflow when the user asks for a wheel/release benchmark or when validating artifacts after `$build`.
 
 1. Pick the exact wheel path. For macOS arm64 post releases, expect a path like:
 

@@ -9,3 +9,7 @@ Key guardrails:
 - Do not overwrite existing Mario state files unless explicitly requested.
 - Validate generated screenshots against NESMaps before treating a state as correct.
 - When checking a consumer repo's installed package, run Python from that consumer repo's cwd so this checkout does not shadow the installed wheel.
+
+## Clean Modal Benchmarking
+
+Use the repo-local `modal-benchmark` skill when benchmark timing needs to be independent of current local machine load. This is the preferred path when macOS security/indexing work, local CPU contention, or other host noise makes local `benchmark-build` timing untrustworthy.

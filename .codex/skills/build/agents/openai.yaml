@@ -1,0 +1,4 @@
+interface:
+  display_name: "Build"
+  short_description: "Build next stable-retro-turbo wheels"
+  default_prompt: "Use $build to build the next post-version macOS and Linux wheels."
