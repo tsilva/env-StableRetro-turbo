@@ -1,7 +1,7 @@
 <div align="center">
   <img src="./logo.png" alt="stable-retro-turbo" width="260" />
 
-  **🚀 Native vector rollouts for Stable Retro RL training 🚀**
+  **🚀 Blazing-fast Stable Retro fork with native vectorization and preprocessing 🚀**
 </div>
 
 stable-retro-turbo is a performance-focused Python package for
@@ -22,7 +22,7 @@ and [Stable Retro docs](https://stable-retro.farama.org/).
 ```bash
 git clone https://github.com/tsilva/stable-retro-turbo.git
 cd stable-retro-turbo
-uv venv --python 3.12
+uv venv --python 3.14
 uv pip install -e .
 uv pip install stable-baselines3 pytest
 ```
@@ -87,27 +87,25 @@ retro.RetroVecEnv(
     obs_type=retro.Observations.IMAGE,
     render_mode="human",
     *,
-    num_envs=1,
-    num_threads=None,
-    rom_path=None,
-    copy_observations=True,
-    obs_resize=None,
-    obs_crop=None,
-    obs_grayscale=False,
-    obs_resize_algorithm="nearest",
-    frame_skip=1,
-    frame_stack=1,
-    maxpool_last_two=False,
-    noop_reset_max=0,
-    sticky_action_prob=0.0,
-    reward_clip=False,
-    info_mode="all",
-    info_keys=None,
-    obs_layout="hwc",
-    terminate_on_life_loss=False,
-    life_variable=None,
-    done_on_info=None,
-    unsafe_zero_copy=False,
+    num_envs=1,                  # number of emulator lanes in the vector env
+    num_threads=None,            # native worker threads; defaults to num_envs
+    rom_path=None,               # explicit ROM path for direct-ROM or external use
+    copy_observations=True,      # copy obs arrays; disable for fewer copies
+    obs_resize=None,             # native resize target as (width, height)
+    obs_crop=None,               # native crop before resize
+    obs_grayscale=False,         # convert image observations to grayscale
+    obs_resize_algorithm="nearest", # "nearest", "bilinear", or "area"
+    frame_skip=1,                # repeat each action for this many frames
+    frame_stack=1,               # stack this many processed frames
+    maxpool_last_two=False,      # max-pool the last two skipped frames
+    noop_reset_max=0,            # random no-op frames after reset
+    sticky_action_prob=0.0,      # chance to repeat the previous lane action
+    reward_clip=False,           # clip rewards in the native path
+    info_mode="all",             # info payload mode: "all", "terminal", or "none"
+    info_keys=None,              # optional info variable names to emit
+    obs_layout="hwc",            # observation layout: "hwc" or "chw"
+    done_on_info=None,           # info-variable terminal rules
+    unsafe_zero_copy=False,      # benchmark-only single-buffer aliasing
 )
 ```
 
@@ -135,8 +133,6 @@ one state per env lane, or a `{state_name: weight}` mapping sampled on reset.
 | `info_mode` | Info payload mode: `"all"`, `"terminal"`, or `"none"`. |
 | `info_keys` | Optional sequence of info variable names to emit. |
 | `obs_layout` | Observation layout: `"hwc"` or `"chw"`. |
-| `terminate_on_life_loss` | Enable native first-life-loss terminal transitions. |
-| `life_variable` | Info/data variable used with `terminate_on_life_loss`, such as `"lives"`. |
 | `done_on_info` | General per-lane terminal rules keyed by info-variable `change`, `increase`, or `decrease`. |
 | `unsafe_zero_copy` | Benchmark-only single-buffer observation aliasing; requires `copy_observations=False`. |
 
@@ -169,15 +165,17 @@ reserved for explicit direct-ROM hot-path diagnostics and requires
 - The import package is `stable_retro`; `retro` remains as a compatibility shim.
 - `RetroVecEnv` requires `stable-baselines3` because it implements the SB3
   `VecEnv` interface.
-- Source builds require Python `3.10` through `3.14`, CMake, a C/C++ compiler,
-  and platform core build dependencies.
+- Source builds and CI cover Python `3.10` through `3.14`; the repo-local
+  deterministic release helper currently targets Python `3.14` wheels.
+  Building from source also requires CMake, a C/C++ compiler, and platform core
+  build dependencies.
 - ROMs are not included. Import ROMs and read game/core docs through upstream
   Stable Retro unless the work is specifically about this turbo layer.
 - `done_on_info` terminates and autoresets only lanes whose configured
   info-variable rule fires. Supported ops are `change`, `increase`, and
   `decrease`.
-- `terminate_on_life_loss=True, life_variable="lives"` is still accepted and
-  compiles to the same native rule path as `done_on_info`.
+- Use `done_on_info={"life_loss": ["lives", "decrease"]}` for first-life-loss
+  terminal transitions.
 - `active_state_indices()` returns a read-only `int32` NumPy view for
   task-conditioned training; copy it when you need a stable snapshot.
 - Third-party emulator cores carry their own licenses; see [`LICENSES.md`](LICENSES.md).

@@ -339,7 +339,7 @@ QString EmulatorController::dataPath() {
 		connect(subproc, static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(&QProcess::finished), subproc, [subproc](int, QProcess::ExitStatus) {
 			subproc->deleteLater();
 		});
-		subproc->start("python3", {"-c", "import retro; print(retro.data.path())"});
+		subproc->start("python3", {"-c", "import stable_retro; print(stable_retro.data.path())"});
 		subproc->waitForStarted();
 		while (subproc->state() != QProcess::NotRunning) {
 			subproc->waitForFinished(10);

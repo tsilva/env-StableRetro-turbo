@@ -170,10 +170,6 @@ class BenchmarkRetroPreprocessWrapper(gym.Wrapper):
         self._obs_crop = obs_crop
         self._obs_grayscale = bool(obs_grayscale)
         self._obs_resize_algorithm = str(obs_resize_algorithm).lower()
-        if self._obs_resize_algorithm == "box":
-            self._obs_resize_algorithm = "area"
-        if self._obs_resize_algorithm == "linear":
-            self._obs_resize_algorithm = "bilinear"
         if self._obs_resize_algorithm not in {"nearest", "bilinear", "area"}:
             raise ValueError(
                 "obs_resize_algorithm must be one of: nearest, bilinear, area",

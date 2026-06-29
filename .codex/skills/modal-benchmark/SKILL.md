@@ -11,6 +11,16 @@ Use this skill when local benchmark timing is contaminated by host load, macOS s
 
 Default to `--package-source checkout`. Use `--package-source version --package-version X.Y.Z.postN` only when the user names a package version or asks to benchmark a published release. Use `benchmark-build` for local wheel-vs-`.post0` comparison work; use this skill when the priority is a repeatable clean-machine target benchmark.
 
+## Launch Approval Prompt
+
+On launch, before running `git status` or any Modal command, give the user this exact approval phrase:
+
+```text
+I approve $modal-benchmark to request escalated execution for Modal network/auth/upload, including uploading the current repo snapshot and local Mario ROM bytes, building and running remote Modal CPU compute, and writing the benchmark artifact locally.
+```
+
+Explain that this covers the permissions the skill needs to run: local Git state inspection, local artifact creation, Modal network access, Modal authentication, uploading the current checkout for scripts/profile, uploading the local Mario ROM bytes for runtime injection, remote image/build execution, and remote CPU benchmark execution.
+
 ## Workflow
 
 Run from the repository root. First confirm the current branch is the intended branch when using the checkout target:

@@ -249,11 +249,10 @@ The key metric is `train_steps_per_second` from the JSON result. Also record `ro
 When benchmarking Mario first-life-loss behavior, measure the opt-in native path with:
 
 ```python
-terminate_on_life_loss=True
-life_variable="lives"
+done_on_info={"life_loss": ["lives", "decrease"]}
 ```
 
-If `scripts/benchmark_vec_env.py` does not expose those flags yet, run a small inline Python benchmark that imports the script's `_build_native_vec` helper and adds only those two kwargs. Keep all other settings aligned with `supermario-level1-1`:
+If `scripts/benchmark_vec_env.py` does not expose a direct CLI option for that strategy yet, run a small inline Python benchmark that imports the script's `_build_native_vec` helper and adds only that kwarg. Keep all other settings aligned with `supermario-level1-1`:
 
 ```python
 env_kwargs = {
@@ -267,8 +266,7 @@ env_kwargs = {
     "maxpool_last_two": True,
     "info_mode": "terminal",
     "obs_layout": "hwc",
-    "terminate_on_life_loss": True,
-    "life_variable": "lives",
+    "done_on_info": {"life_loss": ["lives", "decrease"]},
 }
 ```
 

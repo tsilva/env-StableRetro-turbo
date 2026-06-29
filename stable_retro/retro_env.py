@@ -273,11 +273,6 @@ class RetroEnv(gym.Env, EzPickle):
     @staticmethod
     def _normalize_obs_resize_algorithm(obs_resize_algorithm):
         algorithm = str(obs_resize_algorithm).lower()
-        aliases = {
-            "linear": "bilinear",
-            "box": "area",
-        }
-        algorithm = aliases.get(algorithm, algorithm)
         if algorithm not in {"nearest", "bilinear", "area"}:
             raise ValueError(
                 "obs_resize_algorithm must be one of: nearest, bilinear, area",

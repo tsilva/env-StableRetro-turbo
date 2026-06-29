@@ -84,7 +84,7 @@ def test_env_basic(obs_type, generate_test_env):
     assert isinstance(info, dict)
 
 
-@pytest.mark.parametrize("algorithm", ["nearest", "bilinear", "area", "linear", "box"])
+@pytest.mark.parametrize("algorithm", ["nearest", "bilinear", "area"])
 def test_env_image_preprocessing(algorithm, generate_test_env):
     json_path = os.path.join(os.path.dirname(__file__), "../dummy.json")
 
@@ -110,6 +110,23 @@ def test_env_image_preprocessing(algorithm, generate_test_env):
     assert isinstance(terminated, bool)
     assert isinstance(truncated, bool)
     assert isinstance(info, dict)
+
+
+@pytest.mark.parametrize("algorithm", ["linear", "box"])
+def test_env_rejects_legacy_obs_resize_algorithm_aliases(
+    algorithm,
+    generate_test_env,
+):
+    json_path = os.path.join(os.path.dirname(__file__), "../dummy.json")
+
+    with pytest.raises(ValueError, match="obs_resize_algorithm"):
+        generate_test_env(
+            info=json_path,
+            scenario=json_path,
+            render_mode="rgb_array",
+            obs_resize=(8, 8),
+            obs_resize_algorithm=algorithm,
+        )
 
 
 def test_env_temporal_preprocessing(generate_test_env):

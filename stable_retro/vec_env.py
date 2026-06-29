@@ -33,11 +33,9 @@ class RetroVecEnv(VecEnv):
     Pass done_on_info={"name": ["key", "decrease"]} to terminate and autoreset
     only lanes whose post-reset baseline changes as requested. Supported ops
     are "change", "increase", and "decrease"; keys may be a string or a
-    sequence of strings. The legacy terminate_on_life_loss=True,
-    life_variable="lives" option is compiled into a "life_loss" decrease rule.
-    If both forms provide "life_loss", the explicit done_on_info rule wins.
-    Fired rules are reported in info["done_on_info"] with list-shaped "keys",
-    "prev", and "next" values, including one-element lists for single-key rules.
+    sequence of strings. Fired rules are reported in info["done_on_info"] with
+    list-shaped "keys", "prev", and "next" values, including one-element lists
+    for single-key rules.
 
     With copy_observations=False, returned observations are double-buffered so
     the previous observation survives the next step for SB3 rollout collection.
@@ -74,8 +72,6 @@ class RetroVecEnv(VecEnv):
         info_mode="all",
         info_keys=None,
         obs_layout="hwc",
-        terminate_on_life_loss=False,
-        life_variable=None,
         done_on_info=None,
         unsafe_zero_copy=False,
     ):
@@ -125,22 +121,7 @@ class RetroVecEnv(VecEnv):
         if info_keys is not None:
             info_keys = [str(key) for key in info_keys]
         unsafe_zero_copy = bool(unsafe_zero_copy)
-        terminate_on_life_loss = bool(terminate_on_life_loss)
-        if terminate_on_life_loss:
-            if life_variable is None or str(life_variable) == "":
-                raise ValueError(
-                    "life_variable is required when terminate_on_life_loss=True",
-                )
-            life_variable = str(life_variable)
-        elif life_variable is None:
-            life_variable = ""
-        else:
-            life_variable = str(life_variable)
-        done_on_info_rules = self._normalize_done_on_info(
-            done_on_info,
-            terminate_on_life_loss=terminate_on_life_loss,
-            life_variable=life_variable,
-        )
+        done_on_info_rules = self._normalize_done_on_info(done_on_info)
         obs_layout = str(obs_layout).lower()
         if obs_layout not in {"hwc", "chw"}:
             raise ValueError("obs_layout must be 'hwc' or 'chw'")
@@ -269,8 +250,6 @@ class RetroVecEnv(VecEnv):
             unsafe_zero_copy,
             obs_layout,
             info_keys,
-            terminate_on_life_loss,
-            life_variable,
             done_on_info_rules,
             initial_state_labels,
             initial_state_weights,
@@ -299,15 +278,8 @@ class RetroVecEnv(VecEnv):
         )
 
     @staticmethod
-    def _normalize_done_on_info(
-        done_on_info,
-        *,
-        terminate_on_life_loss: bool,
-        life_variable: str,
-    ):
+    def _normalize_done_on_info(done_on_info):
         rules = {}
-        if terminate_on_life_loss:
-            rules["life_loss"] = ((life_variable,), "decrease")
         if done_on_info is not None:
             if not isinstance(done_on_info, Mapping):
                 raise ValueError("done_on_info must be a mapping of rule names to (keys, op)")

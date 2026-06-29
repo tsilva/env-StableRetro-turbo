@@ -240,29 +240,35 @@ Once you have created an integration, you can put it in a folder called `custom_
 - `.pce`: `*-PCEngine` (e.g. `SoldierBlade-PCEngine`)
 - `.sms`: `*-Sms` (e.g. `AddamsFamily-Sms`)
 
-Then you can tell `retro` about your custom integration using the `add_custom_path` function:
+Then you can tell `stable_retro` about your custom integration using the `add_custom_path` function:
 
 ```python
-import retro
 import os
+import stable_retro
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def main():
-        retro.data.Integrations.add_custom_path(
-                os.path.join(SCRIPT_DIR, "custom_integrations")
-        )
-        print("FakeGame-Nes" in retro.data.list_games(inttype=retro.data.Integrations.ALL))
-        env = retro.make("FakeGame-Nes", inttype=retro.data.Integrations.ALL)
-        print(env)
+    stable_retro.data.Integrations.add_custom_path(
+        os.path.join(SCRIPT_DIR, "custom_integrations")
+    )
+    print(
+        "FakeGame-Nes"
+        in stable_retro.data.list_games(inttype=stable_retro.data.Integrations.ALL)
+    )
+    env = stable_retro.make(
+        "FakeGame-Nes",
+        inttype=stable_retro.data.Integrations.ALL,
+    )
+    print(env)
 
 
 if __name__ == "__main__":
-        main()
+    main()
 ```
 
-This lets you use your integration without having to add it to `retro` directly.
+This lets you use your integration without having to add it to `stable_retro` directly.
 
 (appendix-types)=
 

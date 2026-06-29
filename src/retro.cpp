@@ -1280,8 +1280,6 @@ public:
 		bool unsafeZeroCopy,
 		const string& obsLayout,
 		py::object infoKeysObj,
-		bool terminateOnLifeLoss,
-		const string& lifeVariable,
 		py::object doneOnInfoObj = py::none(),
 		py::object initialStateLabelsObj = py::none(),
 		py::object initialStateWeightsObj = py::none()
@@ -1303,8 +1301,6 @@ public:
 		, m_fullInfo(infoMode == "all")
 		, m_noInfo(infoMode == "none")
 		, m_unsafeZeroCopy(unsafeZeroCopy)
-		, m_terminateOnLifeLoss(terminateOnLifeLoss)
-		, m_lifeVariableName(lifeVariable)
 		, m_numThreads(numThreads) {
 		if (numEnvs == 0) {
 			throw std::runtime_error("num_envs must be positive");
@@ -1337,11 +1333,7 @@ public:
 		} else {
 			throw std::runtime_error("obs_layout must be hwc or chw");
 		}
-		if (m_terminateOnLifeLoss && m_lifeVariableName.empty()) {
-			throw std::runtime_error("life_variable is required when terminate_on_life_loss=True");
-		}
 		parseDoneOnInfoRules(doneOnInfoObj);
-		addLegacyLifeLossRuleIfNeeded();
 		if (!infoKeysObj.is_none()) {
 			py::sequence infoKeys = py::reinterpret_borrow<py::sequence>(infoKeysObj);
 			m_infoKeys.reserve(static_cast<size_t>(infoKeys.size()));
@@ -1663,13 +1655,6 @@ public:
 				info["reset_info"] = resetInfo;
 				info["TimeLimit.truncated"] = false;
 			}
-			if (outputs[i].lifeLoss) {
-				info["life_loss"] = true;
-				info["died"] = true;
-				info["life_variable"] = outputs[i].lifeVariableName;
-				info["previous_lives"] = outputs[i].previousLifeValue;
-				info["current_lives"] = outputs[i].currentLifeValue;
-			}
 			if (!outputs[i].firedDoneOnInfoRules.empty()) {
 				py::dict doneOnInfo = py::dict();
 				for (const DoneOnInfoFiredRule& fired : outputs[i].firedDoneOnInfoRules) {
@@ -1834,31 +1819,12 @@ private:
 		}
 	}
 
-	void addLegacyLifeLossRuleIfNeeded() {
-		if (!m_terminateOnLifeLoss) {
-			return;
-		}
-		for (const DoneOnInfoRule& rule : m_doneOnInfoRules) {
-			if (rule.name == "life_loss") {
-				return;
-			}
-		}
-		DoneOnInfoRule rule;
-		rule.name = "life_loss";
-		rule.op = DoneOnInfoOp::Decrease;
-		rule.keyNames.push_back(m_lifeVariableName);
-		m_doneOnInfoRules.push_back(std::move(rule));
-	}
-
 	void resolveDoneOnInfoVariables(const std::unordered_map<std::string, Variable>& variables) {
 		for (DoneOnInfoRule& rule : m_doneOnInfoRules) {
 			rule.variables.reserve(rule.keyNames.size());
 			for (const std::string& key : rule.keyNames) {
 				auto variable = variables.find(key);
 				if (variable == variables.end()) {
-					if (rule.name == "life_loss" && key == m_lifeVariableName) {
-						throw std::runtime_error("unknown life_variable: " + m_lifeVariableName);
-					}
 					throw std::runtime_error("unknown done_on_info key: " + key);
 				}
 				rule.variables.push_back(variable->second);
@@ -1914,10 +1880,6 @@ private:
 	struct StepOutput {
 		float reward = 0.0f;
 		bool done = false;
-		bool lifeLoss = false;
-		int64_t previousLifeValue = 0;
-		int64_t currentLifeValue = 0;
-		std::string lifeVariableName;
 		std::vector<DoneOnInfoFiredRule> firedDoneOnInfoRules;
 		std::string startStateLabel;
 		std::string resetStartStateLabel;
@@ -2193,14 +2155,10 @@ private:
 			}
 			const std::vector<int64_t>& baseline = slot.doneOnInfoBaselines[ruleIndex];
 			bool fired = false;
-			int64_t firstCurrent = 0;
 			std::vector<int64_t> currentValues(rule.variables.size());
 			for (size_t keyIndex = 0; keyIndex < rule.variables.size(); ++keyIndex) {
 				const int64_t current = slot.data.m_data.lookupValue(rule.variables[keyIndex]);
 				currentValues[keyIndex] = current;
-				if (keyIndex == 0) {
-					firstCurrent = current;
-				}
 				if (doneOnInfoValueFired(rule.op, baseline[keyIndex], current)) {
 					fired = true;
 				}
@@ -2216,12 +2174,6 @@ private:
 				baseline,
 				std::move(currentValues),
 			});
-			if (rule.name == "life_loss") {
-				output.lifeLoss = true;
-				output.lifeVariableName = rule.keyNames.empty() ? m_lifeVariableName : rule.keyNames.front();
-				output.previousLifeValue = baseline.empty() ? 0 : baseline.front();
-				output.currentLifeValue = firstCurrent;
-			}
 		}
 		return firedAny;
 	}
@@ -2454,8 +2406,6 @@ private:
 	bool m_unsafeZeroCopy = false;
 	bool m_channelsFirst = false;
 	bool m_renderSkipEnabled = false;
-	bool m_terminateOnLifeLoss = false;
-	std::string m_lifeVariableName;
 	std::vector<DoneOnInfoRule> m_doneOnInfoRules;
 	std::vector<std::string> m_infoKeys;
 	std::vector<std::pair<std::string, Variable>> m_infoVariables;
@@ -2692,8 +2642,6 @@ PYBIND11_MODULE(_retro, m) {
 				bool,
 				const string&,
 				py::object,
-				bool,
-				const string&,
 				py::object,
 				py::object,
 				py::object>(),
@@ -2721,8 +2669,6 @@ PYBIND11_MODULE(_retro, m) {
 			py::arg("unsafe_zero_copy") = false,
 			py::arg("obs_layout") = "hwc",
 			py::arg("info_keys") = py::none(),
-			py::arg("terminate_on_life_loss") = false,
-			py::arg("life_variable") = "",
 			py::arg("done_on_info") = py::none(),
 			py::arg("initial_state_labels") = py::none(),
 			py::arg("initial_state_weights") = py::none()

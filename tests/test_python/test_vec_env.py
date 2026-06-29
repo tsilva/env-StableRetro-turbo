@@ -245,23 +245,6 @@ def test_stable_retro_native_vec_env_no_rule_no_done_omits_done_on_info(tmp_path
         env.close()
 
 
-def test_stable_retro_native_vec_env_life_loss_requires_variable(tmp_path):
-    pytest.importorskip("stable_baselines3")
-
-    with pytest.raises(
-        ValueError,
-        match="life_variable is required when terminate_on_life_loss=True",
-    ):
-        _make_test_native_vec_env(tmp_path, terminate_on_life_loss=True)
-
-    with pytest.raises(RuntimeError, match="unknown life_variable: missing_lives"):
-        _make_test_native_vec_env(
-            tmp_path,
-            terminate_on_life_loss=True,
-            life_variable="missing_lives",
-        )
-
-
 def test_stable_retro_native_vec_env_done_on_info_validation():
     pytest.importorskip("stable_baselines3")
     from stable_retro.vec_env import RetroVecEnv
@@ -270,28 +253,20 @@ def test_stable_retro_native_vec_env_done_on_info_validation():
 
     assert normalize(
         {"level_change": [["levelHi", "levelLo"], "change"]},
-        terminate_on_life_loss=False,
-        life_variable="",
     ) == (("level_change", ("levelHi", "levelLo"), "change"),)
 
     assert normalize(
         {"life_loss": ("health", "decrease")},
-        terminate_on_life_loss=True,
-        life_variable="lives",
     ) == (("life_loss", ("health",), "decrease"),)
 
     with pytest.raises(ValueError, match="done_on_info ops"):
         normalize(
             {"bad": ("lives", "less")},
-            terminate_on_life_loss=False,
-            life_variable="",
         )
 
     with pytest.raises(ValueError, match="at least one key"):
         normalize(
             {"bad": ((), "change")},
-            terminate_on_life_loss=False,
-            life_variable="",
         )
 
 
@@ -403,7 +378,7 @@ def _make_mario_native_vec_env(num_envs, rom_path, **kwargs):
     )
 
 
-def test_stable_retro_native_vec_env_life_loss_default_disabled():
+def test_stable_retro_native_vec_env_done_on_info_default_disabled():
     pytest.importorskip("stable_baselines3")
 
     rom_path = _mario_rom_path_or_skip()
@@ -411,14 +386,12 @@ def test_stable_retro_native_vec_env_life_loss_default_disabled():
         1,
         rom_path,
         info_mode="terminal",
-        life_variable="lives",
     )
     enabled_env = _make_mario_native_vec_env(
         1,
         rom_path,
         info_mode="terminal",
-        terminate_on_life_loss=True,
-        life_variable="lives",
+        done_on_info={"life_loss": ["lives", "decrease"]},
     )
     try:
         env.reset()
@@ -432,9 +405,10 @@ def test_stable_retro_native_vec_env_life_loss_default_disabled():
                 assert dones.tolist() == [False]
                 continue
 
-            assert enabled_infos[0]["life_loss"] is True
+            assert "life_loss" in enabled_infos[0]["done_on_info"]
             assert dones.tolist() == [False]
             assert "life_loss" not in infos[0]
+            assert "done_on_info" not in infos[0]
             assert "terminal_observation" not in infos[0]
             return
 
@@ -444,7 +418,7 @@ def test_stable_retro_native_vec_env_life_loss_default_disabled():
         enabled_env.close()
 
 
-def test_stable_retro_native_vec_env_life_loss_autoresets_only_one_lane():
+def test_stable_retro_native_vec_env_done_on_info_life_loss_autoresets_only_one_lane():
     pytest.importorskip("stable_baselines3")
 
     rom_path = _mario_rom_path_or_skip()
@@ -452,8 +426,7 @@ def test_stable_retro_native_vec_env_life_loss_autoresets_only_one_lane():
         2,
         rom_path,
         info_mode="terminal",
-        terminate_on_life_loss=True,
-        life_variable="lives",
+        done_on_info={"life_loss": ["lives", "decrease"]},
     )
     baseline_env = _make_mario_native_vec_env(
         2,
@@ -476,10 +449,10 @@ def test_stable_retro_native_vec_env_life_loss_autoresets_only_one_lane():
 
             assert dones.tolist() == [True, False]
             np.testing.assert_array_equal(obs[1], baseline_obs[1])
-            assert infos[0]["life_loss"] is True
-            assert infos[0]["died"] is True
-            assert infos[0]["life_variable"] == "lives"
-            assert infos[0]["current_lives"] < infos[0]["previous_lives"]
+            payload = infos[0]["done_on_info"]["life_loss"]
+            assert payload["op"] == "decrease"
+            assert payload["keys"] == ["lives"]
+            assert payload["next"][0] < payload["prev"][0]
             assert "terminal_observation" in infos[0]
             assert "terminal_observation" not in infos[1]
             return
@@ -488,57 +461,6 @@ def test_stable_retro_native_vec_env_life_loss_autoresets_only_one_lane():
     finally:
         life_env.close()
         baseline_env.close()
-
-
-def test_stable_retro_native_vec_env_done_on_info_life_loss_matches_legacy():
-    pytest.importorskip("stable_baselines3")
-
-    rom_path = _mario_rom_path_or_skip()
-    explicit_env = _make_mario_native_vec_env(
-        1,
-        rom_path,
-        info_mode="terminal",
-        done_on_info={"life_loss": ["lives", "decrease"]},
-    )
-    legacy_env = _make_mario_native_vec_env(
-        1,
-        rom_path,
-        info_mode="terminal",
-        terminate_on_life_loss=True,
-        life_variable="lives",
-    )
-    try:
-        explicit_env.reset()
-        legacy_env.reset()
-        actions = np.zeros((1, explicit_env.num_buttons), dtype=np.uint8)
-        actions[0, 7] = 1
-        for _ in range(180):
-            _, _, explicit_dones, explicit_infos = explicit_env.step(actions)
-            _, _, legacy_dones, legacy_infos = legacy_env.step(actions)
-            np.testing.assert_array_equal(explicit_dones, legacy_dones)
-            if not bool(explicit_dones[0]):
-                continue
-
-            assert explicit_infos[0]["life_loss"] is True
-            assert explicit_infos[0]["died"] is True
-            assert explicit_infos[0]["life_variable"] == "lives"
-            assert explicit_infos[0]["current_lives"] < explicit_infos[0]["previous_lives"]
-            assert explicit_infos[0]["done_on_info"] == {
-                "life_loss": {
-                    "op": "decrease",
-                    "keys": ["lives"],
-                    "prev": [explicit_infos[0]["previous_lives"]],
-                    "next": [explicit_infos[0]["current_lives"]],
-                },
-            }
-            assert legacy_infos[0]["done_on_info"] == explicit_infos[0]["done_on_info"]
-            assert "terminal_observation" in explicit_infos[0]
-            return
-
-        pytest.fail("Mario did not lose a life within the test step budget")
-    finally:
-        explicit_env.close()
-        legacy_env.close()
 
 
 def test_stable_retro_native_vec_env_done_on_info_autoresets_only_changed_lane():
@@ -613,22 +535,16 @@ def test_stable_retro_native_vec_env_done_on_info_reports_multiple_rules_same_st
             if not bool(dones[0]):
                 continue
 
-            assert infos[0]["done_on_info"] == {
-                "life_loss": {
-                    "op": "decrease",
-                    "keys": ["lives"],
-                    "prev": [infos[0]["previous_lives"]],
-                    "next": [infos[0]["current_lives"]],
-                },
-                "level_change": {
-                    "op": "change",
-                    "keys": ["lives"],
-                    "prev": [infos[0]["previous_lives"]],
-                    "next": [infos[0]["current_lives"]],
-                },
-            }
-            assert infos[0]["life_loss"] is True
-            assert infos[0]["died"] is True
+            done_on_info = infos[0]["done_on_info"]
+            assert set(done_on_info) == {"life_loss", "level_change"}
+            assert done_on_info["life_loss"]["op"] == "decrease"
+            assert done_on_info["life_loss"]["keys"] == ["lives"]
+            assert done_on_info["life_loss"]["next"][0] < (
+                done_on_info["life_loss"]["prev"][0]
+            )
+            assert done_on_info["level_change"]["op"] == "change"
+            assert done_on_info["level_change"]["keys"] == ["lives"]
+            assert done_on_info["level_change"]["next"] != done_on_info["level_change"]["prev"]
             return
 
         pytest.fail("Mario did not lose a life within the test step budget")
@@ -1331,8 +1247,7 @@ def test_stable_retro_native_vec_env_mario_life_decrease_terminates_if_rom_prese
         maxpool_last_two=True,
         num_threads=1,
         info_mode="terminal",
-        terminate_on_life_loss=True,
-        life_variable="lives",
+        done_on_info={"life_loss": ["lives", "decrease"]},
     )
     try:
         env.reset()
@@ -1345,10 +1260,10 @@ def test_stable_retro_native_vec_env_mario_life_decrease_terminates_if_rom_prese
             if not bool(dones[0]):
                 continue
 
-            assert infos[0]["life_loss"] is True
-            assert infos[0]["died"] is True
-            assert infos[0]["life_variable"] == "lives"
-            assert infos[0]["current_lives"] < infos[0]["previous_lives"]
+            payload = infos[0]["done_on_info"]["life_loss"]
+            assert payload["op"] == "decrease"
+            assert payload["keys"] == ["lives"]
+            assert payload["next"][0] < payload["prev"][0]
             assert "terminal_observation" in infos[0]
             return
 
