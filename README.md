@@ -1,6 +1,12 @@
 <div align="center">
   <img src="./logo.png" alt="stable-retro-turbo" width="260" />
 
+  <p>
+    <a href="https://pypi.org/project/stable-retro-turbo/">
+      <img src="https://img.shields.io/pypi/v/stable-retro-turbo.svg" alt="PyPI version" />
+    </a>
+  </p>
+
   **🚀 Blazing-fast Stable Retro fork with native vectorization and preprocessing 🚀**
 </div>
 
@@ -20,14 +26,17 @@ and [Stable Retro docs](https://stable-retro.farama.org/).
 ## Install
 
 ```bash
-git clone https://github.com/tsilva/stable-retro-turbo.git
-cd stable-retro-turbo
 uv venv --python 3.14
-uv pip install -e .
+uv pip install stable-retro-turbo
+```
+
+For Stable Baselines3 training examples and local tests, add:
+
+```bash
 uv pip install stable-baselines3 pytest
 ```
 
-Check the local build from the repo root:
+Check the installed package:
 
 ```bash
 uv run python - <<'PY'
@@ -39,9 +48,17 @@ PY
 ```
 
 If you only need upstream Stable Retro behavior, install and read upstream
-Stable Retro instead. If you need a released turbo wheel, use this repository's
-[GitHub release artifacts](https://github.com/tsilva/stable-retro-turbo/releases)
-when available.
+Stable Retro instead.
+
+For development from source:
+
+```bash
+git clone https://github.com/tsilva/stable-retro-turbo.git
+cd stable-retro-turbo
+uv venv --python 3.14
+uv pip install -e .
+uv pip install stable-baselines3 pytest
+```
 
 ## Use
 

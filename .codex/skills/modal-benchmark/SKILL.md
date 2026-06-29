@@ -16,10 +16,10 @@ Default to `--package-source checkout`. Use `--package-source version --package-
 On launch, before running `git status` or any Modal command, give the user this exact approval phrase:
 
 ```text
-I approve $modal-benchmark to request escalated execution for Modal network/auth/upload, including uploading the current repo snapshot and local Mario ROM bytes, building and running remote Modal CPU compute, and writing the benchmark artifact locally.
+I approve $modal-benchmark to request escalated execution for Modal network/auth/upload, including uploading the benchmark harness, local Mario ROM bytes, and, for checkout targets only, a filtered current repo source archive; building and running remote Modal CPU compute; and writing the benchmark artifact locally.
 ```
 
-Explain that this covers the permissions the skill needs to run: local Git state inspection, local artifact creation, Modal network access, Modal authentication, uploading the current checkout for scripts/profile, uploading the local Mario ROM bytes for runtime injection, remote image/build execution, and remote CPU benchmark execution.
+Explain that this covers the permissions the skill needs to run: local Git state inspection, local artifact creation, Modal network access, Modal authentication, uploading the benchmark scripts/profile in the Modal image, uploading the local Mario ROM bytes for runtime injection, remote image/build execution, remote CPU benchmark execution, and, for `--package-source checkout` only, uploading a filtered source archive for remote editable install. For `--package-source version`, the target package is downloaded from PyPI in Modal and the current checkout is not uploaded as the package under test.
 
 ## Workflow
 
@@ -71,19 +71,21 @@ Use the launcher defaults unless the user asks otherwise:
 - Isolated env samples: `repeats=3`, `env_seconds=30`, `env_warmup_steps=32`
 - PPO train samples: `repeats=3`, `warmup_updates=1`, `measured_updates=10`, `n_steps=512`, `batch_size=512`, `n_epochs=4`, `device=cpu`
 
-For `--package-source checkout`, the launcher uploads the current repo snapshot to Modal, builds the extension there, installs the checkout, writes local `stable_retro/data/stable/SuperMarioBros-Nes-v0/rom.nes` bytes into the active package data directory at runtime, and runs:
+The launcher uses one reusable Modal image for both package modes. The image contains OS/Python/SB3/Torch dependencies plus the minimal benchmark harness (`scripts/benchmark_vec_env.py`, `scripts/benchmark_sb3_ppo.py`, and `scripts/benchmark_vec_env.json`). The package under test is installed at runtime.
+
+For `--package-source checkout`, the launcher uploads a filtered source archive of the current repo as a function input, builds the extension there, installs the checkout, writes local `stable_retro/data/stable/SuperMarioBros-Nes-v0/rom.nes` bytes into the active package data directory at runtime, and runs:
 
 - `scripts/benchmark_vec_env.py` for isolated env SPS
 - `scripts/benchmark_sb3_ppo.py --package-source checkout` for full SB3 PPO train-loop SPS
 
-For `--package-source version`, the launcher still uploads this repo snapshot for the benchmark driver scripts and profile JSON, but the remote function uninstalls the editable checkout package, installs `stable-retro-turbo==PACKAGE_VERSION`, writes the same ROM bytes into that installed package's data directory, and runs:
+For `--package-source version`, the launcher does not upload the current checkout as the package under test. The remote function installs `stable-retro-turbo==PACKAGE_VERSION` from PyPI, writes the same ROM bytes into that installed package's data directory, and runs:
 
 - `scripts/benchmark_vec_env.py` for isolated env SPS
 - `scripts/benchmark_sb3_ppo.py --package-source installed` for full SB3 PPO train-loop SPS
 
 ## Reporting
 
-After the run completes, read the saved artifact and report the result. Start with whether it worked and name the target: current checkout with branch/commit, or `stable-retro-turbo==VERSION`. Mention that Modal built the image, uploaded the current checkout for scripts/profile, injected the ROM bytes at runtime, and ran both env and PPO timing samples. For checkout targets, also mention that the native extension was built remotely from the checkout.
+After the run completes, read the saved artifact and report the result. Start with whether it worked and name the target: current checkout with branch/commit, or `stable-retro-turbo==VERSION`. Mention that Modal built/reused the benchmark image, injected the ROM bytes at runtime, and ran both env and PPO timing samples. For checkout targets, also mention that a filtered source archive was uploaded and the native extension was built remotely from the checkout. For version targets, mention that the target package was installed from PyPI.
 
 Include a file link to the saved artifact.
 
@@ -133,6 +135,8 @@ stable_retro_file: PATH
 stable_retro_extension: PATH
 version: VERSION
 rom_path: PATH
+remote_benchmark_harness: PATH
+remote_checkout: PATH_OR_NONE
 ```
 
 If Modal prints a run URL, include it. If no run URL appears in the command output, omit it rather than inventing one.

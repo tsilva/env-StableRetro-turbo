@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import fnmatch
+import io
 import json
 import re
 import subprocess
+import tarfile
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +14,8 @@ import modal
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-REMOTE_REPO = "/root/stable-retro-turbo"
+REMOTE_BENCH = "/root/stable-retro-bench"
+REMOTE_CHECKOUT = "/root/stable-retro-turbo"
 DEFAULT_GAME = "SuperMarioBros-Nes-v0"
 DEFAULT_PROFILE = "supermario-level1-1"
 DEFAULT_ROM = (
@@ -26,26 +30,40 @@ CPU_REQUEST = 16.0
 MEMORY_MB = 16384
 PYTHON_VERSION = "3.14"
 
-IMAGE_IGNORE = [
+CHECKOUT_ARCHIVE_IGNORE = [
+    ".codex",
+    ".codex/**",
     ".git",
+    ".git/**",
     ".venv*",
+    ".venv*/**",
     ".mypy_cache",
+    ".mypy_cache/**",
     ".pytest_cache",
+    ".pytest_cache/**",
     ".ruff_cache",
+    ".ruff_cache/**",
     ".uv-cache",
+    ".uv-cache/**",
     "artifacts",
+    "artifacts/**",
     "build",
+    "build/**",
     "CMakeFiles",
     "**/CMakeFiles/**",
     "CMakeCache.txt",
     "CTestTestfile.cmake",
     "dist",
+    "dist/**",
+    "docs",
+    "docs/**",
     "Makefile",
     "cmake_*.cmake",
     "install_manifest.txt",
     "_CPack_Packages",
     "CPack*Config.cmake",
     "wheelhouse*",
+    "wheelhouse*/**",
     "__pycache__",
     "*.egg-info",
     "*.pyc",
@@ -63,6 +81,17 @@ IMAGE_IGNORE = [
     "**/*.so",
     "*.dylib",
     "**/*.dylib",
+    "*.egg-info",
+    "*.egg-info/**",
+    "architecture.png",
+    "logo.png",
+    "src/ui/logo.icns",
+    "stable_retro/data/contrib/**",
+    "stable_retro/data/experimental/**",
+    "stable_retro/data/stable/*/rom.*",
+    "tests",
+    "tests/**",
+    "third-party/libzip/regress/**",
 ]
 
 app = modal.App("stable-retro-turbo-cpu-benchmarks")
@@ -85,18 +114,22 @@ image = (
         "torch==2.12.1",
         "stable-baselines3==2.9.0",
     )
-    .add_local_dir(REPO_ROOT, REMOTE_REPO, copy=True, ignore=IMAGE_IGNORE)
-    .workdir(REMOTE_REPO)
-    .run_commands(
-        (
-            "CMAKE_ARGS='-DCMAKE_BUILD_TYPE=Release -DBUILD_CORES=nes "
-            "-DBUILD_TESTS=OFF -DENABLE_CAPNPROTO=OFF -DBUILD_N64=OFF' "
-            "STABLE_RETRO_PUBLIC_CORES=fceumm "
-            "STABLE_RETRO_PUBLIC_DATA_PLATFORMS=Nes "
-            "python setup.py build_ext --inplace"
-        ),
-        "python -m pip install --no-build-isolation -e .",
+    .add_local_file(
+        REPO_ROOT / "scripts" / "benchmark_vec_env.py",
+        f"{REMOTE_BENCH}/scripts/benchmark_vec_env.py",
+        copy=True,
     )
+    .add_local_file(
+        REPO_ROOT / "scripts" / "benchmark_sb3_ppo.py",
+        f"{REMOTE_BENCH}/scripts/benchmark_sb3_ppo.py",
+        copy=True,
+    )
+    .add_local_file(
+        REPO_ROOT / "scripts" / "benchmark_vec_env.json",
+        f"{REMOTE_BENCH}/scripts/benchmark_vec_env.json",
+        copy=True,
+    )
+    .workdir(REMOTE_BENCH)
 )
 
 
@@ -128,6 +161,57 @@ def normalize_package_source(package_source: str, package_version: str) -> str:
     if source == "checkout" and package_version.strip():
         raise ValueError("--package-version requires --package-source=version")
     return source
+
+
+def archive_path_ignored(path: Path) -> bool:
+    rel = path.relative_to(REPO_ROOT).as_posix()
+    parts = rel.split("/")
+    ignored_dirs = {
+        ".codex",
+        ".git",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".uv-cache",
+        "artifacts",
+        "build",
+        "CMakeFiles",
+        "docs",
+        "__pycache__",
+        "_CPack_Packages",
+        "tests",
+    }
+    if any(part in ignored_dirs or part.startswith(".venv") for part in parts):
+        return True
+    if parts[:3] == ["stable_retro", "data", "stable"]:
+        if len(parts) < 4 or parts[3] != DEFAULT_GAME:
+            return True
+    if parts[:2] == ["stable_retro", "data"] and len(parts) >= 3:
+        if parts[2] in {"contrib", "experimental"}:
+            return True
+    if parts[0] == "cores" and len(parts) >= 2:
+        if len(parts) != 2 and parts[1] != "nes":
+            return True
+    for pattern in CHECKOUT_ARCHIVE_IGNORE:
+        if fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(path.name, pattern):
+            return True
+    return False
+
+
+def build_checkout_archive() -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+        for path in sorted(REPO_ROOT.rglob("*")):
+            if archive_path_ignored(path) or path.is_dir():
+                continue
+            if not (path.is_file() or path.is_symlink()):
+                continue
+            tar.add(
+                path,
+                arcname=path.relative_to(REPO_ROOT).as_posix(),
+                recursive=False,
+            )
+    return buffer.getvalue()
 
 
 def stat_summary(values: list[float]) -> dict[str, float]:
@@ -170,11 +254,13 @@ def parse_env_output(stdout: str) -> dict[str, Any]:
 def run_checked(
     command: list[str],
     *,
-    cwd: str = REMOTE_REPO,
+    cwd: str = REMOTE_BENCH,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     proc = subprocess.run(
         command,
         cwd=cwd,
+        env=env,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -192,6 +278,7 @@ def run_checked(
 @app.function(image=image, cpu=CPU_REQUEST, memory=MEMORY_MB, timeout=3600)
 def run_benchmark(
     rom_bytes: bytes,
+    checkout_archive_bytes: bytes,
     *,
     package_source: str,
     package_version: str,
@@ -208,25 +295,72 @@ def run_benchmark(
 ) -> dict[str, Any]:
     import os
     import platform
+    import shutil
     import sys
 
     package_source = normalize_package_source(package_source, package_version)
+    scripts_dir = Path(REMOTE_BENCH) / "scripts"
+    benchmark_cwd = "/tmp"
     if package_source == "version":
-        run_checked(["python", "-m", "pip", "uninstall", "-y", "stable-retro-turbo"])
         run_checked(
             [
                 "python",
                 "-m",
                 "pip",
                 "install",
+                "--force-reinstall",
+                "--no-deps",
                 f"stable-retro-turbo=={package_version}",
             ],
         )
         sys.path[:] = [
             path
             for path in sys.path
-            if Path(path or ".").resolve() != Path(REMOTE_REPO)
+            if Path(path or ".").resolve()
+            not in {Path(REMOTE_BENCH), Path(REMOTE_CHECKOUT)}
         ]
+    else:
+        if not checkout_archive_bytes:
+            raise ValueError("checkout archive bytes are required for checkout mode")
+        checkout = Path(REMOTE_CHECKOUT)
+        if checkout.exists():
+            shutil.rmtree(checkout)
+        checkout.mkdir(parents=True, exist_ok=True)
+        archive_buffer = io.BytesIO(checkout_archive_bytes)
+        with tarfile.open(fileobj=archive_buffer, mode="r:gz") as tar:
+            tar.extractall(checkout, filter="data")
+        run_checked(["python", "-m", "pip", "uninstall", "-y", "stable-retro-turbo"])
+        build_env = os.environ.copy()
+        build_env.update(
+            {
+                "CMAKE_ARGS": (
+                    "-DCMAKE_BUILD_TYPE=Release -DBUILD_CORES=nes "
+                    "-DBUILD_TESTS=OFF -DENABLE_CAPNPROTO=OFF -DBUILD_N64=OFF"
+                ),
+                "STABLE_RETRO_PUBLIC_CORES": "fceumm",
+                "STABLE_RETRO_PUBLIC_DATA_PLATFORMS": "Nes",
+            },
+        )
+        run_checked(
+            ["python", "setup.py", "build_ext", "--inplace"],
+            cwd=REMOTE_CHECKOUT,
+            env=build_env,
+        )
+        run_checked(
+            [
+                "python",
+                "-m",
+                "pip",
+                "install",
+                "--no-build-isolation",
+                "--no-deps",
+                "-e",
+                ".",
+            ],
+            cwd=REMOTE_CHECKOUT,
+        )
+        scripts_dir = Path(REMOTE_CHECKOUT) / "scripts"
+        benchmark_cwd = REMOTE_CHECKOUT
 
     import stable_retro
 
@@ -251,11 +385,10 @@ def run_benchmark(
         "affinity_cpu_count": len(os.sched_getaffinity(0))
         if hasattr(os, "sched_getaffinity")
         else None,
-        "remote_repo": REMOTE_REPO,
+        "remote_benchmark_harness": REMOTE_BENCH,
+        "remote_checkout": REMOTE_CHECKOUT if package_source == "checkout" else None,
         "remote_rom_path": str(package_rom),
     }
-    benchmark_cwd = REMOTE_REPO if package_source == "checkout" else "/tmp"
-    scripts_dir = Path(REMOTE_REPO) / "scripts"
     profiles_json = str(scripts_dir / "benchmark_vec_env.json")
 
     import_check = run_checked(
@@ -339,7 +472,7 @@ def run_benchmark(
         ppo_runs.append(result)
 
     return {
-        "kind": "stable-retro-turbo-modal-benchmark-v1",
+        "kind": "stable-retro-turbo-modal-benchmark-v2",
         "target": {
             "package_source": package_source,
             "package_version": package_version if package_source == "version" else None,
@@ -418,8 +551,12 @@ def main(
         raise FileNotFoundError(f"ROM not found: {DEFAULT_ROM}")
 
     rom_bytes = DEFAULT_ROM.read_bytes()
+    checkout_archive_bytes = (
+        build_checkout_archive() if package_source == "checkout" else b""
+    )
     result = run_benchmark.remote(
         rom_bytes,
+        checkout_archive_bytes,
         package_source=package_source,
         package_version=package_version,
         profile=profile,
@@ -458,6 +595,8 @@ def main(
             "smoke": smoke,
             "package_source": package_source,
             "package_version": package_version if package_source == "version" else None,
+            "checkout_archive_bytes": len(checkout_archive_bytes),
+            "checkout_archive_uploaded": package_source == "checkout",
         },
     }
 
