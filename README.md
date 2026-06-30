@@ -112,6 +112,24 @@ one state per env lane, or a `{state_name: weight}` mapping sampled on reset.
 | `info_filter` | Info payload filter: `"all"`, `"terminal"`, `"none"`, or `{"mode": ..., "keys": (...)}`. |
 | `done_on` | General per-lane terminal rules keyed by info-variable `change`, `increase`, or `decrease`. |
 
+## Why SB3 VecEnv?
+
+`RetroVecEnv` is specific to `stable-retro-turbo` and requires
+`stable-baselines3` at runtime because it subclasses SB3's `VecEnv` interface.
+That makes the native vector path usable as a drop-in environment for SB3
+algorithms such as PPO while preserving the vector-env contract SB3 expects:
+batched observations, async step/wait calls, autoreset behavior, terminal
+observations, reset info, and wrapper compatibility.
+
+The advantage is that training code can keep the familiar SB3-facing API while
+the expensive rollout work happens underneath it in native code. Upstream Stable
+Retro users typically combine many Python `RetroEnv` instances through
+`SubprocVecEnv`, `DummyVecEnv`, or Gymnasium vector wrappers, then apply Python
+wrappers for frame skip, resize, grayscale, frame stack, and other preprocessing.
+`stable-retro-turbo` keeps those model-facing semantics, but steps many emulator
+lanes and applies preprocessing in one native batch, reducing Python dispatch,
+process/wrapper overhead, memory copies, and per-frame preprocessing cost.
+
 ## Commands
 
 ```bash
@@ -170,8 +188,7 @@ Modal runs: full env benchmark
 ## Notes
 
 - The import package is `stable_retro`; `retro` remains as a compatibility shim.
-- `RetroVecEnv` requires `stable-baselines3` because it implements the SB3
-  `VecEnv` interface.
+- `RetroVecEnv` is the turbo-specific SB3-compatible vector environment.
 - Source builds and CI cover Python `3.10` through `3.14`; the repo-local
   deterministic release helper currently targets Python `3.14` wheels.
   Building from source also requires CMake, a C/C++ compiler, and platform core
