@@ -25,9 +25,13 @@ uv pip install stable-retro-turbo
 ```python
 import stable_retro as retro  # Uses the upstream-compatible import name.
 
+# RetroVecEnv is a stable-retro-turbo interface
 env = retro.RetroVecEnv(
+    # stable-retro params (all stable-retro params can still be used)
     "SuperMarioBros-Nes-v0",      # Stable Retro game integration.
     state="Level1-1",             # Saved game state to load in each lane.
+
+    # stable-retro-turbo specific params
     num_envs=32,                  # Number of emulator lanes stepped together.
     num_threads=16,               # Native worker threads for those lanes.
     render_mode="rgb_array",      # Return frame arrays instead of opening a window.
@@ -54,45 +58,7 @@ env.close()  # Release native emulator resources.
 
 ## RetroVecEnv Parameters
 
-```python
-retro.RetroVecEnv(
-    game,
-    state=retro.State.DEFAULT,
-    scenario=None,
-    info=None,
-    use_restricted_actions=retro.Actions.FILTERED,
-    record=False,
-    players=1,
-    inttype=retro.data.Integrations.STABLE,
-    obs_type=retro.Observations.IMAGE,
-    render_mode="human",
-    *,
-    num_envs=1,                  # number of emulator lanes in the vector env
-    num_threads=None,            # native worker threads; defaults to num_envs
-    rom_path=None,               # explicit ROM path for direct-ROM or external use
-    obs_resize=None,             # native resize target as (width, height)
-    obs_crop=None,               # native crop before resize
-    obs_grayscale=False,         # convert image observations to grayscale
-    obs_resize_algorithm="nearest", # "nearest", "bilinear", or "area"
-    obs_layout="hwc",            # observation layout: "hwc" or "chw"
-    obs_copy="copy",             # "copy", "safe_view", or "unsafe_view"
-    frame_skip=1,                # repeat each action for this many frames
-    frame_stack=1,               # stack this many processed frames
-    frame_maxpool=False,         # max-pool the last two skipped frames
-    reset_noops=0,               # random no-op frames after reset
-    action_sticky_prob=0.0,      # chance to repeat the previous lane action
-    reward_clip=False,           # clip rewards in the native path
-    info_filter="all",           # "all", "terminal", "none", or mode/keys mapping
-    done_on=None,                # info-variable terminal rules
-)
-```
-
-Inherited fields keep their upstream Stable Retro meaning. The native vector
-path currently supports `players=1`, image observations, and no movie
-recording. `state` also accepts turbo-only multi-state forms: a sequence with
-one state per env lane, or a `{state_name: weight}` mapping sampled on reset.
-
-| Turbo parameter | What it controls |
+| Parameter | What it controls |
 | --- | --- |
 | `num_envs` | Number of emulator lanes in the vector environment. |
 | `num_threads` | Native worker threads; defaults to `num_envs` when omitted. |
