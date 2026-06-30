@@ -10,54 +10,14 @@
   **🚀 Blazing-fast Stable Retro fork with native vectorization and preprocessing 🚀**
 </div>
 
-stable-retro-turbo is a performance-focused Python package for
-reinforcement-learning engineers who use Stable Retro environments and need
-faster batched rollouts. It keeps the familiar `stable_retro` / `retro` import
-surface, then adds `RetroVecEnv`, a native vector environment that moves
-emulator stepping, preprocessing, reward/info handling, and autoreset work out
-of Python.
-
-This repository is only the turbo layer. For inherited Stable Retro material
-such as the full game catalog, emulator support matrix, ROM import workflow,
-integration UI, general tutorials, and community support, use the upstream
-[Farama Stable Retro repository](https://github.com/Farama-Foundation/stable-retro)
-and [Stable Retro docs](https://stable-retro.farama.org/).
+`stable-retro-turbo` is a performance-focused fork of [Stable Retro](https://stable-retro.farama.org/) that accelerates rollouts by moving vectorization and preprocessing entirely into native code.
+That is faster because the hot path avoids repeatedly bouncing between Python and the emulator for each environment step. Instead, many environments can be stepped and transformed in one native batch, reducing Python interpreter overhead, wrapper dispatch, memory copies, and per-frame preprocessing cost. The result is higher rollout throughput, especially when running many parallel environments.
 
 ## Install
 
 ```bash
 uv venv --python 3.14
 uv pip install stable-retro-turbo
-```
-
-For Stable Baselines3 training examples and local tests, add:
-
-```bash
-uv pip install stable-baselines3 pytest
-```
-
-Check the installed package:
-
-```bash
-uv run python - <<'PY'
-import stable_retro as retro
-
-print(retro.__version__.strip())
-print(retro.RetroVecEnv)
-PY
-```
-
-If you only need upstream Stable Retro behavior, install and read upstream
-Stable Retro instead.
-
-For development from source:
-
-```bash
-git clone https://github.com/tsilva/stable-retro-turbo.git
-cd stable-retro-turbo
-uv venv --python 3.14
-uv pip install -e .
-uv pip install stable-baselines3 pytest
 ```
 
 ## Use
@@ -89,9 +49,6 @@ obs = env.reset()
 obs, rewards, dones, infos = env.step([env.action_space.sample() for _ in range(32)])
 env.close()
 ```
-
-`RetroVecEnv` keeps the leading constructor fields aligned with upstream
-`RetroEnv`; turbo-specific controls are keyword-only additions after `*`.
 
 ## RetroVecEnv Parameters
 
