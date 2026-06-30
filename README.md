@@ -23,31 +23,33 @@ uv pip install stable-retro-turbo
 ## Use
 
 ```python
-import stable_retro as retro
+import stable_retro as retro  # Uses the upstream-compatible import name.
 
 env = retro.RetroVecEnv(
-    "SuperMarioBros-Nes-v0",
-    state="Level1-1",
-    num_envs=32,
-    num_threads=16,
-    render_mode="rgb_array",
-    obs_crop=(32, 0, 0, 0),
-    obs_resize=(84, 84),
-    obs_resize_algorithm="area",
-    obs_grayscale=True,
-    obs_layout="chw",
-    obs_copy="safe_view",
-    frame_skip=4,
-    frame_stack=4,
-    frame_maxpool=True,
-    reset_noops=0,
-    action_sticky_prob=0.0,
-    info_filter="terminal",
+    "SuperMarioBros-Nes-v0",      # Stable Retro game integration.
+    state="Level1-1",             # Saved game state to load in each lane.
+    num_envs=32,                  # Number of emulator lanes stepped together.
+    num_threads=16,               # Native worker threads for those lanes.
+    render_mode="rgb_array",      # Return frame arrays instead of opening a window.
+    obs_crop=(32, 0, 0, 0),       # Crop 32 pixels from the top before resizing.
+    obs_resize=(84, 84),          # Resize observations natively for RL input.
+    obs_resize_algorithm="area",  # Area resize is a good downsampling default.
+    obs_grayscale=True,           # Convert RGB frames to grayscale natively.
+    obs_layout="chw",             # Return channel-first tensors for PyTorch/SB3.
+    obs_copy="safe_view",         # Avoid extra copies while keeping observations safe.
+    frame_skip=4,                 # Repeat each action for 4 emulator frames.
+    frame_stack=4,                # Stack the last 4 processed frames.
+    frame_maxpool=True,           # Max-pool recent frames to reduce flicker.
+    reset_noops=0,                # Disable random no-op starts for this example.
+    action_sticky_prob=0.0,       # Disable sticky actions for deterministic stepping.
+    info_filter="terminal",       # Only return full info payloads at episode end.
 )
 
-obs = env.reset()
-obs, rewards, dones, infos = env.step([env.action_space.sample() for _ in range(32)])
-env.close()
+obs = env.reset()  # Shape follows the native preprocessing choices above.
+obs, rewards, dones, infos = env.step(
+    [env.action_space.sample() for _ in range(32)]  # One action per env lane.
+)
+env.close()  # Release native emulator resources.
 ```
 
 ## RetroVecEnv Parameters
