@@ -18,6 +18,9 @@ except ImportError:  # pragma: no cover - import remains cheap without SB3.
     VecEnv = object
 
 
+_UNSET = object()
+
+
 class RetroVecEnv(VecEnv):
     """SB3-compatible native vector env for stable-retro rollouts.
 
@@ -30,16 +33,16 @@ class RetroVecEnv(VecEnv):
     normalized and sampled independently for each env on every episode reset.
 
     Native info-transition termination is opt-in and game/config-specific.
-    Pass done_on_info={"name": ["key", "decrease"]} to terminate and autoreset
+    Pass done_on={"name": ("key", "decrease")} to terminate and autoreset
     only lanes whose post-reset baseline changes as requested. Supported ops
     are "change", "increase", and "decrease"; keys may be a string or a
     sequence of strings. Fired rules are reported in info["done_on_info"] with
     list-shaped "keys", "prev", and "next" values, including one-element lists
     for single-key rules.
 
-    With copy_observations=False, returned observations are double-buffered so
-    the previous observation survives the next step for SB3 rollout collection.
-    unsafe_zero_copy=True restores single-buffer aliasing for benchmarks only.
+    obs_copy="safe_view" returns double-buffered observation views so the
+    previous observation survives the next step for SB3 rollout collection.
+    obs_copy="unsafe_view" restores single-buffer aliasing for benchmarks only.
     """
 
     def __init__(
@@ -58,22 +61,28 @@ class RetroVecEnv(VecEnv):
         num_envs: int = 1,
         num_threads: int | None = None,
         rom_path: str | None = None,
-        copy_observations: bool = True,
+        obs_copy="copy",
         obs_resize=None,
         obs_crop=None,
         obs_grayscale=False,
         obs_resize_algorithm="nearest",
+        obs_layout="hwc",
         frame_skip=1,
         frame_stack=1,
-        maxpool_last_two=False,
-        noop_reset_max=0,
-        sticky_action_prob=0.0,
+        frame_maxpool=False,
+        reset_noops=0,
+        action_sticky_prob=0.0,
         reward_clip=False,
-        info_mode="all",
-        info_keys=None,
-        obs_layout="hwc",
-        done_on_info=None,
-        unsafe_zero_copy=False,
+        info_filter="all",
+        done_on=None,
+        copy_observations=_UNSET,
+        maxpool_last_two=_UNSET,
+        noop_reset_max=_UNSET,
+        sticky_action_prob=_UNSET,
+        info_mode=_UNSET,
+        info_keys=_UNSET,
+        done_on_info=_UNSET,
+        unsafe_zero_copy=_UNSET,
     ):
         if VecEnv is object:
             raise ImportError(
@@ -98,6 +107,45 @@ class RetroVecEnv(VecEnv):
         self._actions = None
         self._observations = None
 
+        frame_maxpool = self._resolve_legacy_alias(
+            "frame_maxpool",
+            frame_maxpool,
+            "maxpool_last_two",
+            maxpool_last_two,
+            False,
+        )
+        reset_noops = self._resolve_legacy_alias(
+            "reset_noops",
+            reset_noops,
+            "noop_reset_max",
+            noop_reset_max,
+            0,
+        )
+        action_sticky_prob = self._resolve_legacy_alias(
+            "action_sticky_prob",
+            action_sticky_prob,
+            "sticky_action_prob",
+            sticky_action_prob,
+            0.0,
+        )
+        info_mode, info_keys = self._normalize_info_filter(
+            info_filter,
+            info_mode,
+            info_keys,
+        )
+        done_on = self._resolve_legacy_alias(
+            "done_on",
+            done_on,
+            "done_on_info",
+            done_on_info,
+            None,
+        )
+        copy_observations, unsafe_zero_copy = self._normalize_obs_copy(
+            obs_copy,
+            copy_observations,
+            unsafe_zero_copy,
+        )
+
         env_kwargs = {
             "use_restricted_actions": use_restricted_actions,
             "record": record,
@@ -110,28 +158,23 @@ class RetroVecEnv(VecEnv):
             "obs_resize_algorithm": obs_resize_algorithm,
             "frame_skip": frame_skip,
             "frame_stack": frame_stack,
-            "maxpool_last_two": maxpool_last_two,
-            "noop_reset_max": noop_reset_max,
-            "sticky_action_prob": sticky_action_prob,
+            "maxpool_last_two": frame_maxpool,
+            "noop_reset_max": reset_noops,
+            "sticky_action_prob": action_sticky_prob,
             "reward_clip": reward_clip,
         }
-        info_mode = str(info_mode)
-        if isinstance(info_keys, str):
-            raise ValueError("info_keys must be a sequence of strings, not a string")
-        if info_keys is not None:
-            info_keys = [str(key) for key in info_keys]
-        unsafe_zero_copy = bool(unsafe_zero_copy)
-        done_on_info_rules = self._normalize_done_on_info(done_on_info)
+        done_on_info_rules = self._normalize_done_on(done_on, label="done_on")
         obs_layout = str(obs_layout).lower()
         if obs_layout not in {"hwc", "chw"}:
             raise ValueError("obs_layout must be 'hwc' or 'chw'")
         self.obs_layout = obs_layout
-        self.copy_observations = bool(copy_observations)
+        self.obs_copy = (
+            "unsafe_view"
+            if unsafe_zero_copy
+            else "copy" if copy_observations else "safe_view"
+        )
+        self.copy_observations = copy_observations
         self.unsafe_zero_copy = unsafe_zero_copy
-        if self.copy_observations and self.unsafe_zero_copy:
-            raise ValueError(
-                "unsafe_zero_copy=True is only valid with copy_observations=False",
-            )
         self.render_mode = render_mode
         if players != 1:
             raise ValueError("RetroVecEnv currently supports players=1")
@@ -278,28 +321,109 @@ class RetroVecEnv(VecEnv):
         )
 
     @staticmethod
-    def _normalize_done_on_info(done_on_info):
+    def _resolve_legacy_alias(new_name, new_value, old_name, old_value, default):
+        if old_value is _UNSET:
+            return new_value
+        if new_value != default:
+            raise ValueError(f"cannot pass both {new_name} and {old_name}")
+        return old_value
+
+    @staticmethod
+    def _normalize_obs_copy(obs_copy, copy_observations, unsafe_zero_copy):
+        if copy_observations is not _UNSET or unsafe_zero_copy is not _UNSET:
+            if obs_copy != "copy":
+                raise ValueError(
+                    "cannot pass both obs_copy and copy_observations/unsafe_zero_copy",
+                )
+            legacy_copy = (
+                True
+                if copy_observations is _UNSET
+                else bool(copy_observations)
+            )
+            legacy_unsafe = (
+                False
+                if unsafe_zero_copy is _UNSET
+                else bool(unsafe_zero_copy)
+            )
+            if legacy_copy and legacy_unsafe:
+                raise ValueError(
+                    "unsafe_zero_copy=True is only valid with copy_observations=False",
+                )
+            return legacy_copy, legacy_unsafe
+
+        if isinstance(obs_copy, bool):
+            raise ValueError(
+                "obs_copy must be 'copy', 'safe_view', or 'unsafe_view'",
+            )
+        mode = str(obs_copy).lower()
+        if mode == "copy":
+            return True, False
+        if mode == "safe_view":
+            return False, False
+        if mode == "unsafe_view":
+            return False, True
+        raise ValueError("obs_copy must be 'copy', 'safe_view', or 'unsafe_view'")
+
+    @classmethod
+    def _normalize_info_filter(cls, info_filter, info_mode, info_keys):
+        if info_mode is not _UNSET or info_keys is not _UNSET:
+            if info_filter != "all":
+                raise ValueError(
+                    "cannot pass both info_filter and info_mode/info_keys",
+                )
+            mode = "all" if info_mode is _UNSET else str(info_mode)
+            keys = None if info_keys is _UNSET else info_keys
+            return mode, cls._normalize_info_keys(keys)
+
+        if info_filter is None:
+            return "all", None
+        if isinstance(info_filter, str):
+            return str(info_filter), None
+        if not isinstance(info_filter, Mapping):
+            raise ValueError(
+                "info_filter must be a mode string or a mapping with mode/keys",
+            )
+        unknown = set(info_filter) - {"mode", "keys"}
+        if unknown:
+            names = ", ".join(sorted(str(key) for key in unknown))
+            raise ValueError(f"unknown info_filter keys: {names}")
+        mode = str(info_filter.get("mode", "all"))
+        keys = cls._normalize_info_keys(info_filter.get("keys", None))
+        return mode, keys
+
+    @staticmethod
+    def _normalize_info_keys(info_keys):
+        if isinstance(info_keys, str):
+            raise ValueError(
+                "info_filter keys must be a sequence of strings, not a string",
+            )
+        if info_keys is None:
+            return None
+        return [str(key) for key in info_keys]
+
+    @staticmethod
+    def _normalize_done_on(done_on, *, label):
         rules = {}
-        if done_on_info is not None:
-            if not isinstance(done_on_info, Mapping):
-                raise ValueError("done_on_info must be a mapping of rule names to (keys, op)")
-            for raw_name, spec in done_on_info.items():
+        if done_on is not None:
+            if not isinstance(done_on, Mapping):
+                raise ValueError(f"{label} must be a mapping of rule names to (keys, op)")
+            for raw_name, spec in done_on.items():
                 name = str(raw_name)
                 if not name:
-                    raise ValueError("done_on_info rule names must not be empty")
+                    raise ValueError(f"{label} rule names must not be empty")
                 if not (
                     isinstance(spec, Sequence)
                     and not isinstance(spec, (str, bytes, bytearray))
                     and len(spec) == 2
                 ):
                     raise ValueError(
-                        "done_on_info values must be (key_or_keys, op) pairs",
+                        f"{label} values must be (key_or_keys, op) pairs",
                     )
                 raw_keys, raw_op = spec
                 op = str(raw_op)
                 if op not in {"change", "increase", "decrease"}:
                     raise ValueError(
-                        "done_on_info ops must be 'change', 'increase', or 'decrease'",
+                        f"{label} ops must be 'change', 'increase', or 'decrease'",
                     )
                 if isinstance(raw_keys, str):
                     keys = (raw_keys,)
@@ -310,14 +434,18 @@ class RetroVecEnv(VecEnv):
                     keys = tuple(str(key) for key in raw_keys)
                 else:
                     raise ValueError(
-                        "done_on_info keys must be a string or sequence of strings",
+                        f"{label} keys must be a string or sequence of strings",
                     )
                 if not keys or any(not key for key in keys):
-                    raise ValueError("done_on_info rules must reference at least one key")
+                    raise ValueError(f"{label} rules must reference at least one key")
                 rules[name] = (keys, op)
         if not rules:
             return None
         return tuple((name, keys, op) for name, (keys, op) in rules.items())
+
+    @staticmethod
+    def _normalize_done_on_info(done_on_info):
+        return RetroVecEnv._normalize_done_on(done_on_info, label="done_on_info")
 
     @staticmethod
     def _observation_space_for_layout(observation_space, obs_layout):

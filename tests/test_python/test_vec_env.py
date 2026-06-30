@@ -270,6 +270,63 @@ def test_stable_retro_native_vec_env_done_on_info_validation():
         )
 
 
+def test_stable_retro_native_vec_env_new_keyword_normalization():
+    pytest.importorskip("stable_baselines3")
+    from stable_retro.vec_env import RetroVecEnv, _UNSET
+
+    assert RetroVecEnv._normalize_obs_copy("copy", _UNSET, _UNSET) == (
+        True,
+        False,
+    )
+    assert RetroVecEnv._normalize_obs_copy("safe_view", _UNSET, _UNSET) == (
+        False,
+        False,
+    )
+    assert RetroVecEnv._normalize_obs_copy("unsafe_view", _UNSET, _UNSET) == (
+        False,
+        True,
+    )
+    assert RetroVecEnv._normalize_info_filter(
+        {"mode": "terminal", "keys": ("lives", "x_pos")},
+        _UNSET,
+        _UNSET,
+    ) == ("terminal", ["lives", "x_pos"])
+    assert RetroVecEnv._normalize_done_on(
+        {"life_loss": ("lives", "decrease")},
+        label="done_on",
+    ) == (("life_loss", ("lives",), "decrease"),)
+
+
+def test_stable_retro_native_vec_env_accepts_new_keyword_shape(tmp_path):
+    pytest.importorskip("stable_baselines3")
+
+    env = _make_test_native_vec_env(
+        tmp_path,
+        obs_layout="chw",
+        obs_copy="safe_view",
+        frame_maxpool=True,
+        reset_noops=0,
+        action_sticky_prob=0.0,
+        info_filter="terminal",
+    )
+    try:
+        obs = env.reset()
+        assert env.obs_copy == "safe_view"
+        assert env.copy_observations is False
+        assert env.unsafe_zero_copy is False
+        assert obs.shape == (2, 4, 84, 84)
+
+        actions = np.zeros((env.num_envs, env.num_buttons), dtype=np.uint8)
+        obs, rewards, dones, infos = env.step(actions)
+
+        assert obs.shape == (2, 4, 84, 84)
+        assert rewards.shape == (2,)
+        assert dones.tolist() == [False, False]
+        assert infos == [{}, {}]
+    finally:
+        env.close()
+
+
 def test_stable_retro_native_vec_env_validates_mixed_state_config():
     pytest.importorskip("stable_baselines3")
     import stable_retro as retro

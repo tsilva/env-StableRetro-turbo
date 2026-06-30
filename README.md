@@ -75,10 +75,14 @@ env = retro.RetroVecEnv(
     obs_resize=(84, 84),
     obs_resize_algorithm="area",
     obs_grayscale=True,
+    obs_layout="chw",
+    obs_copy="safe_view",
     frame_skip=4,
     frame_stack=4,
-    maxpool_last_two=True,
-    info_mode="terminal",
+    frame_maxpool=True,
+    reset_noops=0,
+    action_sticky_prob=0.0,
+    info_filter="terminal",
 )
 
 obs = env.reset()
@@ -107,22 +111,20 @@ retro.RetroVecEnv(
     num_envs=1,                  # number of emulator lanes in the vector env
     num_threads=None,            # native worker threads; defaults to num_envs
     rom_path=None,               # explicit ROM path for direct-ROM or external use
-    copy_observations=True,      # copy obs arrays; disable for fewer copies
     obs_resize=None,             # native resize target as (width, height)
     obs_crop=None,               # native crop before resize
     obs_grayscale=False,         # convert image observations to grayscale
     obs_resize_algorithm="nearest", # "nearest", "bilinear", or "area"
+    obs_layout="hwc",            # observation layout: "hwc" or "chw"
+    obs_copy="copy",             # "copy", "safe_view", or "unsafe_view"
     frame_skip=1,                # repeat each action for this many frames
     frame_stack=1,               # stack this many processed frames
-    maxpool_last_two=False,      # max-pool the last two skipped frames
-    noop_reset_max=0,            # random no-op frames after reset
-    sticky_action_prob=0.0,      # chance to repeat the previous lane action
+    frame_maxpool=False,         # max-pool the last two skipped frames
+    reset_noops=0,               # random no-op frames after reset
+    action_sticky_prob=0.0,      # chance to repeat the previous lane action
     reward_clip=False,           # clip rewards in the native path
-    info_mode="all",             # info payload mode: "all", "terminal", or "none"
-    info_keys=None,              # optional info variable names to emit
-    obs_layout="hwc",            # observation layout: "hwc" or "chw"
-    done_on_info=None,           # info-variable terminal rules
-    unsafe_zero_copy=False,      # benchmark-only single-buffer aliasing
+    info_filter="all",           # "all", "terminal", "none", or mode/keys mapping
+    done_on=None,                # info-variable terminal rules
 )
 ```
 
@@ -136,22 +138,20 @@ one state per env lane, or a `{state_name: weight}` mapping sampled on reset.
 | `num_envs` | Number of emulator lanes in the vector environment. |
 | `num_threads` | Native worker threads; defaults to `num_envs` when omitted. |
 | `rom_path` | Explicit ROM path for direct-ROM tests or external integrations. |
-| `copy_observations` | Return copied observations; disable to reduce copies while keeping SB3-safe double buffering. |
 | `obs_resize` | Native resize target as `(width, height)`. |
 | `obs_crop` | Native crop before resize, using the same crop contract as `RetroEnv`. |
 | `obs_grayscale` | Convert image observations to grayscale natively. |
 | `obs_resize_algorithm` | Resize algorithm: `"nearest"`, `"bilinear"`, or `"area"`. |
+| `obs_layout` | Observation layout: `"hwc"` or `"chw"`. |
+| `obs_copy` | Observation ownership mode: `"copy"`, `"safe_view"`, or benchmark-only `"unsafe_view"`. |
 | `frame_skip` | Repeat each action for this many emulator frames. |
 | `frame_stack` | Stack this many processed frames in each returned observation. |
-| `maxpool_last_two` | Max-pool the last two skipped frames before preprocessing. |
-| `noop_reset_max` | Apply up to this many random no-op frames after reset. |
-| `sticky_action_prob` | Probability of repeating the previous lane action instead of the requested action. |
+| `frame_maxpool` | Max-pool the last two skipped frames before preprocessing. |
+| `reset_noops` | Apply up to this many random no-op frames after reset. |
+| `action_sticky_prob` | Probability of repeating the previous lane action instead of the requested action. |
 | `reward_clip` | Clip rewards with the same semantics as the single-env preprocessing path. |
-| `info_mode` | Info payload mode: `"all"`, `"terminal"`, or `"none"`. |
-| `info_keys` | Optional sequence of info variable names to emit. |
-| `obs_layout` | Observation layout: `"hwc"` or `"chw"`. |
-| `done_on_info` | General per-lane terminal rules keyed by info-variable `change`, `increase`, or `decrease`. |
-| `unsafe_zero_copy` | Benchmark-only single-buffer observation aliasing; requires `copy_observations=False`. |
+| `info_filter` | Info payload filter: `"all"`, `"terminal"`, `"none"`, or `{"mode": ..., "keys": (...)}`. |
+| `done_on` | General per-lane terminal rules keyed by info-variable `change`, `increase`, or `decrease`. |
 
 ## Commands
 
@@ -219,10 +219,10 @@ Modal runs: full env benchmark
   build dependencies.
 - ROMs are not included. Import ROMs and read game/core docs through upstream
   Stable Retro unless the work is specifically about this turbo layer.
-- `done_on_info` terminates and autoresets only lanes whose configured
+- `done_on` terminates and autoresets only lanes whose configured
   info-variable rule fires. Supported ops are `change`, `increase`, and
   `decrease`.
-- Use `done_on_info={"life_loss": ["lives", "decrease"]}` for first-life-loss
+- Use `done_on={"life_loss": ("lives", "decrease")}` for first-life-loss
   terminal transitions.
 - `active_state_indices()` returns a read-only `int32` NumPy view for
   task-conditioned training; copy it when you need a stable snapshot.

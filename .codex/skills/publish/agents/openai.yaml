@@ -1,0 +1,4 @@
+interface:
+  display_name: "Publish"
+  short_description: "Publish next stable-retro-turbo wheels"
+  default_prompt: "Use $publish to build and validate the next post-version macOS and Linux wheels."
