@@ -92,25 +92,25 @@ path currently supports `players=1`, image observations, and no movie
 recording. `state` also accepts turbo-only multi-state forms: a sequence with
 one state per env lane, or a `{state_name: weight}` mapping sampled on reset.
 
-| Turbo parameter | What it controls |
-| --- | --- |
-| `num_envs` | Number of emulator lanes in the vector environment. |
-| `num_threads` | Native worker threads; defaults to `num_envs` when omitted. |
-| `rom_path` | Explicit ROM path for direct-ROM tests or external integrations. |
-| `obs_resize` | Native resize target as `(width, height)`. |
-| `obs_crop` | Native crop before resize, using the same crop contract as `RetroEnv`. |
-| `obs_grayscale` | Convert image observations to grayscale natively. |
-| `obs_resize_algorithm` | Resize algorithm: `"nearest"`, `"bilinear"`, or `"area"`. |
-| `obs_layout` | Observation layout: `"hwc"` or `"chw"`. |
-| `obs_copy` | Observation ownership mode: `"copy"`, `"safe_view"`, or benchmark-only `"unsafe_view"`. |
-| `frame_skip` | Repeat each action for this many emulator frames. |
-| `frame_stack` | Stack this many processed frames in each returned observation. |
-| `frame_maxpool` | Max-pool the last two skipped frames before preprocessing. |
-| `reset_noops` | Apply up to this many random no-op frames after reset. |
-| `action_sticky_prob` | Probability of repeating the previous lane action instead of the requested action. |
-| `reward_clip` | Clip rewards with the same semantics as the single-env preprocessing path. |
-| `info_filter` | Info payload filter: `"all"`, `"terminal"`, `"none"`, or `{"mode": ..., "keys": (...)}`. |
-| `done_on` | General per-lane terminal rules keyed by info-variable `change`, `increase`, or `decrease`. |
+| Turbo parameter | Default | What it controls |
+| --- | --- | --- |
+| `num_envs` | `1` | Number of emulator lanes in the vector environment. |
+| `num_threads` | `None` (`num_envs`) | Native worker threads; when omitted, uses one worker per env lane. |
+| `rom_path` | `None` | Explicit ROM path for direct-ROM tests or external integrations. |
+| `obs_resize` | `None` | Native resize target as `(width, height)`. |
+| `obs_crop` | `None` | Native crop before resize, using the same crop contract as `RetroEnv`. |
+| `obs_grayscale` | `False` | Convert image observations to grayscale natively. |
+| `obs_resize_algorithm` | `"nearest"` | Resize algorithm: `"nearest"`, `"bilinear"`, or `"area"`. |
+| `obs_layout` | `"hwc"` | Observation layout: `"hwc"` or `"chw"`. |
+| `obs_copy` | `"copy"` | Observation ownership mode: `"copy"`, `"safe_view"`, or benchmark-only `"unsafe_view"`. |
+| `frame_skip` | `1` | Repeat each action for this many emulator frames. |
+| `frame_stack` | `1` | Stack this many processed frames in each returned observation. |
+| `frame_maxpool` | `False` | Max-pool the last two skipped frames before preprocessing. |
+| `reset_noops` | `0` | Apply up to this many random no-op frames after reset. |
+| `action_sticky_prob` | `0.0` | Probability of repeating the previous lane action instead of the requested action. |
+| `reward_clip` | `False` | Clip rewards with the same semantics as the single-env preprocessing path. |
+| `info_filter` | `"all"` | Info payload filter: `"all"`, `"terminal"`, `"none"`, or `{"mode": ..., "keys": (...)}`. |
+| `done_on` | `None` | General per-lane terminal rules keyed by info-variable `change`, `increase`, or `decrease`. |
 
 ## Why SB3 VecEnv?
 
