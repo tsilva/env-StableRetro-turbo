@@ -28,6 +28,8 @@ Compared with upstream Stable Retro's single-environment `RetroEnv` API,
   lane.
 - Weighted multi-state sampling: pass `{state_name: weight}` to sample a new
   start state independently for each lane on reset and lane autoreset.
+- Expanded `SuperMarioBros-Nes-v0` saved-state coverage, including the Level 1
+  and Level 2 start states that upstream Stable Retro does not ship.
 - Active-state tracking through `active_state_indices()` and `active_states()`,
   plus `start_state` / `state` entries in reset info when multiple start states
   are configured.
