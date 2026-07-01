@@ -17,32 +17,34 @@
 Compared with upstream Stable Retro's single-environment `RetroEnv` API,
 `stable-retro-turbo` adds a training-oriented fast path:
 
-- `RetroVecEnv`, an SB3-compatible native vector environment with `num_envs`
-  emulator lanes and `num_threads` native worker threads.
-- Native fused preprocessing for crop, resize, grayscale conversion,
+- **Native vector environment**: `RetroVecEnv` provides an SB3-compatible fast
+  path with `num_envs` emulator lanes and `num_threads` native worker threads.
+- **Fused native preprocessing**: Crop, resize, grayscale conversion,
   channel-first layout, frame skip, frame stack, two-frame max-pool, and reward
-  clipping.
-- Lane-local autoreset, including SB3-style `terminal_observation`,
-  `reset_info`, and `TimeLimit.truncated=False` metadata for lanes that ended.
-- Multi-state lane assignment: pass a state sequence to pin one start state per
+  clipping can run inside the native rollout path.
+- **Lane-local autoreset**: Ended lanes reset without resetting the whole
+  vector, while preserving SB3-style `terminal_observation`, `reset_info`, and
+  `TimeLimit.truncated=False` metadata.
+- **Multi-state lane assignment**: A state sequence pins one start state per
   lane.
-- Weighted multi-state sampling: pass `{state_name: weight}` to sample a new
-  start state independently for each lane on reset and lane autoreset.
-- Expanded `SuperMarioBros-Nes-v0` saved-state coverage, including the Level 1
+- **Weighted multi-state sampling**: A `{state_name: weight}` mapping samples a
+  new start state independently for each lane on reset and lane autoreset.
+- **Expanded Mario saved states**: `SuperMarioBros-Nes-v0` includes the Level 1
   and Level 2 start states that upstream Stable Retro does not ship.
-- Active-state tracking through `active_state_indices()` and `active_states()`,
-  plus `start_state` / `state` entries in reset info when multiple start states
-  are configured.
-- Per-lane info-transition terminals with `done_on`, supporting `change`,
+- **Active-state tracking**: `active_state_indices()` and `active_states()`
+  expose each lane's current start state, with `start_state` / `state` entries
+  in reset info when multiple start states are configured.
+- **Per-lane info-transition terminals**: `done_on` supports `change`,
   `increase`, and `decrease` rules such as first-life-loss termination.
-- Native info filtering with `info_filter="all"`, `"terminal"`, `"none"`, or a
-  selected key list to avoid building large info dicts every step.
-- Observation ownership modes with `obs_copy="copy"`, `"safe_view"`, and
-  benchmark-only `"unsafe_view"`.
-- Sticky actions and random no-op resets through `action_sticky_prob` and
-  `reset_noops`.
-- Explicit `rom_path` loading for benchmark and external-integration workflows
-  that should not depend on an imported ROM lookup.
+- **Native info filtering**: `info_filter="all"`, `"terminal"`, `"none"`, or a
+  selected key list avoids building large info dicts every step.
+- **Observation ownership modes**: `obs_copy="copy"`, `"safe_view"`, and
+  benchmark-only `"unsafe_view"` let callers trade copying for view reuse.
+- **Sticky actions and no-op resets**: `action_sticky_prob` and `reset_noops`
+  add common Atari-style rollout stochasticity knobs.
+- **Explicit ROM paths**: `rom_path` supports benchmark and
+  external-integration workflows that should not depend on an imported ROM
+  lookup.
 
 ## Install
 
