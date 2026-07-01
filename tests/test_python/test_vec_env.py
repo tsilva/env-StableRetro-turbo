@@ -253,47 +253,129 @@ def test_stable_retro_native_vec_env_done_on_info_validation():
 
     assert normalize(
         {"level_change": [["levelHi", "levelLo"], "change"]},
-    ) == (("level_change", ("levelHi", "levelLo"), "change"),)
+    ) == (("level_change", "default", ("levelHi", "levelLo"), "change", "reset"),)
 
     assert normalize(
         {"life_loss": ("health", "decrease")},
-    ) == (("life_loss", ("health",), "decrease"),)
+    ) == (("life_loss", "default", ("health",), "decrease", "reset"),)
+
+    assert normalize(
+        {
+            "life_loss": {
+                "description": "Player lost a life.",
+                "triggers": [
+                    {
+                        "id": "lives_decrease",
+                        "variables": ["lives"],
+                        "op": "decrease",
+                        "compare": "reset",
+                    },
+                    {
+                        "id": "health_decrease",
+                        "variables": ["health"],
+                        "op": "decrease",
+                    },
+                ],
+            },
+        },
+    ) == (
+        ("life_loss", "lives_decrease", ("lives",), "decrease", "reset"),
+        ("life_loss", "health_decrease", ("health",), "decrease", "reset"),
+    )
 
     with pytest.raises(ValueError, match="done_on_info ops"):
         normalize(
             {"bad": ("lives", "less")},
         )
 
-    with pytest.raises(ValueError, match="at least one key"):
+    with pytest.raises(ValueError, match="at least one variable"):
         normalize(
             {"bad": ((), "change")},
         )
 
 
-def test_stable_retro_native_vec_env_resolves_metadata_done_on_events():
+def test_stable_retro_native_vec_env_resolves_scenario_done_on_events(tmp_path):
     pytest.importorskip("stable_baselines3")
+    import stable_retro as retro
     from stable_retro.vec_env import RetroVecEnv
 
+    scenario_path = retro.data.get_file_path(
+        "SuperMarioBros-Nes-v0",
+        "scenario.json",
+    )
     assert RetroVecEnv._normalize_done_on(
         ["life_loss", "level_change"],
         label="done_on",
         game="SuperMarioBros-Nes-v0",
+        scenario_path=scenario_path,
     ) == (
-        ("life_loss", ("lives",), "decrease"),
-        ("level_change", ("levelHi", "levelLo"), "change"),
+        ("life_loss", "lives_decrease", ("lives",), "decrease", "reset"),
+        ("level_change", "level_bytes_changed", ("levelHi", "levelLo"), "change", "reset"),
     )
 
     assert RetroVecEnv._normalize_done_on(
         {"life_loss": None},
         label="done_on",
         game="SuperMarioBros-Nes-v0",
-    ) == (("life_loss", ("lives",), "decrease"),)
+        scenario_path=scenario_path,
+    ) == (("life_loss", "lives_decrease", ("lives",), "decrease", "reset"),)
+
+    custom_scenario = tmp_path / "scenario.json"
+    custom_scenario.write_text(
+        """
+{
+  "events": {
+    "screen_change": {
+      "description": "Screen identifier changed.",
+      "triggers": [
+        {
+          "id": "screen_bytes_changed",
+          "variables": ["screenHi", "screenLo"],
+          "op": "change",
+          "compare": "reset"
+        },
+        {
+          "id": "room_changed",
+          "variables": "room",
+          "op": "change"
+        }
+      ]
+    }
+  },
+  "done": {
+    "variables": {
+      "lives": {
+        "op": "equal",
+        "reference": 0
+      }
+    }
+  },
+  "reward": {
+    "variables": {
+      "score": {
+        "reward": 1.0
+      }
+    }
+  }
+}
+""",
+        encoding="utf-8",
+    )
+    assert RetroVecEnv._normalize_done_on(
+        ["screen_change"],
+        label="done_on",
+        scenario_path=str(custom_scenario),
+    ) == (
+        ("screen_change", "screen_bytes_changed", ("screenHi", "screenLo"), "change", "reset"),
+        ("screen_change", "room_changed", ("room",), "change", "reset"),
+    )
 
     with pytest.raises(ValueError, match="unknown configured event"):
         RetroVecEnv._normalize_done_on(
             ["boss_clear"],
             label="done_on",
             game="SuperMarioBros-Nes-v0",
+            scenario_path=scenario_path,
         )
 
 
@@ -321,7 +403,7 @@ def test_stable_retro_native_vec_env_new_keyword_normalization():
     assert RetroVecEnv._normalize_done_on(
         {"life_loss": ("lives", "decrease")},
         label="done_on",
-    ) == (("life_loss", ("lives",), "decrease"),)
+    ) == (("life_loss", "default", ("lives",), "decrease", "reset"),)
 
 
 def test_stable_retro_native_vec_env_accepts_new_keyword_shape(tmp_path):
@@ -534,8 +616,11 @@ def test_stable_retro_native_vec_env_done_on_info_life_loss_autoresets_only_one_
             assert dones.tolist() == [True, False]
             np.testing.assert_array_equal(obs[1], baseline_obs[1])
             payload = infos[0]["done_on_info"]["life_loss"]
+            assert payload["trigger"] == "default"
+            assert payload["compare"] == "reset"
             assert payload["op"] == "decrease"
             assert payload["keys"] == ["lives"]
+            assert payload["variables"] == ["lives"]
             assert payload["next"][0] < payload["prev"][0]
             assert "terminal_observation" in infos[0]
             assert "terminal_observation" not in infos[1]
@@ -581,8 +666,11 @@ def test_stable_retro_native_vec_env_done_on_info_autoresets_only_changed_lane()
             assert dones.tolist() == [True, False]
             np.testing.assert_array_equal(obs[1], baseline_obs[1])
             payload = infos[0]["done_on_info"]["scroll_change"]
+            assert payload["trigger"] == "default"
+            assert payload["compare"] == "reset"
             assert payload["op"] == "change"
             assert payload["keys"] == ["xscrollHi", "xscrollLo"]
+            assert payload["variables"] == ["xscrollHi", "xscrollLo"]
             assert len(payload["prev"]) == 2
             assert len(payload["next"]) == 2
             assert payload["prev"] != payload["next"]
@@ -597,7 +685,7 @@ def test_stable_retro_native_vec_env_done_on_info_autoresets_only_changed_lane()
         baseline_env.close()
 
 
-def test_stable_retro_native_vec_env_done_on_info_reports_multiple_rules_same_step():
+def test_stable_retro_native_vec_env_done_on_info_reports_multiple_triggers_same_event():
     pytest.importorskip("stable_baselines3")
 
     rom_path = _mario_rom_path_or_skip()
@@ -606,8 +694,20 @@ def test_stable_retro_native_vec_env_done_on_info_reports_multiple_rules_same_st
         rom_path,
         info_mode="terminal",
         done_on_info={
-            "life_loss": ["lives", "decrease"],
-            "level_change": ["lives", "change"],
+            "life_loss": {
+                "triggers": [
+                    {
+                        "id": "lives_decrease",
+                        "variables": "lives",
+                        "op": "decrease",
+                    },
+                    {
+                        "id": "lives_change",
+                        "variables": "lives",
+                        "op": "change",
+                    },
+                ],
+            },
         },
     )
     try:
@@ -620,15 +720,21 @@ def test_stable_retro_native_vec_env_done_on_info_reports_multiple_rules_same_st
                 continue
 
             done_on_info = infos[0]["done_on_info"]
-            assert set(done_on_info) == {"life_loss", "level_change"}
-            assert done_on_info["life_loss"]["op"] == "decrease"
-            assert done_on_info["life_loss"]["keys"] == ["lives"]
-            assert done_on_info["life_loss"]["next"][0] < (
-                done_on_info["life_loss"]["prev"][0]
-            )
-            assert done_on_info["level_change"]["op"] == "change"
-            assert done_on_info["level_change"]["keys"] == ["lives"]
-            assert done_on_info["level_change"]["next"] != done_on_info["level_change"]["prev"]
+            assert set(done_on_info) == {"life_loss"}
+            life_loss = done_on_info["life_loss"]
+            assert life_loss["trigger"] == "lives_decrease"
+            assert life_loss["op"] == "decrease"
+            assert life_loss["compare"] == "reset"
+            assert life_loss["variables"] == ["lives"]
+            assert life_loss["next"][0] < life_loss["prev"][0]
+            assert [trigger["trigger"] for trigger in life_loss["triggers"]] == [
+                "lives_decrease",
+                "lives_change",
+            ]
+            assert [trigger["op"] for trigger in life_loss["triggers"]] == [
+                "decrease",
+                "change",
+            ]
             return
 
         pytest.fail("Mario did not lose a life within the test step budget")
@@ -1331,7 +1437,7 @@ def test_stable_retro_native_vec_env_mario_life_decrease_terminates_if_rom_prese
         maxpool_last_two=True,
         num_threads=1,
         info_mode="terminal",
-        done_on_info={"life_loss": ["lives", "decrease"]},
+        done_on=["life_loss"],
     )
     try:
         env.reset()
@@ -1345,8 +1451,11 @@ def test_stable_retro_native_vec_env_mario_life_decrease_terminates_if_rom_prese
                 continue
 
             payload = infos[0]["done_on_info"]["life_loss"]
+            assert payload["trigger"] == "lives_decrease"
+            assert payload["compare"] == "reset"
             assert payload["op"] == "decrease"
             assert payload["keys"] == ["lives"]
+            assert payload["variables"] == ["lives"]
             assert payload["next"][0] < payload["prev"][0]
             assert "terminal_observation" in infos[0]
             return
@@ -1354,6 +1463,58 @@ def test_stable_retro_native_vec_env_mario_life_decrease_terminates_if_rom_prese
         pytest.fail("Mario did not lose a life within the test step budget")
     finally:
         env.close()
+
+
+def test_stable_retro_hf_mario_level1_policy_triggers_level_change_if_available():
+    pytest.importorskip("stable_baselines3")
+    if not hasattr(np, "_core"):
+        pytest.skip("HF SB3 checkpoint requires NumPy 2-compatible pickle paths")
+
+    import stable_retro as retro
+    from stable_retro.testing.hf_policy import (
+        load_sb3_policy,
+        make_mario_level1_policy_env,
+        resolve_hf_policy_path,
+        run_policy_until_event,
+    )
+
+    try:
+        retro.data.get_original_romfile_path("SuperMarioBros-Nes-v0")
+    except FileNotFoundError:
+        pytest.skip("SuperMarioBros-Nes-v0 ROM is not imported locally")
+
+    try:
+        model_path = resolve_hf_policy_path(
+            "tsilva/SuperMarioBros-NES_Level1",
+            "ppo_supermariobros-nes-v0_4500000_steps.zip",
+            env_var="STABLE_RETRO_HF_POLICY_PATH",
+        )
+        model = load_sb3_policy(model_path, device="cpu")
+    except (FileNotFoundError, RuntimeError) as exc:
+        pytest.skip(str(exc))
+
+    env = make_mario_level1_policy_env(done_on=["level_change"])
+    try:
+        result = run_policy_until_event(
+            model,
+            env,
+            event_name="level_change",
+            episodes=10,
+            max_steps=2500,
+            seed_start=10007,
+            deterministic=False,
+        )
+    finally:
+        env.close()
+
+    assert result is not None
+    assert result.episode < 10
+    assert result.payload["trigger"] == "level_bytes_changed"
+    assert result.payload["compare"] == "reset"
+    assert result.payload["op"] == "change"
+    assert result.payload["keys"] == ["levelHi", "levelLo"]
+    assert result.payload["prev"] == [0, 0]
+    assert result.payload["next"] != [0, 0]
 
 
 def test_stable_retro_native_vec_env_mario_all_info_keys_match_default():

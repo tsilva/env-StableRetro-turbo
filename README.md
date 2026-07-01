@@ -31,12 +31,18 @@ Compared with upstream Stable Retro's single-environment `RetroEnv` API,
   SB3 vector-env episode metadata.
 - **🚦 Info-transition terminals**: Episodes can end on changes in game info,
   such as first life loss.
+- **🧾 Scenario-defined events**: Integrations can declare reusable named
+  events in `scenario.json`, including verbose multi-trigger events such as
+  `"op": "decrease"` or `"op": "change"`.
 - **🎛️ Rollout stochasticity controls**: Sticky actions and random no-op starts
   are available in the native path.
 - **🧩 Explicit ROM paths**: Benchmarks and integrations can run without relying
   on an imported ROM lookup.
 - **🍄 Expanded Mario saved states**: Mario Level 1 and Level 2 starts ship with
   the package.
+- **🍄 Super Mario event hooks**: `SuperMarioBros-Nes-v0` includes built-in
+  `life_loss` and `level_change` scenario events for policy evaluation and
+  curriculum terminals.
 
 ## Install
 
@@ -227,8 +233,13 @@ Modal runs: full env benchmark
 - `done_on` terminates and autoresets only lanes whose configured
   info-variable rule fires. Supported ops are `change`, `increase`, and
   `decrease`.
-- Use `done_on={"life_loss": ("lives", "decrease")}` for first-life-loss
-  terminal transitions.
+- Named `done_on` events are resolved from the selected scenario's `events`
+  map, with legacy `metadata.json` `info_events` used only as a fallback.
+  Events may use compact `(variables, op)` pairs or verbose `triggers`; multiple
+  triggers for one event are OR'd together.
+- Use `done_on=["life_loss"]` or
+  `done_on={"life_loss": {"variables": "lives", "op": "decrease"}}` for
+  first-life-loss terminal transitions.
 - `active_state_indices()` returns a read-only `int32` NumPy view for
   task-conditioned training; copy it when you need a stable snapshot.
 - Third-party emulator cores carry their own licenses; see [`LICENSES.md`](LICENSES.md).

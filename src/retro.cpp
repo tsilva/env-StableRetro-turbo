@@ -1658,8 +1658,10 @@ public:
 			if (!outputs[i].firedDoneOnInfoRules.empty()) {
 				py::dict doneOnInfo = py::dict();
 				for (const DoneOnInfoFiredRule& fired : outputs[i].firedDoneOnInfoRules) {
-					py::dict ruleInfo = py::dict();
-					ruleInfo["op"] = py::str(doneOnInfoOpName(fired.op));
+					py::dict triggerInfo = py::dict();
+					triggerInfo["trigger"] = py::str(fired.triggerId);
+					triggerInfo["compare"] = py::str(fired.compare);
+					triggerInfo["op"] = py::str(doneOnInfoOpName(fired.op));
 					py::list keys;
 					py::list previousValues;
 					py::list currentValues;
@@ -1672,10 +1674,31 @@ public:
 					for (int64_t value : fired.currentValues) {
 						currentValues.append(value);
 					}
-					ruleInfo["keys"] = keys;
-					ruleInfo["prev"] = previousValues;
-					ruleInfo["next"] = currentValues;
-					doneOnInfo[py::str(fired.name)] = ruleInfo;
+					triggerInfo["keys"] = keys;
+					triggerInfo["variables"] = keys;
+					triggerInfo["prev"] = previousValues;
+					triggerInfo["next"] = currentValues;
+
+					py::str eventName(fired.name);
+					if (PyDict_Contains(doneOnInfo.ptr(), eventName.ptr()) == 1) {
+						py::dict eventInfo = doneOnInfo[eventName].cast<py::dict>();
+						py::list triggers = eventInfo["triggers"].cast<py::list>();
+						triggers.append(triggerInfo);
+						continue;
+					}
+
+					py::dict eventInfo = py::dict();
+					eventInfo["trigger"] = triggerInfo["trigger"];
+					eventInfo["compare"] = triggerInfo["compare"];
+					eventInfo["op"] = triggerInfo["op"];
+					eventInfo["keys"] = triggerInfo["keys"];
+					eventInfo["variables"] = triggerInfo["variables"];
+					eventInfo["prev"] = triggerInfo["prev"];
+					eventInfo["next"] = triggerInfo["next"];
+					py::list triggers;
+					triggers.append(triggerInfo);
+					eventInfo["triggers"] = triggers;
+					doneOnInfo[eventName] = eventInfo;
 				}
 				info["done_on_info"] = doneOnInfo;
 			}
@@ -1745,6 +1768,8 @@ private:
 
 	struct DoneOnInfoRule {
 		std::string name;
+		std::string triggerId = "default";
+		std::string compare = "reset";
 		DoneOnInfoOp op = DoneOnInfoOp::Change;
 		std::vector<std::string> keyNames;
 		std::vector<Variable> variables;
@@ -1752,6 +1777,8 @@ private:
 
 	struct DoneOnInfoFiredRule {
 		std::string name;
+		std::string triggerId = "default";
+		std::string compare = "reset";
 		DoneOnInfoOp op = DoneOnInfoOp::Change;
 		std::vector<std::string> keys;
 		std::vector<int64_t> previousValues;
@@ -1791,15 +1818,32 @@ private:
 		m_doneOnInfoRules.reserve(static_cast<size_t>(rules.size()));
 		for (py::handle rawRule : rules) {
 			py::sequence rule = py::reinterpret_borrow<py::sequence>(rawRule);
-			if (rule.size() != 3) {
-				throw std::runtime_error("done_on_info native rules must be (name, keys, op)");
+			const py::ssize_t ruleSize = rule.size();
+			if (ruleSize != 3 && ruleSize != 5) {
+				throw std::runtime_error("done_on_info native rules must be (name, keys, op) or (name, trigger, keys, op, compare)");
 			}
 			DoneOnInfoRule parsed;
 			parsed.name = py::str(rule[0]);
 			if (parsed.name.empty()) {
 				throw std::runtime_error("done_on_info rule names must not be empty");
 			}
-			py::sequence keys = py::reinterpret_borrow<py::sequence>(rule[1]);
+			const py::ssize_t triggerIndex = ruleSize == 5 ? 1 : -1;
+			const py::ssize_t keysIndex = ruleSize == 5 ? 2 : 1;
+			const py::ssize_t opIndex = ruleSize == 5 ? 3 : 2;
+			const py::ssize_t compareIndex = ruleSize == 5 ? 4 : -1;
+			if (triggerIndex >= 0) {
+				parsed.triggerId = py::str(rule[triggerIndex]);
+				if (parsed.triggerId.empty()) {
+					throw std::runtime_error("done_on_info trigger ids must not be empty");
+				}
+			}
+			if (compareIndex >= 0) {
+				parsed.compare = py::str(rule[compareIndex]);
+				if (parsed.compare != "reset") {
+					throw std::runtime_error("done_on_info compare must be reset");
+				}
+			}
+			py::sequence keys = py::reinterpret_borrow<py::sequence>(rule[keysIndex]);
 			if (keys.size() == 0) {
 				throw std::runtime_error("done_on_info rules must reference at least one key");
 			}
@@ -1814,7 +1858,7 @@ private:
 				}
 				parsed.keyNames.push_back(key);
 			}
-			parsed.op = parseDoneOnInfoOp(py::str(rule[2]));
+			parsed.op = parseDoneOnInfoOp(py::str(rule[opIndex]));
 			m_doneOnInfoRules.push_back(std::move(parsed));
 		}
 	}
@@ -2169,6 +2213,8 @@ private:
 			firedAny = true;
 			output.firedDoneOnInfoRules.push_back({
 				rule.name,
+				rule.triggerId,
+				rule.compare,
 				rule.op,
 				rule.keyNames,
 				baseline,

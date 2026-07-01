@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+* add scenario-defined custom info events for native `done_on` terminals
+  * events may use compact rules or verbose multi-trigger definitions
+  * `SuperMarioBros-Nes-v0` now declares `life_loss` and `level_change` in
+    `scenario.json`
+
 ## 1.0.0
 
 * add `EzPickle` support for `RetroEnv` to improve compatibility with multiprocessing/vectorized RL tooling

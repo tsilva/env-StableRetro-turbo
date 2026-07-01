@@ -154,6 +154,8 @@ cores/fbneo/*.dll
 # Test stuff
 Temporary
 Testing/
+!stable_retro/testing/
+!stable_retro/testing/*.py
 *.mkv
 *.search
 

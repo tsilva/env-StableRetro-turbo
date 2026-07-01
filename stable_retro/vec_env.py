@@ -36,10 +36,11 @@ class RetroVecEnv(VecEnv):
     Native info-transition termination is opt-in and game/config-specific.
     Pass done_on={"name": ("key", "decrease")} to terminate and autoreset
     only lanes whose post-reset baseline changes as requested. Supported ops
-    are "change", "increase", and "decrease"; keys may be a string or a
-    sequence of strings. Fired rules are reported in info["done_on_info"] with
-    list-shaped "keys", "prev", and "next" values, including one-element lists
-    for single-key rules.
+    are "change", "increase", and "decrease"; variables may be a string or a
+    sequence of strings. Named scenario events can also declare multiple
+    trigger objects. Fired rules are reported in info["done_on_info"] with
+    list-shaped "keys"/"variables", "prev", and "next" values, including
+    one-element lists for single-variable rules.
 
     obs_copy="safe_view" returns double-buffered observation views so the
     previous observation survives the next step for SB3 rollout collection.
@@ -164,11 +165,14 @@ class RetroVecEnv(VecEnv):
             "sticky_action_prob": action_sticky_prob,
             "reward_clip": reward_clip,
         }
+        info_path = self._resolve_info_path(retro, game, info, inttype)
+        scenario_path = self._resolve_scenario_path(retro, game, scenario, inttype)
         done_on_info_rules = self._normalize_done_on(
             done_on,
             label="done_on",
             game=game,
             inttype=inttype,
+            scenario_path=scenario_path,
         )
         obs_layout = str(obs_layout).lower()
         if obs_layout not in {"hwc", "chw"}:
@@ -191,8 +195,6 @@ class RetroVecEnv(VecEnv):
                 "RetroVecEnv currently supports image observations only",
             )
 
-        info_path = self._resolve_info_path(retro, game, info, inttype)
-        scenario_path = self._resolve_scenario_path(retro, game, scenario, inttype)
         template = self._make_template_env(
             retro,
             game,
@@ -408,8 +410,16 @@ class RetroVecEnv(VecEnv):
         return [str(key) for key in info_keys]
 
     @classmethod
-    def _normalize_done_on(cls, done_on, *, label, game=None, inttype=None):
-        rules = {}
+    def _normalize_done_on(
+        cls,
+        done_on,
+        *,
+        label,
+        game=None,
+        inttype=None,
+        scenario_path=None,
+    ):
+        rules = []
         if done_on is not None:
             if isinstance(done_on, Sequence) and not isinstance(
                 done_on,
@@ -418,7 +428,7 @@ class RetroVecEnv(VecEnv):
                 done_on = {str(name): None for name in done_on}
             if not isinstance(done_on, Mapping):
                 raise ValueError(
-                    f"{label} must be a mapping of rule names to (keys, op) "
+                    f"{label} must be a mapping of rule names to event specs "
                     "or a sequence of configured event names",
                 )
             for raw_name, spec in done_on.items():
@@ -431,38 +441,150 @@ class RetroVecEnv(VecEnv):
                         (name,),
                         inttype=inttype,
                         label=label,
+                        scenario_path=scenario_path,
                     )[name]
-                if not (
-                    isinstance(spec, Sequence)
-                    and not isinstance(spec, (str, bytes, bytearray))
-                    and len(spec) == 2
+                for trigger_id, variables, op, compare in cls._normalize_event_spec(
+                    name,
+                    spec,
+                    label=label,
                 ):
-                    raise ValueError(
-                        f"{label} values must be (key_or_keys, op) pairs",
-                    )
-                raw_keys, raw_op = spec
-                op = str(raw_op)
-                if op not in {"change", "increase", "decrease"}:
-                    raise ValueError(
-                        f"{label} ops must be 'change', 'increase', or 'decrease'",
-                    )
-                if isinstance(raw_keys, str):
-                    keys = (raw_keys,)
-                elif (
-                    isinstance(raw_keys, Sequence)
-                    and not isinstance(raw_keys, (bytes, bytearray))
-                ):
-                    keys = tuple(str(key) for key in raw_keys)
-                else:
-                    raise ValueError(
-                        f"{label} keys must be a string or sequence of strings",
-                    )
-                if not keys or any(not key for key in keys):
-                    raise ValueError(f"{label} rules must reference at least one key")
-                rules[name] = (keys, op)
+                    rules.append((name, trigger_id, variables, op, compare))
         if not rules:
             return None
-        return tuple((name, keys, op) for name, (keys, op) in rules.items())
+        return tuple(rules)
+
+    @classmethod
+    def _normalize_event_spec(cls, name, spec, *, label):
+        if cls._is_compact_event_spec(spec):
+            return (cls._normalize_event_trigger(name, spec, label=label),)
+
+        if not isinstance(spec, Mapping):
+            raise ValueError(
+                f"{label} values must be compact (variables, op) pairs or "
+                "mappings with variables/op or triggers",
+            )
+
+        allowed = {"description", "triggers", "id", "variables", "keys", "op", "compare"}
+        unknown = set(spec) - allowed
+        if unknown:
+            names = ", ".join(sorted(str(key) for key in unknown))
+            raise ValueError(f"{label} event {name!r} has unknown keys: {names}")
+
+        if "triggers" not in spec:
+            return (cls._normalize_event_trigger(name, spec, label=label),)
+
+        raw_triggers = spec["triggers"]
+        if isinstance(raw_triggers, (str, bytes, bytearray)) or not isinstance(
+            raw_triggers,
+            Sequence,
+        ):
+            raise ValueError(f"{label} event {name!r} triggers must be a sequence")
+        if not raw_triggers:
+            raise ValueError(f"{label} event {name!r} must contain at least one trigger")
+
+        triggers = []
+        trigger_count = len(raw_triggers)
+        for index, raw_trigger in enumerate(raw_triggers):
+            triggers.append(
+                cls._normalize_event_trigger(
+                    name,
+                    raw_trigger,
+                    label=label,
+                    index=index,
+                    trigger_count=trigger_count,
+                ),
+            )
+        return tuple(triggers)
+
+    @staticmethod
+    def _is_compact_event_spec(spec):
+        return (
+            isinstance(spec, Sequence)
+            and not isinstance(spec, (str, bytes, bytearray))
+            and len(spec) == 2
+        )
+
+    @classmethod
+    def _normalize_event_trigger(
+        cls,
+        event_name,
+        trigger,
+        *,
+        label,
+        index=0,
+        trigger_count=1,
+    ):
+        if cls._is_compact_event_spec(trigger):
+            raw_variables, raw_op = trigger
+            trigger_id = "default" if trigger_count == 1 else f"trigger_{index + 1}"
+            compare = "reset"
+        elif isinstance(trigger, Mapping):
+            allowed = {"description", "id", "variables", "keys", "op", "compare"}
+            unknown = set(trigger) - allowed
+            if unknown:
+                names = ", ".join(sorted(str(key) for key in unknown))
+                raise ValueError(
+                    f"{label} event {event_name!r} trigger has unknown keys: {names}",
+                )
+            if "variables" in trigger and "keys" in trigger:
+                raise ValueError(
+                    f"{label} event {event_name!r} trigger cannot use both "
+                    "variables and keys",
+                )
+            raw_variables = trigger.get("variables", trigger.get("keys"))
+            raw_op = trigger.get("op")
+            trigger_id = str(
+                trigger.get(
+                    "id",
+                    "default" if trigger_count == 1 else f"trigger_{index + 1}",
+                ),
+            )
+            compare = str(trigger.get("compare", "reset"))
+        else:
+            raise ValueError(
+                f"{label} event {event_name!r} triggers must be compact pairs "
+                "or mappings",
+            )
+
+        if not trigger_id:
+            raise ValueError(f"{label} event {event_name!r} trigger ids must not be empty")
+        variables = cls._normalize_event_variables(raw_variables, label=label)
+        op = cls._normalize_event_op(raw_op, label=label)
+        compare = cls._normalize_event_compare(compare, label=label)
+        return trigger_id, variables, op, compare
+
+    @staticmethod
+    def _normalize_event_variables(raw_variables, *, label):
+        if isinstance(raw_variables, str):
+            variables = (raw_variables,)
+        elif (
+            isinstance(raw_variables, Sequence)
+            and not isinstance(raw_variables, (bytes, bytearray))
+        ):
+            variables = tuple(str(variable) for variable in raw_variables)
+        else:
+            raise ValueError(
+                f"{label} variables must be a string or sequence of strings",
+            )
+        if not variables or any(not variable for variable in variables):
+            raise ValueError(f"{label} rules must reference at least one variable")
+        return variables
+
+    @staticmethod
+    def _normalize_event_op(raw_op, *, label):
+        op = str(raw_op)
+        if op not in {"change", "increase", "decrease"}:
+            raise ValueError(
+                f"{label} ops must be 'change', 'increase', or 'decrease'",
+            )
+        return op
+
+    @staticmethod
+    def _normalize_event_compare(raw_compare, *, label):
+        compare = str(raw_compare)
+        if compare != "reset":
+            raise ValueError(f"{label} compare must be 'reset'")
+        return compare
 
     @staticmethod
     def _normalize_done_on_info(done_on_info):
@@ -470,7 +592,11 @@ class RetroVecEnv(VecEnv):
 
     @staticmethod
     def metadata_info_events(game, inttype=None):
-        """Return named info-event rules declared by a game's metadata."""
+        """Return named info-event rules declared by a game's metadata.
+
+        Kept as a compatibility fallback for versions that stored events there.
+        New game integrations should prefer scenario ``events``.
+        """
 
         if not game:
             return {}
@@ -490,13 +616,38 @@ class RetroVecEnv(VecEnv):
         info_events = metadata.get("info_events", {})
         return info_events if isinstance(info_events, Mapping) else {}
 
+    @staticmethod
+    def scenario_events(scenario_path):
+        """Return named event rules declared by a scenario file."""
+
+        if not scenario_path:
+            return {}
+        try:
+            with open(scenario_path, encoding="utf-8") as handle:
+                scenario = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            return {}
+        events = scenario.get("events", {})
+        return events if isinstance(events, Mapping) else {}
+
     @classmethod
-    def resolve_info_event_rules(cls, game, names, *, inttype=None, label="info_events"):
+    def resolve_info_event_rules(
+        cls,
+        game,
+        names,
+        *,
+        inttype=None,
+        label="info_events",
+        scenario_path=None,
+    ):
         """Resolve configured event names to raw done_on rule specs."""
 
-        if not game:
-            raise ValueError(f"{label} named events require a game")
-        event_rules = cls.metadata_info_events(game, inttype=inttype)
+        if not game and not scenario_path:
+            raise ValueError(f"{label} named events require a game or scenario")
+        event_rules = {}
+        if game:
+            event_rules.update(cls.metadata_info_events(game, inttype=inttype))
+        event_rules.update(cls.scenario_events(scenario_path))
         resolved = {}
         missing = []
         for raw_name in names:
@@ -509,8 +660,9 @@ class RetroVecEnv(VecEnv):
             resolved[name] = event_rules[name]
         if missing:
             available = ", ".join(sorted(str(name) for name in event_rules)) or "none"
+            source = game or str(scenario_path)
             raise ValueError(
-                f"{label} unknown configured event(s) for {game}: "
+                f"{label} unknown configured event(s) for {source}: "
                 f"{', '.join(missing)}. Available events: {available}",
             )
         return resolved
