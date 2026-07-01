@@ -10,8 +10,7 @@
   **🚀 Blazing-fast Stable Retro fork with native vectorization and preprocessing 🚀**
 </div>
 
-`stable-retro-turbo` is a performance-focused fork of [Stable Retro](https://stable-retro.farama.org/) that accelerates rollouts by moving vectorization and preprocessing entirely into native code.
-That is faster because the hot path avoids repeatedly bouncing between Python and the emulator for each environment step. Instead, many environments can be stepped and transformed in one native batch, reducing Python interpreter overhead, wrapper dispatch, memory copies, and per-frame preprocessing cost. The result is higher rollout throughput, especially when running many parallel environments.
+`stable-retro-turbo` is a performance-focused fork of [Stable Retro](https://stable-retro.farama.org/) that accelerates rollouts by moving vectorization and preprocessing into native code. By batching environment stepping and preprocessing natively, it avoids Python overhead, wrapper dispatch, and redundant memory copies, delivering substantially higher rollout throughput, especially with many parallel environments.
 
 ## Install
 
