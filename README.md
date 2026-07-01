@@ -18,33 +18,25 @@ Compared with upstream Stable Retro's single-environment `RetroEnv` API,
 `stable-retro-turbo` adds a training-oriented fast path:
 
 - **⚡ Native vector environment**: `RetroVecEnv` provides an SB3-compatible fast
-  path with `num_envs` emulator lanes and `num_threads` native worker threads.
-- **🧪 Fused native preprocessing**: Crop, resize, grayscale conversion,
-  channel-first layout, frame skip, frame stack, two-frame max-pool, and reward
-  clipping can run inside the native rollout path.
-- **📦 Observation ownership modes**: `obs_copy="copy"`, `"safe_view"`, and
-  benchmark-only `"unsafe_view"` let callers trade copying for view reuse.
-- **🔎 Native info filtering**: `info_filter="all"`, `"terminal"`, `"none"`, or a
-  selected key list avoids building large info dicts every step.
-- **🍄 Expanded Mario saved states**: `SuperMarioBros-Nes-v0` includes the Level 1
-  and Level 2 start states that upstream Stable Retro does not ship.
-- **🛤️ Multi-state lane assignment**: A state sequence pins one start state per
-  lane.
-- **🎲 Weighted multi-state sampling**: A `{state_name: weight}` mapping samples a
-  new start state independently for each lane on reset and lane autoreset.
-- **📍 Active-state tracking**: `active_state_indices()` and `active_states()`
-  expose each lane's current start state, with `start_state` / `state` entries
-  in reset info when multiple start states are configured.
-- **🔁 Lane-local autoreset**: Ended lanes reset without resetting the whole
-  vector, while preserving SB3-style `terminal_observation`, `reset_info`, and
-  `TimeLimit.truncated=False` metadata.
-- **🚦 Per-lane info-transition terminals**: `done_on` supports `change`,
-  `increase`, and `decrease` rules such as first-life-loss termination.
-- **🎛️ Sticky actions and no-op resets**: `action_sticky_prob` and `reset_noops`
-  add common Atari-style rollout stochasticity knobs.
-- **🧩 Explicit ROM paths**: `rom_path` supports benchmark and
-  external-integration workflows that should not depend on an imported ROM
-  lookup.
+  path for many emulator lanes at once.
+- **🧪 Fused native preprocessing**: RL image transforms, frame handling, and
+  reward clipping can run in the native rollout path.
+- **📦 Observation ownership modes**: Callers can choose copy-safe observations
+  or faster view-based observations for benchmarks.
+- **🔎 Native info filtering**: Step metadata can be reduced before it crosses
+  the Python boundary.
+- **🛤️ Multi-state training support**: Lanes can use fixed, sampled, and tracked
+  start states for curricula or task-conditioned agents.
+- **🔁 Lane-local autoreset**: Finished lanes reset independently while keeping
+  SB3 vector-env episode metadata.
+- **🚦 Info-transition terminals**: Episodes can end on changes in game info,
+  such as first life loss.
+- **🎛️ Rollout stochasticity controls**: Sticky actions and random no-op starts
+  are available in the native path.
+- **🧩 Explicit ROM paths**: Benchmarks and integrations can run without relying
+  on an imported ROM lookup.
+- **🍄 Expanded Mario saved states**: Mario Level 1 and Level 2 starts ship with
+  the package.
 
 ## Install
 

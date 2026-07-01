@@ -270,6 +270,33 @@ def test_stable_retro_native_vec_env_done_on_info_validation():
         )
 
 
+def test_stable_retro_native_vec_env_resolves_metadata_done_on_events():
+    pytest.importorskip("stable_baselines3")
+    from stable_retro.vec_env import RetroVecEnv
+
+    assert RetroVecEnv._normalize_done_on(
+        ["life_loss", "level_change"],
+        label="done_on",
+        game="SuperMarioBros-Nes-v0",
+    ) == (
+        ("life_loss", ("lives",), "decrease"),
+        ("level_change", ("levelHi", "levelLo"), "change"),
+    )
+
+    assert RetroVecEnv._normalize_done_on(
+        {"life_loss": None},
+        label="done_on",
+        game="SuperMarioBros-Nes-v0",
+    ) == (("life_loss", ("lives",), "decrease"),)
+
+    with pytest.raises(ValueError, match="unknown configured event"):
+        RetroVecEnv._normalize_done_on(
+            ["boss_clear"],
+            label="done_on",
+            game="SuperMarioBros-Nes-v0",
+        )
+
+
 def test_stable_retro_native_vec_env_new_keyword_normalization():
     pytest.importorskip("stable_baselines3")
     from stable_retro.vec_env import RetroVecEnv, _UNSET

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -163,7 +164,12 @@ class RetroVecEnv(VecEnv):
             "sticky_action_prob": action_sticky_prob,
             "reward_clip": reward_clip,
         }
-        done_on_info_rules = self._normalize_done_on(done_on, label="done_on")
+        done_on_info_rules = self._normalize_done_on(
+            done_on,
+            label="done_on",
+            game=game,
+            inttype=inttype,
+        )
         obs_layout = str(obs_layout).lower()
         if obs_layout not in {"hwc", "chw"}:
             raise ValueError("obs_layout must be 'hwc' or 'chw'")
@@ -401,16 +407,31 @@ class RetroVecEnv(VecEnv):
             return None
         return [str(key) for key in info_keys]
 
-    @staticmethod
-    def _normalize_done_on(done_on, *, label):
+    @classmethod
+    def _normalize_done_on(cls, done_on, *, label, game=None, inttype=None):
         rules = {}
         if done_on is not None:
+            if isinstance(done_on, Sequence) and not isinstance(
+                done_on,
+                (str, bytes, bytearray),
+            ):
+                done_on = {str(name): None for name in done_on}
             if not isinstance(done_on, Mapping):
-                raise ValueError(f"{label} must be a mapping of rule names to (keys, op)")
+                raise ValueError(
+                    f"{label} must be a mapping of rule names to (keys, op) "
+                    "or a sequence of configured event names",
+                )
             for raw_name, spec in done_on.items():
                 name = str(raw_name)
                 if not name:
                     raise ValueError(f"{label} rule names must not be empty")
+                if spec is None:
+                    spec = cls.resolve_info_event_rules(
+                        game,
+                        (name,),
+                        inttype=inttype,
+                        label=label,
+                    )[name]
                 if not (
                     isinstance(spec, Sequence)
                     and not isinstance(spec, (str, bytes, bytearray))
@@ -446,6 +467,53 @@ class RetroVecEnv(VecEnv):
     @staticmethod
     def _normalize_done_on_info(done_on_info):
         return RetroVecEnv._normalize_done_on(done_on_info, label="done_on_info")
+
+    @staticmethod
+    def metadata_info_events(game, inttype=None):
+        """Return named info-event rules declared by a game's metadata."""
+
+        if not game:
+            return {}
+        if inttype is None:
+            inttype = retro_data.Integrations.STABLE
+        try:
+            metadata_path = retro_data.get_file_path(game, "metadata.json", inttype)
+        except FileNotFoundError:
+            return {}
+        if not metadata_path:
+            return {}
+        try:
+            with open(metadata_path, encoding="utf-8") as handle:
+                metadata = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            return {}
+        info_events = metadata.get("info_events", {})
+        return info_events if isinstance(info_events, Mapping) else {}
+
+    @classmethod
+    def resolve_info_event_rules(cls, game, names, *, inttype=None, label="info_events"):
+        """Resolve configured event names to raw done_on rule specs."""
+
+        if not game:
+            raise ValueError(f"{label} named events require a game")
+        event_rules = cls.metadata_info_events(game, inttype=inttype)
+        resolved = {}
+        missing = []
+        for raw_name in names:
+            name = str(raw_name)
+            if not name:
+                raise ValueError(f"{label} event names must not be empty")
+            if name not in event_rules:
+                missing.append(name)
+                continue
+            resolved[name] = event_rules[name]
+        if missing:
+            available = ", ".join(sorted(str(name) for name in event_rules)) or "none"
+            raise ValueError(
+                f"{label} unknown configured event(s) for {game}: "
+                f"{', '.join(missing)}. Available events: {available}",
+            )
+        return resolved
 
     @staticmethod
     def _observation_space_for_layout(observation_space, obs_layout):

@@ -1,5 +1,18 @@
 {
   "default_state": "Level1-1",
+  "info_events": {
+    "life_loss": [
+      "lives",
+      "decrease"
+    ],
+    "level_change": [
+      [
+        "levelHi",
+        "levelLo"
+      ],
+      "change"
+    ]
+  },
   "states": {
     "Level2-1": {
       "runs": [

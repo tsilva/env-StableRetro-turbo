@@ -54,10 +54,39 @@ are nonzero, the branch has diverged; stop.
 
 It must print `stable-retro-turbo`.
 
-3. Find the next post version and tag the clean current commit:
+3. Verify the tracked upstream Stable Retro base version:
 
 ```bash
-TARGET_VERSION="$(.venv314/bin/python scripts/release_build.py bump-version)"
+git fetch --prune upstream main
+UPSTREAM_STABLE_RETRO_VERSION="$(git show upstream/main:stable_retro/VERSION.txt | tr -d '[:space:]')"
+CURRENT_TURBO_VERSION="$(tr -d '[:space:]' < stable_retro/VERSION.txt)"
+CURRENT_TURBO_BASE="${CURRENT_TURBO_VERSION%%.post*}"
+printf 'upstream stable-retro: %s\ncurrent stable-retro-turbo: %s\n' \
+  "${UPSTREAM_STABLE_RETRO_VERSION}" \
+  "${CURRENT_TURBO_VERSION}"
+```
+
+The `stable-retro-turbo` version must always be prefixed by the upstream Stable
+Retro version currently tracked on `upstream/main`. If
+`CURRENT_TURBO_BASE != UPSTREAM_STABLE_RETRO_VERSION`, start a new post series
+on the tracked upstream base and use:
+
+```bash
+TARGET_VERSION="${UPSTREAM_STABLE_RETRO_VERSION}.post1"
+```
+
+For example, if upstream is `1.0.1` and the current turbo version is
+`1.0.0.post23`, the next release target is `1.0.1.post1`, not
+`1.0.0.post24`. Stop and ask the user before publishing if the tracked upstream
+base is surprising, cannot be read, or does not match the intended release
+line.
+
+4. Find the next post version and tag the clean current commit:
+
+```bash
+if [ -z "${TARGET_VERSION:-}" ]; then
+  TARGET_VERSION="$(.venv314/bin/python scripts/release_build.py bump-version)"
+fi
 RELEASE_TAG="v${TARGET_VERSION}"
 if git rev-parse --verify --quiet "refs/tags/${RELEASE_TAG}"; then
   echo "Tag already exists: ${RELEASE_TAG}"
@@ -78,13 +107,13 @@ git rev-parse HEAD
 The two commit hashes must match. This tags the already-clean, already-pushed,
 already-pulled current commit before the version bump dirties the working tree.
 
-4. Bump to the tagged post version:
+5. Bump to the tagged post version:
 
 ```bash
 .venv314/bin/python scripts/release_build.py bump-version --to "${TARGET_VERSION}" --write
 ```
 
-5. If current-turn source changes have not been regression-tested, run focused
+6. If current-turn source changes have not been regression-tested, run focused
 tests before building:
 
 ```bash
@@ -97,7 +126,7 @@ When emulator behavior changed, also run from `tests/`:
 ./test-emulator --gtest_filter='EmulatorCore/EmulatorTest.*/*Nes'
 ```
 
-6. Create clean source copies under `/private/tmp`:
+7. Create clean source copies under `/private/tmp`:
 
 ```bash
 .venv314/bin/python scripts/release_build.py prepare-sources
@@ -107,7 +136,7 @@ Use the JSON output paths for the platform builds. The script excludes stale
 build outputs, compiled artifacts, wheelhouses, local venv state, CMake cache
 files, and actual ROM payloads, then verifies the Linux copy is clean.
 
-7. Print the exact platform build commands:
+8. Print the exact platform build commands:
 
 ```bash
 .venv314/bin/python scripts/release_build.py build-commands \
@@ -118,7 +147,7 @@ files, and actual ROM payloads, then verifies the Linux copy is clean.
 Run the macOS commands locally. Run the Linux `cibuildwheel` command from the
 clean Linux source copy; Docker access may require escalation in the sandbox.
 
-8. After the macOS wheel is repaired and stripped, smoke-test it from outside
+9. After the macOS wheel is repaired and stripped, smoke-test it from outside
 the checkout:
 
 ```bash
@@ -128,7 +157,7 @@ the checkout:
 
 The Linux wheel import smoke is run by `cibuildwheel` inside the container.
 
-9. Run final host-side validation:
+10. Run final host-side validation:
 
 ```bash
 .venv314/bin/python scripts/release_build.py final-check
