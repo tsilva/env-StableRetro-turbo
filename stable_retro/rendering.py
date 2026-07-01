@@ -63,11 +63,12 @@ def get_display(spec):
 
 
 class SimpleImageViewer:
-    def __init__(self, display=None, maxwidth=500):
+    def __init__(self, display=None, maxwidth=500, scale_up=False):
         self.window = None
         self.isopen = False
         self.display = get_display(display)
         self.maxwidth = maxwidth
+        self.scale_up = scale_up
         self.width = 0
         self.height = 0
         self._rotation = 0
@@ -79,7 +80,7 @@ class SimpleImageViewer:
         display_height = height
         if rotation_steps % 2:
             display_width, display_height = display_height, display_width
-        if display_width > self.maxwidth:
+        if self.scale_up or display_width > self.maxwidth:
             scale = self.maxwidth / display_width
             display_width = int(scale * display_width)
             display_height = int(scale * display_height)
@@ -128,11 +129,28 @@ class SimpleImageViewer:
         gl.glMatrixMode(gl.GL_MODELVIEW)
         gl.glPushMatrix()
         gl.glLoadIdentity()
+        draw_width = self.width
+        draw_height = self.height
+        draw_x = 0
+        draw_y = 0
+        if not self._rotation:
+            frame_aspect = float(arr.shape[1]) / float(arr.shape[0])
+            window_aspect = float(self.width) / float(self.height)
+            if window_aspect > frame_aspect:
+                draw_height = self.height
+                draw_width = int(round(draw_height * frame_aspect))
+                draw_x = int((self.width - draw_width) / 2)
+            else:
+                draw_width = self.width
+                draw_height = int(round(draw_width / frame_aspect))
+                draw_y = int((self.height - draw_height) / 2)
         if self._rotation:
             gl.glTranslatef(float(self.width) / 2.0, float(self.height) / 2.0, 0.0)
             gl.glRotatef(-90.0 * self._rotation, 0.0, 0.0, 1.0)
             gl.glTranslatef(float(-self.width) / 2.0, float(-self.height) / 2.0, 0.0)
-        texture.blit(0, 0)
+            texture.blit(0, 0, width=self.width, height=self.height)
+        else:
+            texture.blit(draw_x, draw_y, width=draw_width, height=draw_height)
         gl.glMatrixMode(gl.GL_MODELVIEW)
         gl.glPopMatrix()
         gl.glMatrixMode(gl.GL_MODELVIEW)
@@ -141,7 +159,10 @@ class SimpleImageViewer:
     def close(self):
         if self.isopen and sys.meta_path:
             # ^^^ check sys.meta_path to avoid 'ImportError: sys.meta_path is None, Python is likely shutting down'
-            self.window.close()
+            try:
+                self.window.close()
+            except AttributeError:
+                pass
             self.isopen = False
 
     def __del__(self):

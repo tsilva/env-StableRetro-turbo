@@ -185,6 +185,76 @@ def test_stable_retro_native_vec_env_same_process(tmp_path):
         env.close()
 
 
+def test_stable_retro_native_vec_env_rgb_array_render_returns_raw_screen(tmp_path):
+    pytest.importorskip("stable_baselines3")
+
+    env = _make_test_native_vec_env(
+        tmp_path,
+        num_envs=2,
+        render_mode="rgb_array",
+        info_mode="terminal",
+    )
+    try:
+        obs = env.reset()
+        screen = env.render("rgb_array")
+        other_screen = env.native.get_screen(1)
+
+        assert screen.dtype == np.uint8
+        assert screen.ndim == 3
+        assert screen.shape[2] == 3
+        assert screen.shape[:2] != obs.shape[1:3]
+        assert other_screen.shape == screen.shape
+    finally:
+        env.close()
+
+
+def test_stable_retro_native_vec_env_rgb_array_render_updates_with_indexed_video(
+    tmp_path,
+):
+    pytest.importorskip("stable_baselines3")
+
+    os.environ["STABLE_RETRO_DISABLE_RENDER_SKIP"] = "1"
+    env = _make_test_native_vec_env(
+        tmp_path,
+        num_envs=1,
+        render_mode="rgb_array",
+        obs_resize_algorithm="area",
+        maxpool_last_two=True,
+        info_mode="terminal",
+    )
+    try:
+        env.reset()
+        action = np.zeros((1, env.num_buttons), dtype=np.uint8)
+        frame_hashes = []
+        for _ in range(30):
+            frame_hashes.append(_sha(env.render("rgb_array")))
+            env.step(action)
+
+        assert len(set(frame_hashes)) > 1
+    finally:
+        env.close()
+        os.environ.pop("STABLE_RETRO_DISABLE_RENDER_SKIP", None)
+
+
+def test_stable_retro_simple_image_viewer_close_ignores_cocoa_shutdown_error():
+    from stable_retro.rendering import SimpleImageViewer
+
+    class BrokenCloseWindow:
+        def close(self):
+            raise AttributeError(
+                "'CocoaAlternateEventLoop' object has no attribute "
+                "'platform_event_loop'",
+            )
+
+    viewer = SimpleImageViewer.__new__(SimpleImageViewer)
+    viewer.window = BrokenCloseWindow()
+    viewer.isopen = True
+
+    viewer.close()
+
+    assert viewer.isopen is False
+
+
 def test_stable_retro_native_vec_env_chw_observation_layout(tmp_path):
     pytest.importorskip("stable_baselines3")
 
@@ -1515,6 +1585,41 @@ def test_stable_retro_hf_mario_level1_policy_triggers_level_change_if_available(
     assert result.payload["keys"] == ["levelHi", "levelLo"]
     assert result.payload["prev"] == [0, 0]
     assert result.payload["next"] != [0, 0]
+
+
+def test_stable_retro_hf_mario_policy_playback_command_parses():
+    from stable_retro.scripts.play_hf_policy import build_parser
+
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "--policy",
+            "/tmp/hf-smb-policy/ppo_supermariobros-nes-v0_4500000_steps.zip",
+            "--event",
+            "level_change",
+            "--seed",
+            "10007",
+            "--max-steps",
+            "2500",
+            "--episodes",
+            "10",
+            "--fps",
+            "30",
+            "--max-width",
+            "672",
+        ],
+    )
+
+    assert str(args.policy) == (
+        "/tmp/hf-smb-policy/ppo_supermariobros-nes-v0_4500000_steps.zip"
+    )
+    assert args.event == "level_change"
+    assert args.seed == 10007
+    assert args.max_steps == 2500
+    assert args.episodes == 10
+    assert args.fps == 30
+    assert args.max_width == 672
+    assert args.deterministic is False
 
 
 def test_stable_retro_native_vec_env_mario_all_info_keys_match_default():

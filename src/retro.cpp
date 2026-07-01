@@ -954,6 +954,12 @@ static inline uint8_t rgb565Gray(uint16_t rgb) {
 	return static_cast<uint8_t>((r * 77 + g * 150 + b * 29 + 128) >> 8);
 }
 
+static inline void rgb565ToRgb888(uint16_t rgb, uint8_t& r, uint8_t& g, uint8_t& b) {
+	r = static_cast<uint8_t>(((rgb >> 11) & 0x1F) * 255 / 31);
+	g = static_cast<uint8_t>(((rgb >> 5) & 0x3F) * 255 / 63);
+	b = static_cast<uint8_t>((rgb & 0x1F) * 255 / 31);
+}
+
 static inline uint8_t rgb565MaxGray(uint16_t rgb, uint16_t maxRgb) {
 	const uint32_t r = std::max<uint32_t>((rgb & 0xF800) >> 8, (maxRgb & 0xF800) >> 8);
 	const uint32_t g = std::max<uint32_t>((rgb & 0x07E0) >> 3, (maxRgb & 0x07E0) >> 3);
@@ -1712,6 +1718,51 @@ public:
 			return py::make_tuple(m_stackedChannels, m_obsHeight, m_obsWidth);
 		}
 		return py::make_tuple(m_obsHeight, m_obsWidth, m_stackedChannels);
+	}
+
+	py::array_t<uint8_t> getScreen(size_t index = 0) {
+		if (index >= m_slots.size()) {
+			throw std::runtime_error("screen index out of range");
+		}
+		Slot& slot = *m_slots[index];
+		IndexedVideoFrame indexedFrame;
+		if (slot.usesIndexedVideo && slot.emulator->m_re.getIndexedVideoFrame(indexedFrame)) {
+			py::array_t<uint8_t> screen({
+				static_cast<py::ssize_t>(indexedFrame.height),
+				static_cast<py::ssize_t>(indexedFrame.width),
+				static_cast<py::ssize_t>(3),
+			});
+			uint8_t* dst = screen.mutable_data();
+			for (unsigned y = 0; y < indexedFrame.height; ++y) {
+				for (unsigned x = 0; x < indexedFrame.width; ++x) {
+					const uint8_t pixel = indexedFrame.data[
+						static_cast<size_t>(y) * indexedFrame.pitch + static_cast<size_t>(x)
+					];
+					uint8_t r = 0;
+					uint8_t g = 0;
+					uint8_t b = 0;
+					rgb565ToRgb888(indexedRgb565(indexedFrame, pixel), r, g, b);
+					const size_t offset = (
+						static_cast<size_t>(y) * static_cast<size_t>(indexedFrame.width) +
+						static_cast<size_t>(x)
+					) * 3;
+					dst[offset] = r;
+					dst[offset + 1] = g;
+					dst[offset + 2] = b;
+				}
+			}
+			return screen;
+		}
+		slot.emulator->readRgbFrame(slot.rgb);
+		const long width = slot.emulator->m_re.getImageWidth();
+		const long height = slot.emulator->m_re.getImageHeight();
+		py::array_t<uint8_t> screen({
+			static_cast<py::ssize_t>(height),
+			static_cast<py::ssize_t>(width),
+			static_cast<py::ssize_t>(3),
+		});
+		std::memcpy(screen.mutable_data(), slot.rgb.data(), slot.rgb.size());
+		return screen;
 	}
 
 	size_t numEnvs() const {
@@ -2723,6 +2774,7 @@ PYBIND11_MODULE(_retro, m) {
 		.def("step", &PyNativeVectorEnv::step)
 		.def("active_state_indices", &PyNativeVectorEnv::activeStateIndices)
 		.def("observation_shape", &PyNativeVectorEnv::observationShape)
+		.def("get_screen", &PyNativeVectorEnv::getScreen, py::arg("index") = 0)
 		.def_property_readonly("initial_state_names", &PyNativeVectorEnv::initialStateNames)
 		.def_property_readonly("num_envs", &PyNativeVectorEnv::numEnvs);
 

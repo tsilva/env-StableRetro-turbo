@@ -186,6 +186,7 @@ class RetroVecEnv(VecEnv):
         self.copy_observations = copy_observations
         self.unsafe_zero_copy = unsafe_zero_copy
         self.render_mode = render_mode
+        self.viewer = None
         if players != 1:
             raise ValueError("RetroVecEnv currently supports players=1")
         if record:
@@ -877,13 +878,27 @@ class RetroVecEnv(VecEnv):
         )
 
     def close(self):
+        if self.viewer is not None:
+            self.viewer.close()
+            self.viewer = None
         self.closed = True
 
     def get_images(self):
         return []
 
     def render(self, mode: str | None = None):
-        return None
+        mode = self.render_mode if mode is None else mode
+        if mode == "rgb_array":
+            return self.native.get_screen(0)
+        if mode == "human":
+            from stable_retro.rendering import SimpleImageViewer
+
+            img = self.native.get_screen(0)
+            if self.viewer is None:
+                self.viewer = SimpleImageViewer()
+            self.viewer.imshow(img)
+            return self.viewer.isopen
+        raise ValueError(f"unsupported render mode: {mode}")
 
     def get_attr(self, attr_name: str, indices=None) -> list[Any]:
         return [getattr(self, attr_name) for _ in self._get_indices(indices)]
