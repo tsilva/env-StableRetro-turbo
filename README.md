@@ -12,6 +12,36 @@
 
 `stable-retro-turbo` is a performance-focused fork of [Stable Retro](https://stable-retro.farama.org/) that accelerates rollouts by moving vectorization and preprocessing into native code. By batching environment stepping and preprocessing natively, it avoids Python overhead, wrapper dispatch, and redundant memory copies, delivering substantially higher rollout throughput, especially with many parallel environments.
 
+## Turbo-Only Features
+
+Compared with upstream Stable Retro's single-environment `RetroEnv` API,
+`stable-retro-turbo` adds a training-oriented fast path:
+
+- `RetroVecEnv`, an SB3-compatible native vector environment with `num_envs`
+  emulator lanes and `num_threads` native worker threads.
+- Native fused preprocessing for crop, resize, grayscale conversion,
+  channel-first layout, frame skip, frame stack, two-frame max-pool, and reward
+  clipping.
+- Lane-local autoreset, including SB3-style `terminal_observation`,
+  `reset_info`, and `TimeLimit.truncated=False` metadata for lanes that ended.
+- Multi-state lane assignment: pass a state sequence to pin one start state per
+  lane.
+- Weighted multi-state sampling: pass `{state_name: weight}` to sample a new
+  start state independently for each lane on reset and lane autoreset.
+- Active-state tracking through `active_state_indices()` and `active_states()`,
+  plus `start_state` / `state` entries in reset info when multiple start states
+  are configured.
+- Per-lane info-transition terminals with `done_on`, supporting `change`,
+  `increase`, and `decrease` rules such as first-life-loss termination.
+- Native info filtering with `info_filter="all"`, `"terminal"`, `"none"`, or a
+  selected key list to avoid building large info dicts every step.
+- Observation ownership modes with `obs_copy="copy"`, `"safe_view"`, and
+  benchmark-only `"unsafe_view"`.
+- Sticky actions and random no-op resets through `action_sticky_prob` and
+  `reset_noops`.
+- Explicit `rom_path` loading for benchmark and external-integration workflows
+  that should not depend on an imported ROM lookup.
+
 ## Install
 
 ```bash
