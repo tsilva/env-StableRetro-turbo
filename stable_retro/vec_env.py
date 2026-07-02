@@ -71,16 +71,13 @@ class RetroVecEnv(VecEnv):
         obs_layout="hwc",
         frame_skip=1,
         frame_stack=1,
-        frame_maxpool=False,
-        reset_noops=0,
-        action_sticky_prob=0.0,
+        maxpool_last_two=False,
+        noop_reset_max=0,
+        sticky_action_prob=0.0,
         reward_clip=False,
         info_filter="all",
         done_on=None,
         copy_observations=_UNSET,
-        maxpool_last_two=_UNSET,
-        noop_reset_max=_UNSET,
-        sticky_action_prob=_UNSET,
         info_mode=_UNSET,
         info_keys=_UNSET,
         done_on_info=_UNSET,
@@ -109,33 +106,12 @@ class RetroVecEnv(VecEnv):
         self._actions = None
         self._observations = None
 
-        frame_maxpool = self._resolve_legacy_alias(
-            "frame_maxpool",
-            frame_maxpool,
-            "maxpool_last_two",
-            maxpool_last_two,
-            False,
-        )
-        reset_noops = self._resolve_legacy_alias(
-            "reset_noops",
-            reset_noops,
-            "noop_reset_max",
-            noop_reset_max,
-            0,
-        )
-        action_sticky_prob = self._resolve_legacy_alias(
-            "action_sticky_prob",
-            action_sticky_prob,
-            "sticky_action_prob",
-            sticky_action_prob,
-            0.0,
-        )
         info_mode, info_keys = self._normalize_info_filter(
             info_filter,
             info_mode,
             info_keys,
         )
-        done_on = self._resolve_legacy_alias(
+        done_on = self._resolve_alias(
             "done_on",
             done_on,
             "done_on_info",
@@ -160,9 +136,9 @@ class RetroVecEnv(VecEnv):
             "obs_resize_algorithm": obs_resize_algorithm,
             "frame_skip": frame_skip,
             "frame_stack": frame_stack,
-            "maxpool_last_two": frame_maxpool,
-            "noop_reset_max": reset_noops,
-            "sticky_action_prob": action_sticky_prob,
+            "maxpool_last_two": maxpool_last_two,
+            "noop_reset_max": noop_reset_max,
+            "sticky_action_prob": sticky_action_prob,
             "reward_clip": reward_clip,
         }
         info_path = self._resolve_info_path(retro, game, info, inttype)
@@ -330,12 +306,12 @@ class RetroVecEnv(VecEnv):
         )
 
     @staticmethod
-    def _resolve_legacy_alias(new_name, new_value, old_name, old_value, default):
-        if old_value is _UNSET:
-            return new_value
-        if new_value != default:
-            raise ValueError(f"cannot pass both {new_name} and {old_name}")
-        return old_value
+    def _resolve_alias(preferred_name, preferred_value, alias_name, alias_value, default):
+        if alias_value is _UNSET:
+            return preferred_value
+        if preferred_value != default:
+            raise ValueError(f"cannot pass both {preferred_name} and {alias_name}")
+        return alias_value
 
     @staticmethod
     def _normalize_obs_copy(obs_copy, copy_observations, unsafe_zero_copy):

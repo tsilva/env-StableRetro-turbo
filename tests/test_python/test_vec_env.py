@@ -449,7 +449,7 @@ def test_stable_retro_native_vec_env_resolves_scenario_done_on_events(tmp_path):
         )
 
 
-def test_stable_retro_native_vec_env_new_keyword_normalization():
+def test_stable_retro_native_vec_env_keyword_normalization():
     pytest.importorskip("stable_baselines3")
     from stable_retro.vec_env import RetroVecEnv, _UNSET
 
@@ -476,16 +476,16 @@ def test_stable_retro_native_vec_env_new_keyword_normalization():
     ) == (("life_loss", "default", ("lives",), "decrease", "reset"),)
 
 
-def test_stable_retro_native_vec_env_accepts_new_keyword_shape(tmp_path):
+def test_stable_retro_native_vec_env_accepts_retro_env_keyword_shape(tmp_path):
     pytest.importorskip("stable_baselines3")
 
     env = _make_test_native_vec_env(
         tmp_path,
         obs_layout="chw",
         obs_copy="safe_view",
-        frame_maxpool=True,
-        reset_noops=0,
-        action_sticky_prob=0.0,
+        maxpool_last_two=True,
+        noop_reset_max=0,
+        sticky_action_prob=0.0,
         info_filter="terminal",
     )
     try:
@@ -504,6 +504,24 @@ def test_stable_retro_native_vec_env_accepts_new_keyword_shape(tmp_path):
         assert infos == [{}, {}]
     finally:
         env.close()
+
+
+@pytest.mark.parametrize(
+    "legacy_kwarg",
+    [
+        {"frame_maxpool": True},
+        {"reset_noops": 0},
+        {"action_sticky_prob": 0.0},
+    ],
+)
+def test_stable_retro_native_vec_env_rejects_legacy_vector_keyword_shape(
+    tmp_path,
+    legacy_kwarg,
+):
+    pytest.importorskip("stable_baselines3")
+
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        _make_test_native_vec_env(tmp_path, **legacy_kwarg)
 
 
 def test_stable_retro_native_vec_env_validates_mixed_state_config():

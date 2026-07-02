@@ -525,6 +525,13 @@ if(BUILD_TESTS)
   enable_testing()
   add_subdirectory(third-party/gtest/googlemock)
   add_subdirectory(tests)
+  if(BUILD_PYTHON)
+    add_test(
+      NAME python_hf_policy_stable_retro_parity
+      COMMAND ${Python_EXECUTABLE} -m pytest -q
+              ${CMAKE_SOURCE_DIR}/tests/test_python/test_stable_retro_policy_parity.py
+      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  endif()
 endif()
 
 if(BUILD_UI)

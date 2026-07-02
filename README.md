@@ -74,9 +74,9 @@ env = retro.RetroVecEnv(
     obs_copy="safe_view",         # Avoid extra copies while keeping observations safe.
     frame_skip=4,                 # Repeat each action for 4 emulator frames.
     frame_stack=4,                # Stack the last 4 processed frames.
-    frame_maxpool=True,           # Max-pool recent frames to reduce flicker.
-    reset_noops=0,                # Disable random no-op starts for this example.
-    action_sticky_prob=0.0,       # Disable sticky actions for deterministic stepping.
+    maxpool_last_two=True,        # Max-pool recent frames to reduce flicker.
+    noop_reset_max=0,             # Disable random no-op starts for this example.
+    sticky_action_prob=0.0,       # Disable sticky actions for deterministic stepping.
     info_filter="terminal",       # Only return full info payloads at episode end.
 )
 
@@ -113,9 +113,9 @@ retro.RetroVecEnv(
     obs_copy="copy",             # "copy", "safe_view", or "unsafe_view"
     frame_skip=1,                # repeat each action for this many frames
     frame_stack=1,               # stack this many processed frames
-    frame_maxpool=False,         # max-pool the last two skipped frames
-    reset_noops=0,               # random no-op frames after reset
-    action_sticky_prob=0.0,      # chance to repeat the previous lane action
+    maxpool_last_two=False,      # max-pool the last two skipped frames
+    noop_reset_max=0,            # random no-op frames after reset
+    sticky_action_prob=0.0,      # chance to repeat the previous lane action
     reward_clip=False,           # clip rewards in the native path
     info_filter="all",           # "all", "terminal", "none", or mode/keys mapping
     done_on=None,                # info-variable terminal rules
@@ -140,9 +140,9 @@ one state per env lane, or a `{state_name: weight}` mapping sampled on reset.
 | `obs_copy` | `"copy"` | Observation ownership mode: `"copy"`, `"safe_view"`, or benchmark-only `"unsafe_view"`. |
 | `frame_skip` | `1` | Repeat each action for this many emulator frames. |
 | `frame_stack` | `1` | Stack this many processed frames in each returned observation. |
-| `frame_maxpool` | `False` | Max-pool the last two skipped frames before preprocessing. |
-| `reset_noops` | `0` | Apply up to this many random no-op frames after reset. |
-| `action_sticky_prob` | `0.0` | Probability of repeating the previous lane action instead of the requested action. |
+| `maxpool_last_two` | `False` | Max-pool the last two skipped frames before preprocessing. |
+| `noop_reset_max` | `0` | Apply up to this many random no-op frames after reset. |
+| `sticky_action_prob` | `0.0` | Probability of repeating the previous lane action instead of the requested action. |
 | `reward_clip` | `False` | Clip rewards with the same semantics as the single-env preprocessing path. |
 | `info_filter` | `"all"` | Info payload filter: `"all"`, `"terminal"`, `"none"`, or `{"mode": ..., "keys": (...)}`. |
 | `done_on` | `None` | General per-lane terminal rules keyed by info-variable `change`, `increase`, or `decrease`. |

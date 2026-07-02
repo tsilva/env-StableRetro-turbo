@@ -25,3 +25,8 @@ constraint-dependencies = [
   "mistralai!=2.4.6",
   "guardrails-ai!=0.10.1",
 ]
+
+[tool.pytest.ini_options]
+markers = [
+  "retro_oracle: tests that compare against optional stable-retro oracle packages",
+]
