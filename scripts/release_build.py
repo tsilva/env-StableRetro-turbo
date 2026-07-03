@@ -214,6 +214,14 @@ def env_lines(env: dict[str, str]) -> str:
     return " ".join(f"{key}={shell_quote(value)}" for key, value in env.items())
 
 
+def release_temp_root() -> Path:
+    root = Path("/private/tmp")
+    if not root.exists():
+        root = Path(tempfile.gettempdir())
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 def macos_env() -> dict[str, str]:
     return {
         "MACOSX_DEPLOYMENT_TARGET": "14.0",
@@ -235,7 +243,7 @@ def prepare_sources(args: argparse.Namespace) -> None:
     version = args.version or read_version()
     post = post_number(version)
     root = args.root or Path(
-        tempfile.mkdtemp(prefix=f"stable-retro-turbo-post{post}-builds.", dir="/private/tmp")
+        tempfile.mkdtemp(prefix=f"stable-retro-turbo-post{post}-builds.", dir=release_temp_root())
     )
     root = root.resolve()
     macos_src = root / "macos-src"
@@ -479,9 +487,10 @@ def run(args_list: list[str], **kwargs: object) -> None:
 def smoke_wheel(args: argparse.Namespace) -> None:
     wheel = args.wheel.absolute()
     python = args.python.absolute()
+    temp_root = release_temp_root()
     uv_env = os.environ.copy()
-    uv_env.setdefault("UV_CACHE_DIR", "/private/tmp/uv-cache-stable-retro-build")
-    with tempfile.TemporaryDirectory(prefix="stable-retro-macos-wheel-smoke.", dir="/private/tmp") as tmp:
+    uv_env.setdefault("UV_CACHE_DIR", str(temp_root / "uv-cache-stable-retro-build"))
+    with tempfile.TemporaryDirectory(prefix="stable-retro-wheel-smoke.", dir=temp_root) as tmp:
         target = Path(tmp)
         if args.installer == "uv":
             run(
@@ -532,7 +541,7 @@ assert not hasattr(stable_retro, "StableRetroNativeVecEnv")
         env = os.environ.copy()
         env["PYTHONPATH"] = str(target)
         env.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-stable-retro")
-        run([str(python), "-c", code], cwd="/private/tmp", env=env)
+        run([str(python), "-c", code], cwd=temp_root, env=env)
 
 
 def sha256(path: Path) -> str:
