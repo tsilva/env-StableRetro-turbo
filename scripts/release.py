@@ -83,16 +83,6 @@ def next_post_version(current: str, upstream_base: str) -> str:
     return f"{current_base}.post{current_post + 1}"
 
 
-def next_semver_version(current: str, part: str) -> str:
-    current_base, _ = parse_version(current)
-    major, minor, patch = [int(piece) for piece in current_base.split(".")]
-    if part == "major":
-        return f"{major + 1}.0.0"
-    if part == "minor":
-        return f"{major}.{minor + 1}.0"
-    raise ValueError(part)
-
-
 def helper(*args: str) -> None:
     run([str(PYTHON), str(RELEASE_HELPER), *args])
 
@@ -102,12 +92,10 @@ def target_version(args: argparse.Namespace) -> str:
     upstream_base = upstream_stable_retro_version()
     if args.to:
         version = args.to
-    elif args.part == "post":
-        version = next_post_version(current, upstream_base)
     else:
-        version = next_semver_version(current, args.part)
+        version = next_post_version(current, upstream_base)
     target_base, _ = parse_version(version)
-    if args.part == "post" and target_base != upstream_base and not args.allow_upstream_base_mismatch:
+    if target_base != upstream_base and not args.allow_upstream_base_mismatch:
         raise SystemExit(
             f"target version {version} is based on {target_base}, but upstream/main is {upstream_base}; "
             "pass --allow-upstream-base-mismatch to override"
@@ -146,13 +134,7 @@ def parse_args() -> argparse.Namespace:
         description=__doc__,
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--to", help="Exact release version, for example 1.1.0")
-    parser.add_argument(
-        "--part",
-        choices=("minor", "major", "post"),
-        default="minor",
-        help="Version component to bump when --to is omitted",
-    )
+    parser.add_argument("--to", help="Exact release version, for example 1.0.1.post2")
     parser.add_argument("--skip-checks", action="store_true", help="Skip local helper/compile checks")
     parser.add_argument("--dry-run-push", action="store_true", help="Create the commit and tag, but dry-run the push")
     parser.add_argument(
