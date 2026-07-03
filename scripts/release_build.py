@@ -97,6 +97,12 @@ def parse_version(version: str) -> tuple[str, int]:
     return match.group("base"), int(match.group("post") or 0)
 
 
+def version_sort_key(version: str) -> tuple[int, int, int, int]:
+    base, post = parse_version(version)
+    major, minor, patch = (int(part) for part in base.split("."))
+    return major, minor, patch, post
+
+
 def next_post_version(version: str) -> str:
     base, post = parse_version(version)
     return f"{base}.post{post + 1}"
@@ -274,13 +280,39 @@ def bump_version(args: argparse.Namespace) -> None:
     print(target)
 
 
+def fetch_pypi_project() -> dict[str, object]:
+    url = f"https://pypi.org/pypi/{PACKAGE_NAME}/json"
+    with urllib.request.urlopen(url, timeout=20) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def release_has_non_yanked_file(files: object) -> bool:
+    if not isinstance(files, list):
+        return False
+    return any(isinstance(file, dict) and not file.get("yanked", False) for file in files)
+
+
+def latest_non_yanked_pypi_version(releases: object) -> str | None:
+    if not isinstance(releases, dict):
+        return None
+    candidates: list[tuple[tuple[int, int, int, int], str]] = []
+    for version, files in releases.items():
+        if not isinstance(version, str) or not release_has_non_yanked_file(files):
+            continue
+        try:
+            candidates.append((version_sort_key(version), version))
+        except ValueError:
+            continue
+    if not candidates:
+        return None
+    return max(candidates)[1]
+
+
 def check_pypi(args: argparse.Namespace) -> None:
     version = args.version or read_version()
     parse_version(version)
-    url = f"https://pypi.org/pypi/{PACKAGE_NAME}/json"
     try:
-        with urllib.request.urlopen(url, timeout=20) as response:
-            data = json.loads(response.read().decode("utf-8"))
+        data = fetch_pypi_project()
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             print(json.dumps({"package": PACKAGE_NAME, "exists": False, "version_exists": False}, indent=2))
@@ -291,6 +323,28 @@ def check_pypi(args: argparse.Namespace) -> None:
     print(json.dumps({"package": PACKAGE_NAME, "version": version, "version_exists": exists}, indent=2))
     if exists:
         raise SystemExit(f"{PACKAGE_NAME} {version} already exists on PyPI")
+
+
+def latest_pypi(args: argparse.Namespace) -> None:
+    try:
+        data = fetch_pypi_project()
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            print(json.dumps({"package": PACKAGE_NAME, "exists": False, "latest_non_yanked": None}, indent=2))
+            return
+        raise
+    latest = latest_non_yanked_pypi_version(data.get("releases"))
+    info = data.get("info", {})
+    info_version = info.get("version") if isinstance(info, dict) else None
+    result = {
+        "package": PACKAGE_NAME,
+        "exists": True,
+        "latest_non_yanked": latest,
+        "pypi_info_version": info_version,
+    }
+    print(json.dumps(result, indent=2))
+    if args.fail_if_mismatch and latest != info_version:
+        raise SystemExit(f"PyPI info.version {info_version!r} does not match latest non-yanked {latest!r}")
 
 
 def build_commands(args: argparse.Namespace) -> None:
@@ -591,6 +645,14 @@ def main() -> None:
     pypi = subparsers.add_parser("check-pypi", help="Check whether a PyPI version is still unused")
     pypi.add_argument("--version")
     pypi.set_defaults(func=check_pypi)
+
+    latest = subparsers.add_parser("latest-pypi", help="Print the latest non-yanked PyPI version")
+    latest.add_argument(
+        "--fail-if-mismatch",
+        action="store_true",
+        help="Fail if PyPI info.version differs from the computed latest non-yanked release",
+    )
+    latest.set_defaults(func=latest_pypi)
 
     prepare = subparsers.add_parser("prepare-sources", help="Create clean macOS/Linux source copies")
     prepare.add_argument("--version")

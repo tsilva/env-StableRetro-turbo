@@ -23,7 +23,7 @@ author = "Farama Foundation"
 
 # The full version, including alpha/beta/rc tags
 with open(os.path.join(os.path.dirname(__file__), "../stable_retro/VERSION.txt")) as f:
-    release = f.read()
+    release = f.read().strip()
 
 
 # -- General configuration ---------------------------------------------------

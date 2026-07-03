@@ -3,7 +3,7 @@
 
   <p>
     <a href="https://pypi.org/project/stable-retro-turbo/">
-      <img src="https://img.shields.io/pypi/v/stable-retro-turbo.svg" alt="PyPI version" />
+      <img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fpypi.org%2Fpypi%2Fstable-retro-turbo%2Fjson&amp;query=%24.info.version&amp;label=pypi&amp;prefix=v&amp;cacheSeconds=300" alt="PyPI version" />
     </a>
   </p>
 

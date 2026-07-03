@@ -24,6 +24,46 @@ def test_next_post_version_handles_base_version():
     assert release_build.next_post_version("1.0.0") == "1.0.0.post1"
 
 
+def test_version_file_is_the_single_source_of_truth():
+    root = Path(__file__).resolve().parents[2]
+    version_path = root / "stable_retro" / "VERSION.txt"
+
+    assert (root / "setup.py").read_text(encoding="utf-8").count("stable_retro\" / \"VERSION.txt") == 1
+    assert "../stable_retro/VERSION.txt" in (root / "docs" / "conf.py").read_text(encoding="utf-8")
+    assert "stable_retro/VERSION.txt" in (root / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8"
+    )
+    assert (root / "stable_retro" / "__init__.py").read_text(encoding="utf-8").count("VERSION.txt") == 1
+    assert version_path.read_text(encoding="utf-8").strip()
+
+
+def test_latest_non_yanked_pypi_version_ignores_fully_yanked_latest_release():
+    release_build = _release_build_module()
+    releases = {
+        "1.0.1.post3": [{"filename": "older.whl", "yanked": False}],
+        "1.0.1.post4": [{"filename": "current.whl", "yanked": False}],
+        "1.3.0": [
+            {"filename": "macos.whl", "yanked": True},
+            {"filename": "linux.whl", "yanked": True},
+        ],
+    }
+
+    assert release_build.latest_non_yanked_pypi_version(releases) == "1.0.1.post4"
+
+
+def test_latest_non_yanked_pypi_version_accepts_release_with_any_non_yanked_file():
+    release_build = _release_build_module()
+    releases = {
+        "1.0.1.post4": [{"filename": "current.whl", "yanked": False}],
+        "1.0.1.post5": [
+            {"filename": "bad-platform.whl", "yanked": True},
+            {"filename": "good-platform.whl", "yanked": False},
+        ],
+    }
+
+    assert release_build.latest_non_yanked_pypi_version(releases) == "1.0.1.post5"
+
+
 def test_should_ignore_root_build_but_not_skill_build_directory():
     release_build = _release_build_module()
 

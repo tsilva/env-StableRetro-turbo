@@ -13,7 +13,7 @@ ROOT_DIR = os.path.abspath(os.path.dirname(__file__))
 core_path(os.path.join(os.path.dirname(__file__), "cores"))
 
 with open(os.path.join(os.path.dirname(__file__), "VERSION.txt")) as f:
-    __version__ = f.read()
+    __version__ = f.read().strip()
 
 
 __all__ = [
