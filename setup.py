@@ -284,6 +284,7 @@ class CMakeBuild(build_ext):
 
 setup(
     name="stable-retro-turbo",
+    description="Blazing-fast Stable Retro fork with native vectorization and preprocessing",
     long_description=README,
     long_description_content_type="text/markdown",
     author="Farama Foundation",

@@ -390,6 +390,29 @@ def test_stable_retro_native_vec_env_resolves_scenario_done_on_events(tmp_path):
         scenario_path=scenario_path,
     ) == (("life_loss", "lives_decrease", ("lives",), "decrease", "reset"),)
 
+    smb3_scenario_path = retro.data.get_file_path(
+        "SuperMarioBros3-Nes-v0",
+        "scenario.json",
+    )
+    smb3_level_complete_keys = tuple(
+        f"levelComplete{offset:02x}" for offset in range(0, 0x40, 4)
+    )
+    assert RetroVecEnv._normalize_done_on(
+        ["life_loss", "level_change"],
+        label="done_on",
+        game="SuperMarioBros3-Nes-v0",
+        scenario_path=smb3_scenario_path,
+    ) == (
+        ("life_loss", "lives_decrease", ("lives",), "decrease", "reset"),
+        (
+            "level_change",
+            "level_complete_flags_changed",
+            smb3_level_complete_keys,
+            "change",
+            "reset",
+        ),
+    )
+
     custom_scenario = tmp_path / "scenario.json"
     custom_scenario.write_text(
         """

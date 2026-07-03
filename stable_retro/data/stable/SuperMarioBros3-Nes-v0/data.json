@@ -4,6 +4,82 @@
       "address": 144,
       "type": "|u1"
     },
+    "levelComplete00": {
+      "address": 32000,
+      "type": ">u4"
+    },
+    "levelComplete04": {
+      "address": 32004,
+      "type": ">u4"
+    },
+    "levelComplete08": {
+      "address": 32008,
+      "type": ">u4"
+    },
+    "levelComplete0c": {
+      "address": 32012,
+      "type": ">u4"
+    },
+    "levelComplete10": {
+      "address": 32016,
+      "type": ">u4"
+    },
+    "levelComplete14": {
+      "address": 32020,
+      "type": ">u4"
+    },
+    "levelComplete18": {
+      "address": 32024,
+      "type": ">u4"
+    },
+    "levelComplete1c": {
+      "address": 32028,
+      "type": ">u4"
+    },
+    "levelComplete20": {
+      "address": 32032,
+      "type": ">u4"
+    },
+    "levelComplete24": {
+      "address": 32036,
+      "type": ">u4"
+    },
+    "levelComplete28": {
+      "address": 32040,
+      "type": ">u4"
+    },
+    "levelComplete2c": {
+      "address": 32044,
+      "type": ">u4"
+    },
+    "levelComplete30": {
+      "address": 32048,
+      "type": ">u4"
+    },
+    "levelComplete34": {
+      "address": 32052,
+      "type": ">u4"
+    },
+    "levelComplete38": {
+      "address": 32056,
+      "type": ">u4"
+    },
+    "levelComplete3c": {
+      "address": 32060,
+      "type": ">u4"
+    },
+    "levelXHi": {
+      "address": 31096,
+      "type": "|u1"
+    },
+    "levelXLo": {
+      "address": 31098,
+      "type": "|u1"
+    },
+    "levelY": {
+      "address": 31094,
+      "type": "|u1"
+    },
     "lives": {
       "address": 1846,
       "type": "|i1"
@@ -15,6 +91,10 @@
     "time": {
       "address": 1800,
       "type": ">u4"
+    },
+    "world": {
+      "address": 1831,
+      "type": "|u1"
     }
   }
 }

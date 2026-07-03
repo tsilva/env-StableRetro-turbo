@@ -1,4 +1,47 @@
 {
+  "events": {
+    "life_loss": {
+      "description": "Player lost a life.",
+      "triggers": [
+        {
+          "id": "lives_decrease",
+          "variables": [
+            "lives"
+          ],
+          "op": "decrease",
+          "compare": "reset"
+        }
+      ]
+    },
+    "level_change": {
+      "description": "Current level completion state changed.",
+      "triggers": [
+        {
+          "id": "level_complete_flags_changed",
+          "variables": [
+            "levelComplete00",
+            "levelComplete04",
+            "levelComplete08",
+            "levelComplete0c",
+            "levelComplete10",
+            "levelComplete14",
+            "levelComplete18",
+            "levelComplete1c",
+            "levelComplete20",
+            "levelComplete24",
+            "levelComplete28",
+            "levelComplete2c",
+            "levelComplete30",
+            "levelComplete34",
+            "levelComplete38",
+            "levelComplete3c"
+          ],
+          "op": "change",
+          "compare": "reset"
+        }
+      ]
+    }
+  },
   "crop": [
     0,
     0,
