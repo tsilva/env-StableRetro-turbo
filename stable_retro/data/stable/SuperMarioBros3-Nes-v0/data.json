@@ -84,6 +84,10 @@
       "address": 1846,
       "type": "|i1"
     },
+    "returnToMap": {
+      "address": 20,
+      "type": "|u1"
+    },
     "score": {
       "address": 1813,
       "type": ">u3"

@@ -406,6 +406,13 @@ def test_stable_retro_native_vec_env_resolves_scenario_done_on_events(tmp_path):
         ("life_loss", "lives_decrease", ("lives",), "decrease", "reset"),
         (
             "level_change",
+            "return_to_map_started",
+            ("returnToMap",),
+            "increase",
+            "reset",
+        ),
+        (
+            "level_change",
             "level_complete_flags_changed",
             smb3_level_complete_keys,
             "change",

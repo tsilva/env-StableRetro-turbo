@@ -14,8 +14,16 @@
       ]
     },
     "level_change": {
-      "description": "Current level completion state changed.",
+      "description": "Current level is returning to the world map or completion state changed.",
       "triggers": [
+        {
+          "id": "return_to_map_started",
+          "variables": [
+            "returnToMap"
+          ],
+          "op": "increase",
+          "compare": "reset"
+        },
         {
           "id": "level_complete_flags_changed",
           "variables": [
