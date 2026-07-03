@@ -47,7 +47,7 @@ jobs:
       - name: Install release environment
         run: |
           uv venv --allow-existing --python "${PYTHON_VERSION}" .venv314
-          uv pip install --python .venv314/bin/python "build==1.5.0" "cibuildwheel==3.3.1" "cmake==4.3.2" "delocate==0.13.0" "setuptools==81.0.0" "twine==6.2.0" "wheel==0.47.0"
+          uv pip install --python .venv314/bin/python "build==1.5.0" "cibuildwheel==3.3.1" "cmake==4.3.2" "delocate==0.13.0" "farama-notifications==0.0.6" "gymnasium==1.2.3" "pyglet==1.5.31" "setuptools==81.0.0" "twine==6.2.0" "wheel==0.47.0"
 
       - name: Resolve version
         id: version
@@ -112,7 +112,7 @@ jobs:
       - name: Install release environment
         run: |
           uv venv --allow-existing --python "${PYTHON_VERSION}" .venv314
-          uv pip install --python .venv314/bin/python "build==1.5.0" "cibuildwheel==3.3.1" "cmake==4.3.2" "delocate==0.13.0" "setuptools==81.0.0" "twine==6.2.0" "wheel==0.47.0"
+          uv pip install --python .venv314/bin/python "build==1.5.0" "cibuildwheel==3.3.1" "cmake==4.3.2" "delocate==0.13.0" "farama-notifications==0.0.6" "gymnasium==1.2.3" "pyglet==1.5.31" "setuptools==81.0.0" "twine==6.2.0" "wheel==0.47.0"
 
       - name: Build wheels
         run: .venv314/bin/python scripts/release_build.py build-platform --platform "${{ matrix.platform }}" --version "${{ needs.validate.outputs.version }}"
@@ -165,7 +165,7 @@ jobs:
       - name: Install release environment
         run: |
           uv venv --allow-existing --python "${PYTHON_VERSION}" .venv314
-          uv pip install --python .venv314/bin/python "build==1.5.0" "cibuildwheel==3.3.1" "cmake==4.3.2" "delocate==0.13.0" "setuptools==81.0.0" "twine==6.2.0" "wheel==0.47.0"
+          uv pip install --python .venv314/bin/python "build==1.5.0" "cibuildwheel==3.3.1" "cmake==4.3.2" "delocate==0.13.0" "farama-notifications==0.0.6" "gymnasium==1.2.3" "pyglet==1.5.31" "setuptools==81.0.0" "twine==6.2.0" "wheel==0.47.0"
 
       - name: Download macOS wheel
         uses: actions/download-artifact@v4
