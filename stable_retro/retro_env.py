@@ -2,6 +2,7 @@ import gc
 import gzip
 import json
 import os
+from typing import Literal
 
 import gymnasium as gym
 import numpy as np
@@ -36,6 +37,8 @@ class RetroEnv(gym.Env, EzPickle):
         render_mode="human",
         obs_resize=None,
         obs_crop=None,
+        obs_crop_mode: Literal["remove", "mask"] = "remove",
+        obs_crop_fill: int = 0,
         obs_grayscale=False,
         obs_resize_algorithm="nearest",
         frame_skip=1,
@@ -67,6 +70,8 @@ class RetroEnv(gym.Env, EzPickle):
             render_mode,
             obs_resize,
             obs_crop,
+            obs_crop_mode,
+            obs_crop_fill,
             obs_grayscale,
             obs_resize_algorithm,
             frame_skip,
@@ -81,6 +86,8 @@ class RetroEnv(gym.Env, EzPickle):
         self._obs_type = obs_type
         self._obs_resize = self._normalize_obs_resize(obs_resize)
         self._obs_crop = self._normalize_obs_crop(obs_crop)
+        self._obs_crop_mode = self._normalize_obs_crop_mode(obs_crop_mode)
+        self._obs_crop_fill = self._normalize_obs_crop_fill(obs_crop_fill)
         self._obs_grayscale = bool(obs_grayscale)
         self._obs_resize_algorithm = self._normalize_obs_resize_algorithm(
             obs_resize_algorithm,
@@ -271,6 +278,20 @@ class RetroEnv(gym.Env, EzPickle):
         return top, bottom, left, right
 
     @staticmethod
+    def _normalize_obs_crop_mode(obs_crop_mode):
+        mode = str(obs_crop_mode).lower()
+        if mode not in {"remove", "mask"}:
+            raise ValueError("obs_crop_mode must be 'remove' or 'mask'")
+        return mode
+
+    @staticmethod
+    def _normalize_obs_crop_fill(obs_crop_fill):
+        fill = int(obs_crop_fill)
+        if fill < 0 or fill > 255:
+            raise ValueError("obs_crop_fill must be between 0 and 255")
+        return fill
+
+    @staticmethod
     def _normalize_obs_resize_algorithm(obs_resize_algorithm):
         algorithm = str(obs_resize_algorithm).lower()
         if algorithm not in {"nearest", "bilinear", "area"}:
@@ -376,11 +397,22 @@ class RetroEnv(gym.Env, EzPickle):
         height, width = image.shape[:2]
         y2 = height - bottom if bottom else height
         x2 = width - right if right else width
+        if self._obs_crop_mode == "mask":
+            result = np.array(image, copy=True)
+            if top:
+                result[: min(top, height), ...] = self._obs_crop_fill
+            if bottom:
+                result[max(height - bottom, 0) :, ...] = self._obs_crop_fill
+            if left:
+                result[:, : min(left, width), ...] = self._obs_crop_fill
+            if right:
+                result[:, max(width - right, 0) :, ...] = self._obs_crop_fill
+            return result
         if top >= y2 or left >= x2:
             raise ValueError("obs_crop removes the entire observation")
         return image[top:y2, left:x2]
 
-    def _effective_crop(self, player, raw_height, raw_width):
+    def _base_crop(self, player, raw_height, raw_width):
         x, y, w, h = self.data.crop_info(player)
         if not w or x + w > raw_width:
             right_edge = raw_width
@@ -390,9 +422,13 @@ class RetroEnv(gym.Env, EzPickle):
             bottom_edge = raw_height
         else:
             bottom_edge = y + h
-        top = y
-        left = x
-        if self._obs_crop is not None:
+        return int(y), int(raw_height - bottom_edge), int(x), int(raw_width - right_edge)
+
+    def _effective_crop(self, player, raw_height, raw_width):
+        top, bottom, left, right = self._base_crop(player, raw_height, raw_width)
+        bottom_edge = raw_height - bottom
+        right_edge = raw_width - right
+        if self._obs_crop is not None and self._obs_crop_mode == "remove":
             obs_top, obs_bottom, obs_left, obs_right = self._obs_crop
             top += obs_top
             left += obs_left
@@ -406,6 +442,11 @@ class RetroEnv(gym.Env, EzPickle):
             int(left),
             int(raw_width - right_edge),
         )
+
+    def _native_mask_crop(self):
+        if self._obs_crop is None or self._obs_crop_mode != "mask":
+            return None
+        return self._obs_crop
 
     def _native_processed_screen(self, player):
         if player != 0 or self._rotation_steps() != 0:
@@ -422,6 +463,8 @@ class RetroEnv(gym.Env, EzPickle):
                 self._obs_resize,
                 self._obs_grayscale,
                 self._obs_resize_algorithm,
+                self._native_mask_crop(),
+                self._obs_crop_fill,
             ),
         )
 
@@ -448,6 +491,8 @@ class RetroEnv(gym.Env, EzPickle):
             self._obs_grayscale,
             self._obs_resize_algorithm,
             self._maxpool_last_two,
+            self._native_mask_crop(),
+            self._obs_crop_fill,
         )
 
     def _apply_obs_grayscale(self, image):

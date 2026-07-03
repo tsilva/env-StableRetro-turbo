@@ -6,7 +6,7 @@ import json
 import math
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import gymnasium as gym
@@ -66,6 +66,8 @@ class RetroVecEnv(VecEnv):
         obs_copy="copy",
         obs_resize=None,
         obs_crop=None,
+        obs_crop_mode: Literal["remove", "mask"] = "remove",
+        obs_crop_fill: int = 0,
         obs_grayscale=False,
         obs_resize_algorithm="nearest",
         obs_layout="hwc",
@@ -123,6 +125,8 @@ class RetroVecEnv(VecEnv):
             copy_observations,
             unsafe_zero_copy,
         )
+        obs_crop_mode = self._normalize_obs_crop_mode(obs_crop_mode)
+        obs_crop_fill = self._normalize_obs_crop_fill(obs_crop_fill)
 
         env_kwargs = {
             "use_restricted_actions": use_restricted_actions,
@@ -132,6 +136,8 @@ class RetroVecEnv(VecEnv):
             "render_mode": render_mode,
             "obs_resize": obs_resize,
             "obs_crop": obs_crop,
+            "obs_crop_mode": obs_crop_mode,
+            "obs_crop_fill": obs_crop_fill,
             "obs_grayscale": obs_grayscale,
             "obs_resize_algorithm": obs_resize_algorithm,
             "frame_skip": frame_skip,
@@ -189,6 +195,7 @@ class RetroVecEnv(VecEnv):
                 )
             width, height = template.em.get_resolution()
             crop = template._effective_crop(0, height, width)
+            crop_mask = template._native_mask_crop()
             initial_state = template.initial_state if template.initial_state else None
             self.action_space = template.action_space
             self.observation_space = self._observation_space_for_layout(
@@ -281,6 +288,8 @@ class RetroVecEnv(VecEnv):
             done_on_info_rules,
             initial_state_labels,
             initial_state_weights,
+            crop_mask,
+            obs_crop_fill,
         )
         super().__init__(int(num_envs), self.observation_space, self.action_space)
         self.initial_state_names = tuple(self.native.initial_state_names)
@@ -348,6 +357,20 @@ class RetroVecEnv(VecEnv):
         if mode == "unsafe_view":
             return False, True
         raise ValueError("obs_copy must be 'copy', 'safe_view', or 'unsafe_view'")
+
+    @staticmethod
+    def _normalize_obs_crop_mode(obs_crop_mode):
+        mode = str(obs_crop_mode).lower()
+        if mode not in {"remove", "mask"}:
+            raise ValueError("obs_crop_mode must be 'remove' or 'mask'")
+        return mode
+
+    @staticmethod
+    def _normalize_obs_crop_fill(obs_crop_fill):
+        fill = int(obs_crop_fill)
+        if fill < 0 or fill > 255:
+            raise ValueError("obs_crop_fill must be between 0 and 255")
+        return fill
 
     @classmethod
     def _normalize_info_filter(cls, info_filter, info_mode, info_keys):

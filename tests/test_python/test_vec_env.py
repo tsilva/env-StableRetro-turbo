@@ -1,4 +1,5 @@
 import hashlib
+import inspect
 import os
 from pathlib import Path
 
@@ -119,6 +120,211 @@ def _make_test_native_vec_env(tmp_path, **kwargs):
         num_threads=2,
         **kwargs,
     )
+
+
+def _make_crop_native_vec_env(tmp_path, **kwargs):
+    import stable_retro as retro
+    from stable_retro.vec_env import RetroVecEnv
+
+    num_envs = kwargs.pop("num_envs", 1)
+    info_path = kwargs.pop("info_path", _empty_info_path(tmp_path))
+    root = Path(__file__).resolve().parents[1]
+    rom_path = root / "roms" / "Dr88-FamiconIntro.nes"
+    defaults = {
+        "obs_resize": None,
+        "obs_grayscale": False,
+        "frame_skip": 1,
+        "frame_stack": 1,
+        "num_threads": 1,
+        "info_mode": "terminal",
+    }
+    defaults.update(kwargs)
+
+    return RetroVecEnv(
+        "Dr88-FamiconIntro",
+        state=retro.State.NONE,
+        num_envs=num_envs,
+        rom_path=str(rom_path),
+        info=str(info_path),
+        scenario=str(info_path),
+        **defaults,
+    )
+
+
+def test_stable_retro_native_vec_env_crop_mask_signature_defaults():
+    from stable_retro.retro_env import RetroEnv
+    from stable_retro.vec_env import RetroVecEnv
+
+    vec_sig = inspect.signature(RetroVecEnv)
+    env_sig = inspect.signature(RetroEnv)
+
+    assert vec_sig.parameters["obs_crop_mode"].default == "remove"
+    assert vec_sig.parameters["obs_crop_fill"].default == 0
+    assert env_sig.parameters["obs_crop_mode"].default == "remove"
+    assert env_sig.parameters["obs_crop_fill"].default == 0
+
+
+def test_stable_retro_native_vec_env_crop_mask_preserves_full_canvas_shape(tmp_path):
+    pytest.importorskip("stable_baselines3")
+
+    full_env = _make_crop_native_vec_env(tmp_path)
+    mask_env = _make_crop_native_vec_env(
+        tmp_path,
+        obs_crop=(32, 0, 0, 0),
+        obs_crop_mode="mask",
+    )
+    try:
+        full_obs = full_env.reset()
+        mask_obs = mask_env.reset()
+
+        assert mask_env.observation_space.shape == full_env.observation_space.shape
+        assert mask_obs.shape == full_obs.shape
+    finally:
+        full_env.close()
+        mask_env.close()
+
+
+def test_stable_retro_native_vec_env_crop_remove_matches_default(tmp_path):
+    pytest.importorskip("stable_baselines3")
+
+    default_env = _make_crop_native_vec_env(
+        tmp_path,
+        obs_crop=(32, 0, 0, 0),
+    )
+    explicit_env = _make_crop_native_vec_env(
+        tmp_path,
+        obs_crop=(32, 0, 0, 0),
+        obs_crop_mode="remove",
+    )
+    full_env = _make_crop_native_vec_env(tmp_path)
+    try:
+        default_obs = default_env.reset()
+        explicit_obs = explicit_env.reset()
+        full_obs = full_env.reset()
+
+        np.testing.assert_array_equal(explicit_obs, default_obs)
+        assert explicit_obs.shape[1] == full_obs.shape[1] - 32
+        assert explicit_env.observation_space.shape == default_env.observation_space.shape
+    finally:
+        default_env.close()
+        explicit_env.close()
+        full_env.close()
+
+
+def test_stable_retro_native_vec_env_crop_none_ignores_mask_mode(tmp_path):
+    pytest.importorskip("stable_baselines3")
+
+    default_env = _make_crop_native_vec_env(tmp_path)
+    mask_mode_env = _make_crop_native_vec_env(
+        tmp_path,
+        obs_crop=None,
+        obs_crop_mode="mask",
+        obs_crop_fill=123,
+    )
+    try:
+        default_obs = default_env.reset()
+        mask_mode_obs = mask_mode_env.reset()
+
+        np.testing.assert_array_equal(mask_mode_obs, default_obs)
+        assert mask_mode_env.observation_space.shape == default_env.observation_space.shape
+    finally:
+        default_env.close()
+        mask_mode_env.close()
+
+
+def test_stable_retro_native_vec_env_crop_mask_fills_region_before_postprocess(
+    tmp_path,
+):
+    pytest.importorskip("stable_baselines3")
+
+    full_env = _make_crop_native_vec_env(tmp_path)
+    mask_env = _make_crop_native_vec_env(
+        tmp_path,
+        obs_crop=(32, 0, 0, 0),
+        obs_crop_mode="mask",
+        obs_crop_fill=17,
+    )
+    try:
+        full_obs = full_env.reset()[0]
+        mask_obs = mask_env.reset()[0]
+
+        assert mask_obs.shape == full_obs.shape
+        assert not np.array_equal(mask_obs, full_obs)
+        np.testing.assert_array_equal(mask_obs[:32, :, :], 17)
+        np.testing.assert_array_equal(mask_obs[32:, :, :], full_obs[32:, :, :])
+    finally:
+        full_env.close()
+        mask_env.close()
+
+
+@pytest.mark.parametrize("bad_mode", ["hide", "", "MASKED"])
+def test_stable_retro_native_vec_env_rejects_invalid_crop_mode(tmp_path, bad_mode):
+    pytest.importorskip("stable_baselines3")
+
+    with pytest.raises(ValueError, match="obs_crop_mode must be 'remove' or 'mask'"):
+        _make_crop_native_vec_env(
+            tmp_path,
+            obs_crop=(32, 0, 0, 0),
+            obs_crop_mode=bad_mode,
+        )
+
+
+@pytest.mark.parametrize("bad_fill", [-1, 256])
+def test_stable_retro_native_vec_env_rejects_invalid_crop_fill(tmp_path, bad_fill):
+    pytest.importorskip("stable_baselines3")
+
+    with pytest.raises(ValueError, match="obs_crop_fill must be between 0 and 255"):
+        _make_crop_native_vec_env(
+            tmp_path,
+            obs_crop=(32, 0, 0, 0),
+            obs_crop_mode="mask",
+            obs_crop_fill=bad_fill,
+        )
+
+
+@pytest.mark.parametrize("obs_copy", ["copy", "safe_view", "unsafe_view"])
+@pytest.mark.parametrize("obs_layout", ["hwc", "chw"])
+@pytest.mark.parametrize("obs_crop_mode", ["remove", "mask"])
+def test_stable_retro_native_vec_env_crop_modes_terminal_layout_semantics(
+    tmp_path,
+    obs_copy,
+    obs_layout,
+    obs_crop_mode,
+):
+    pytest.importorskip("stable_baselines3")
+
+    done_info = _done_on_frame_info_path(tmp_path)
+    env = _make_crop_native_vec_env(
+        tmp_path,
+        info_path=done_info,
+        obs_crop=(1, 0, 0, 0),
+        obs_crop_mode=obs_crop_mode,
+        obs_crop_fill=0,
+        obs_resize=(16, 16),
+        obs_grayscale=True,
+        frame_stack=2,
+        obs_copy=obs_copy,
+        obs_layout=obs_layout,
+        info_mode="all",
+    )
+    try:
+        obs = env.reset()
+        assert env.observation_space.contains(obs[0])
+
+        actions = np.zeros((1, env.num_buttons), dtype=np.uint8)
+        for _ in range(12):
+            obs, _rewards, dones, infos = env.step(actions)
+            if bool(dones[0]):
+                break
+        else:
+            pytest.fail("Dr88 fixture did not reach the terminal frame")
+
+        assert dones.tolist() == [True]
+        assert env.observation_space.contains(obs[0])
+        assert "terminal_observation" in infos[0]
+        assert env.observation_space.contains(infos[0]["terminal_observation"])
+    finally:
+        env.close()
 
 
 @pytest.mark.parametrize("sticky_action_prob", [-0.01, 1.01])

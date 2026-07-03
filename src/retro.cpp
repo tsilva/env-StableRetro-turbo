@@ -136,7 +136,15 @@ struct PyRetroEmulator {
 		std::memcpy(raw.data(), img, raw.size());
 	}
 
-	py::array_t<uint8_t> processRgbFrame(const std::vector<uint8_t>& rgb, py::object cropObj, py::object resizeObj, bool grayscale, const string& algorithm) {
+	py::array_t<uint8_t> processRgbFrame(
+		const std::vector<uint8_t>& rgb,
+		py::object cropObj,
+		py::object resizeObj,
+		bool grayscale,
+		const string& algorithm,
+		py::object maskCropObj,
+		int cropFill
+	) {
 		long w = m_re.getImageWidth();
 		long h = m_re.getImageHeight();
 
@@ -153,6 +161,26 @@ struct PyRetroEmulator {
 			bottom = py::int_(crop[1]);
 			left = py::int_(crop[2]);
 			right = py::int_(crop[3]);
+		}
+		long maskTop = 0;
+		long maskBottom = 0;
+		long maskLeft = 0;
+		long maskRight = 0;
+		if (!maskCropObj.is_none()) {
+			auto maskCrop = py::tuple(maskCropObj);
+			if (maskCrop.size() != 4) {
+				throw std::runtime_error("mask crop must be a (top, bottom, left, right) tuple");
+			}
+			maskTop = py::int_(maskCrop[0]);
+			maskBottom = py::int_(maskCrop[1]);
+			maskLeft = py::int_(maskCrop[2]);
+			maskRight = py::int_(maskCrop[3]);
+			if (maskTop < 0 || maskBottom < 0 || maskLeft < 0 || maskRight < 0) {
+				throw std::runtime_error("mask crop values must be non-negative");
+			}
+		}
+		if (cropFill < 0 || cropFill > 255) {
+			throw std::runtime_error("crop_fill must be between 0 and 255");
 		}
 		if (top < 0 || bottom < 0 || left < 0 || right < 0 || top + bottom >= h || left + right >= w) {
 			throw std::runtime_error("crop removes the entire observation");
@@ -176,12 +204,26 @@ struct PyRetroEmulator {
 		int channels = grayscale ? 1 : 3;
 		py::array_t<uint8_t> arr({ { dstH, dstW, channels } });
 		uint8_t* dst = arr.mutable_data();
+		const uint8_t fill = static_cast<uint8_t>(cropFill);
+
+		auto isMasked = [&](long y, long x) -> bool {
+			return y < maskTop
+				|| (maskBottom > 0 && y >= srcH - maskBottom)
+				|| x < maskLeft
+				|| (maskRight > 0 && x >= srcW - maskRight);
+		};
 
 		auto srcPixel = [&](long y, long x, int c) -> uint8_t {
+			if (isMasked(y, x)) {
+				return fill;
+			}
 			const size_t offset = (static_cast<size_t>(top + y) * static_cast<size_t>(w) + static_cast<size_t>(left + x)) * 3;
 			return rgb[offset + c];
 		};
 		auto srcGray = [&](long y, long x) -> uint8_t {
+			if (isMasked(y, x)) {
+				return fill;
+			}
 			const size_t offset = (static_cast<size_t>(top + y) * static_cast<size_t>(w) + static_cast<size_t>(left + x)) * 3;
 			const uint32_t r = rgb[offset];
 			const uint32_t g = rgb[offset + 1];
@@ -310,10 +352,17 @@ struct PyRetroEmulator {
 		return arr;
 	}
 
-	py::array_t<uint8_t> getProcessedScreen(py::object cropObj, py::object resizeObj, bool grayscale, const string& algorithm) {
+	py::array_t<uint8_t> getProcessedScreen(
+		py::object cropObj,
+		py::object resizeObj,
+		bool grayscale,
+		const string& algorithm,
+		py::object maskCropObj,
+		int cropFill
+	) {
 		std::vector<uint8_t> rgb;
 		readRgbFrame(rgb);
-		return processRgbFrame(rgb, cropObj, resizeObj, grayscale, algorithm);
+		return processRgbFrame(rgb, cropObj, resizeObj, grayscale, algorithm, maskCropObj, cropFill);
 	}
 
 	double getScreenRate() {
@@ -362,7 +411,18 @@ struct PyRetroEmulator {
 	}
 
 	void configureData(PyGameData& data);
-	py::tuple stepRepeatAndProcess(PyGameData& data, py::array_t<uint8_t> mask, int repeats, py::object cropObj, py::object resizeObj, bool grayscale, const string& algorithm, bool maxpoolLastTwo);
+	py::tuple stepRepeatAndProcess(
+		PyGameData& data,
+		py::array_t<uint8_t> mask,
+		int repeats,
+		py::object cropObj,
+		py::object resizeObj,
+		bool grayscale,
+		const string& algorithm,
+		bool maxpoolLastTwo,
+		py::object maskCropObj,
+		int cropFill
+	);
 	static bool loadCoreInfo(const string& json) {
 		return Retro::loadCoreInfo(json);
 	}
@@ -790,14 +850,27 @@ NativeResize parseNativeResize(py::object resizeObj) {
 	return resize;
 }
 
+static inline bool cropMaskHasAny(const NativeCrop& mask) {
+	return mask.top != 0 || mask.bottom != 0 || mask.left != 0 || mask.right != 0;
+}
+
+static inline bool cropMaskContains(const NativeCrop& mask, long height, long width, long y, long x) {
+	return y < mask.top
+		|| (mask.bottom > 0 && y >= height - mask.bottom)
+		|| x < mask.left
+		|| (mask.right > 0 && x >= width - mask.right);
+}
+
 void processRgbFrameToBuffer(
 	const std::vector<uint8_t>& rgb,
 	long rawW,
 	long rawH,
 	const NativeCrop& crop,
+	const NativeCrop& maskCrop,
 	const NativeResize& resize,
 	bool grayscale,
 	const string& algorithm,
+	uint8_t cropFill,
 	uint8_t* dst
 ) {
 	if (crop.top + crop.bottom >= rawH || crop.left + crop.right >= rawW) {
@@ -810,10 +883,16 @@ void processRgbFrameToBuffer(
 	const int channels = grayscale ? 1 : 3;
 
 	auto srcPixel = [&](long y, long x, int c) -> uint8_t {
+		if (cropMaskContains(maskCrop, srcH, srcW, y, x)) {
+			return cropFill;
+		}
 		const size_t offset = (static_cast<size_t>(crop.top + y) * static_cast<size_t>(rawW) + static_cast<size_t>(crop.left + x)) * 3;
 		return rgb[offset + c];
 	};
 	auto srcGray = [&](long y, long x) -> uint8_t {
+		if (cropMaskContains(maskCrop, srcH, srcW, y, x)) {
+			return cropFill;
+		}
 		const size_t offset = (static_cast<size_t>(crop.top + y) * static_cast<size_t>(rawW) + static_cast<size_t>(crop.left + x)) * 3;
 		const uint32_t r = rgb[offset];
 		const uint32_t g = rgb[offset + 1];
@@ -1188,8 +1267,10 @@ void processNativeGrayscaleFrameToBuffer(
 	size_t pitch,
 	int depth,
 	const NativeCrop& crop,
+	const NativeCrop& maskCrop,
 	const NativeResize& resize,
 	const string& algorithm,
+	uint8_t cropFill,
 	uint8_t* dst
 ) {
 	if (crop.top + crop.bottom >= rawH || crop.left + crop.right >= rawW) {
@@ -1204,6 +1285,9 @@ void processNativeGrayscaleFrameToBuffer(
 	const long dstW = resize.enabled ? resize.width : srcW;
 
 	auto srcGray = [&](long y, long x) -> uint8_t {
+		if (cropMaskContains(maskCrop, srcH, srcW, y, x)) {
+			return cropFill;
+		}
 		return nativeGray(raw, maxRaw, pitch, depth, crop.top + y, crop.left + x);
 	};
 	auto writePixel = [&](long y, long x, uint8_t value) {
@@ -1288,13 +1372,17 @@ public:
 		py::object infoKeysObj,
 		py::object doneOnInfoObj = py::none(),
 		py::object initialStateLabelsObj = py::none(),
-		py::object initialStateWeightsObj = py::none()
+		py::object initialStateWeightsObj = py::none(),
+		py::object maskCropObj = py::none(),
+		int cropFill = 0
 	)
 		: m_numButtons(numButtons)
 		, m_frameSkip(frameSkip)
 		, m_frameStack(frameStack)
 		, m_crop(parseNativeCrop(cropObj))
+		, m_cropMask(parseNativeCrop(maskCropObj))
 		, m_resize(parseNativeResize(resizeObj))
+		, m_cropFill(static_cast<uint8_t>(cropFill))
 		, m_grayscale(grayscale)
 		, m_algorithm(algorithm)
 		, m_maxpoolLastTwo(maxpoolLastTwo)
@@ -1325,6 +1413,9 @@ public:
 		}
 		if (stickyActionProb < 0.0 || stickyActionProb > 1.0) {
 			throw std::runtime_error("sticky_action_prob must be between 0.0 and 1.0");
+		}
+		if (cropFill < 0 || cropFill > 255) {
+			throw std::runtime_error("crop_fill must be between 0 and 255");
 		}
 		if (algorithm != "nearest" && algorithm != "bilinear" && algorithm != "area") {
 			throw std::runtime_error("algorithm must be nearest, bilinear, or area");
@@ -1385,7 +1476,7 @@ public:
 				m_singleObsSize = static_cast<size_t>(m_obsHeight) * static_cast<size_t>(m_obsWidth) * static_cast<size_t>(m_obsChannels);
 				m_stackedChannels = m_obsChannels * m_frameStack;
 				m_stackedObsSize = static_cast<size_t>(m_obsHeight) * static_cast<size_t>(m_obsWidth) * static_cast<size_t>(m_stackedChannels);
-				if (m_grayscale && m_algorithm == "area") {
+				if (m_grayscale && m_algorithm == "area" && !cropMaskHasAny(m_cropMask)) {
 					m_grayscaleAreaPlan = buildAreaResizePlan(rawW, rawH, m_crop, m_resize);
 					m_useGrayscaleAreaPlan = true;
 				}
@@ -2051,8 +2142,10 @@ private:
 				static_cast<size_t>(slot.emulator->m_re.getImagePitch()),
 				slot.emulator->m_re.getImageDepth(),
 				m_crop,
+				m_cropMask,
 				m_resize,
 				m_algorithm,
+				m_cropFill,
 				slot.singleObs.data()
 			);
 			return;
@@ -2063,9 +2156,11 @@ private:
 			slot.emulator->m_re.getImageWidth(),
 			slot.emulator->m_re.getImageHeight(),
 			m_crop,
+			m_cropMask,
 			m_resize,
 			m_grayscale,
 			m_algorithm,
+			m_cropFill,
 			slot.singleObs.data()
 		);
 	}
@@ -2415,8 +2510,10 @@ private:
 						static_cast<size_t>(slot.emulator->m_re.getImagePitch()),
 						slot.emulator->m_re.getImageDepth(),
 						m_crop,
+						m_cropMask,
 						m_resize,
 						m_algorithm,
+						m_cropFill,
 						slot.singleObs.data()
 					);
 				}
@@ -2431,9 +2528,11 @@ private:
 					slot.emulator->m_re.getImageWidth(),
 					slot.emulator->m_re.getImageHeight(),
 					m_crop,
+					m_cropMask,
 					m_resize,
 					m_grayscale,
 					m_algorithm,
+					m_cropFill,
 					slot.singleObs.data()
 				);
 			}
@@ -2488,7 +2587,9 @@ private:
 	int m_frameSkip = 1;
 	int m_frameStack = 1;
 	NativeCrop m_crop;
+	NativeCrop m_cropMask;
 	NativeResize m_resize;
+	uint8_t m_cropFill = 0;
 	bool m_grayscale = false;
 	string m_algorithm;
 	bool m_maxpoolLastTwo = false;
@@ -2524,7 +2625,18 @@ private:
 	std::vector<std::vector<uint8_t>> m_terminalObservations;
 };
 
-	py::tuple PyRetroEmulator::stepRepeatAndProcess(PyGameData& data, py::array_t<uint8_t> mask, int repeats, py::object cropObj, py::object resizeObj, bool grayscale, const string& algorithm, bool maxpoolLastTwo) {
+	py::tuple PyRetroEmulator::stepRepeatAndProcess(
+		PyGameData& data,
+		py::array_t<uint8_t> mask,
+		int repeats,
+		py::object cropObj,
+		py::object resizeObj,
+		bool grayscale,
+		const string& algorithm,
+		bool maxpoolLastTwo,
+		py::object maskCropObj,
+		int cropFill
+	) {
 	if (repeats <= 0) {
 		throw std::runtime_error("repeats must be positive");
 	}
@@ -2568,7 +2680,15 @@ private:
 		}
 	}
 
-	py::array_t<uint8_t> obs = processRgbFrame(currRgb, cropObj, resizeObj, grayscale, algorithm);
+	py::array_t<uint8_t> obs = processRgbFrame(
+		currRgb,
+		cropObj,
+		resizeObj,
+		grayscale,
+		algorithm,
+		maskCropObj,
+		cropFill
+	);
 	return py::make_tuple(obs, totalReward, done, data.lookupAll());
 }
 
@@ -2647,8 +2767,30 @@ PYBIND11_MODULE(_retro, m) {
 		.def("get_state", &PyRetroEmulator::getState)
 		.def("set_state", &PyRetroEmulator::setState)
 		.def("get_screen", &PyRetroEmulator::getScreen)
-		.def("get_processed_screen", &PyRetroEmulator::getProcessedScreen)
-		.def("step_repeat_and_process", &PyRetroEmulator::stepRepeatAndProcess)
+		.def(
+			"get_processed_screen",
+			&PyRetroEmulator::getProcessedScreen,
+			py::arg("crop"),
+			py::arg("resize"),
+			py::arg("grayscale"),
+			py::arg("algorithm"),
+			py::arg("mask_crop") = py::none(),
+			py::arg("crop_fill") = 0
+		)
+		.def(
+			"step_repeat_and_process",
+			&PyRetroEmulator::stepRepeatAndProcess,
+			py::arg("data"),
+			py::arg("mask"),
+			py::arg("repeats"),
+			py::arg("crop"),
+			py::arg("resize"),
+			py::arg("grayscale"),
+			py::arg("algorithm"),
+			py::arg("maxpool_last_two"),
+			py::arg("mask_crop") = py::none(),
+			py::arg("crop_fill") = 0
+		)
 		.def("get_rotation", &PyRetroEmulator::getRotation)
 		.def("get_screen_rate", &PyRetroEmulator::getScreenRate)
 		.def("get_audio", &PyRetroEmulator::getAudio)
@@ -2741,7 +2883,9 @@ PYBIND11_MODULE(_retro, m) {
 				py::object,
 				py::object,
 				py::object,
-				py::object>(),
+				py::object,
+				py::object,
+				int>(),
 			py::arg("num_envs"),
 			py::arg("rom_path"),
 			py::arg("data_path"),
@@ -2768,7 +2912,9 @@ PYBIND11_MODULE(_retro, m) {
 			py::arg("info_keys") = py::none(),
 			py::arg("done_on_info") = py::none(),
 			py::arg("initial_state_labels") = py::none(),
-			py::arg("initial_state_weights") = py::none()
+			py::arg("initial_state_weights") = py::none(),
+			py::arg("mask_crop") = py::none(),
+			py::arg("crop_fill") = 0
 		)
 		.def("reset", &PyNativeVectorEnv::reset, py::arg("seed") = py::none())
 		.def("step", &PyNativeVectorEnv::step)

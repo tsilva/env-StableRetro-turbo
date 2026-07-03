@@ -67,6 +67,8 @@ env = retro.RetroVecEnv(
     num_threads=16,               # Native worker threads for those lanes.
     render_mode="rgb_array",      # Return frame arrays instead of opening a window.
     obs_crop=(32, 0, 0, 0),       # Crop 32 pixels from the top before resizing.
+    obs_crop_mode="mask",         # Hide the HUD while preserving full-frame geometry.
+    obs_crop_fill=0,              # Pixel value used by mask crop regions.
     obs_resize=(84, 84),          # Resize observations natively for RL input.
     obs_resize_algorithm="area",  # Area resize is a good downsampling default.
     obs_grayscale=True,           # Convert RGB frames to grayscale natively.
@@ -107,6 +109,8 @@ retro.RetroVecEnv(
     rom_path=None,               # explicit ROM path for direct-ROM or external use
     obs_resize=None,             # native resize target as (width, height)
     obs_crop=None,               # native crop before resize
+    obs_crop_mode="remove",      # "remove" crops pixels; "mask" fills them
+    obs_crop_fill=0,             # fill value for obs_crop_mode="mask"
     obs_grayscale=False,         # convert image observations to grayscale
     obs_resize_algorithm="nearest", # "nearest", "bilinear", or "area"
     obs_layout="hwc",            # observation layout: "hwc" or "chw"
@@ -134,6 +138,8 @@ one state per env lane, or a `{state_name: weight}` mapping sampled on reset.
 | `rom_path` | `None` | Explicit ROM path for direct-ROM tests or external integrations. |
 | `obs_resize` | `None` | Native resize target as `(width, height)`. |
 | `obs_crop` | `None` | Native crop before resize, using the same crop contract as `RetroEnv`. |
+| `obs_crop_mode` | `"remove"` | Crop behavior: `"remove"` keeps the historical geometry-changing crop, while `"mask"` preserves the full observation canvas and fills the cropped regions before resize, layout conversion, and frame stacking. |
+| `obs_crop_fill` | `0` | Scalar uint8 fill value for crop masking; RGB observations fill every channel with the same value. |
 | `obs_grayscale` | `False` | Convert image observations to grayscale natively. |
 | `obs_resize_algorithm` | `"nearest"` | Resize algorithm: `"nearest"`, `"bilinear"`, or `"area"`. |
 | `obs_layout` | `"hwc"` | Observation layout: `"hwc"` or `"chw"`. |
@@ -146,6 +152,12 @@ one state per env lane, or a `{state_name: weight}` mapping sampled on reset.
 | `reward_clip` | `False` | Clip rewards with the same semantics as the single-env preprocessing path. |
 | `info_filter` | `"all"` | Info payload filter: `"all"`, `"terminal"`, `"none"`, or `{"mode": ..., "keys": (...)}`. |
 | `done_on` | `None` | General per-lane terminal rules keyed by info-variable `change`, `increase`, or `decrease`. |
+
+Use crop masking when you want to hide HUDs or other static screen regions
+during initial training without changing the spatial observation contract. For
+example, `obs_crop=(32, 0, 0, 0), obs_crop_mode="mask"` hides the top 32 pixels
+before resize and frame stacking, while keeping the same observation geometry as
+the full-canvas path for later fine-tuning on unmasked observations.
 
 ## Why SB3 VecEnv?
 
