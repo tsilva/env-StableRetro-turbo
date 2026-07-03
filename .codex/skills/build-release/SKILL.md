@@ -1,9 +1,9 @@
 ---
-name: publish
-description: Build, validate, and prepare upload for the next stable-retro-turbo post-version release wheels. Use when the user says /publish, asks to publish with the next version, or asks for macOS and Linux stable_retro_turbo wheels for publishing with twine.
+name: build-release
+description: Build, validate, and prepare upload for the next stable-retro-turbo post-version release wheels. Use when the user says /build-release, asks to build a release with the next version, asks to publish with the next version, or asks for macOS and Linux stable_retro_turbo wheels for publishing with twine.
 ---
 
-# Publish
+# Build Release
 
 Use this skill to create publish-ready `stable_retro_turbo` wheels for the next
 `.postN` version on macOS arm64 and Linux x86_64. Keep release mechanics in

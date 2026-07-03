@@ -58,6 +58,9 @@ FINAL_EXPECTED = {
     # 1-2 starts on the aboveground pipe-entry strip (area 1 / pointer 0x29)
     # and then transitions into the actual underground cave (area 2 / pointer 0xc0).
     "Level1-2": (0, 1, 2, 0xC0),
+    # 6-2 keeps the requested world/level/area but SMB rewrites the settled
+    # runtime pointer after its entrance path has initialized.
+    "Level6-2": (5, 1, 1, 0xC2),
 }
 
 MIN_SETTLE_FRAMES = {
