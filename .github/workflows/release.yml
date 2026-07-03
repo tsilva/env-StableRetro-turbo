@@ -1,68 +1,218 @@
-name: release
+name: Release
 
 on:
-  workflow_dispatch:
   push:
-    branches: [master, main]
-  pull_request:
-    branches: [master, main]
-  release:
-    types: [published]
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Optional git ref to build"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.14"
+  UV_CACHE_DIR: .uv-cache
 
 jobs:
-  build_wheels:
-    name: Build ${{ matrix.label }} wheels
-    runs-on: ${{ matrix.os }}
+  validate:
+    name: Validate release metadata
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      post: ${{ steps.version.outputs.post }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install release environment
+        run: |
+          uv venv --python "${PYTHON_VERSION}" .venv314
+          uv pip install --python .venv314/bin/python "build==1.5.0" "cibuildwheel==3.3.1" "cmake==4.3.2" "delocate==0.13.0" "setuptools==81.0.0" "twine==6.2.0" "wheel==0.47.0"
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < stable_retro/VERSION.txt)"
+          post="0"
+          if [[ "$version" == *.post* ]]; then
+            post="${version##*.post}"
+          fi
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            tag_version="${GITHUB_REF_NAME#v}"
+            if [[ "$tag_version" != "$version" ]]; then
+              echo "Tag $GITHUB_REF_NAME does not match project version $version" >&2
+              exit 1
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "post=$post" >> "$GITHUB_OUTPUT"
+
+      - name: Check version consistency
+        run: .venv314/bin/python scripts/release_build.py check-version --version "${{ steps.version.outputs.version }}"
+
+      - name: Check PyPI version is unused
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        run: .venv314/bin/python scripts/release_build.py check-pypi --version "${{ steps.version.outputs.version }}"
+
+  build:
+    name: Build ${{ matrix.platform }} wheel
+    needs: validate
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
-            label: macOS arm64
-            artifact: wheels-macos-arm64
-          - os: ubuntu-latest
-            label: Linux x86_64
-            artifact: wheels-linux-x86_64
-
+          - platform: macos
+            runner: macos-14
+            wheelhouse_suffix: repaired
+          - platform: linux
+            runner: ubuntu-24.04
+            wheelhouse_suffix: linux
+    runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          python-version: "3.11"
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
 
-      - name: Install build tooling
-        run: python -m pip install --upgrade pip cibuildwheel==3.3.1
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install macOS system packages
+        if: matrix.platform == 'macos'
+        run: brew install pkg-config lua@5.4
+
+      - name: Install release environment
+        run: |
+          uv venv --python "${PYTHON_VERSION}" .venv314
+          uv pip install --python .venv314/bin/python "build==1.5.0" "cibuildwheel==3.3.1" "cmake==4.3.2" "delocate==0.13.0" "setuptools==81.0.0" "twine==6.2.0" "wheel==0.47.0"
 
       - name: Build wheels
-        run: python -m cibuildwheel . --output-dir wheelhouse
+        run: .venv314/bin/python scripts/release_build.py build-platform --platform "${{ matrix.platform }}" --version "${{ needs.validate.outputs.version }}"
 
-      - name: Report built wheels
-        run: ls -lh wheelhouse/*.whl
+      - name: Smoke built wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          case "${{ matrix.platform }}" in
+            macos) wheels=(wheelhouse-post*-repaired/*.whl) ;;
+            linux) wheels=(wheelhouse-post*-linux/*.whl) ;;
+          esac
+          if (( ${#wheels[@]} != 1 )); then
+            printf 'expected one wheel, found %s\n' "${#wheels[@]}" >&2
+            printf '%s\n' "${wheels[@]}" >&2
+            exit 1
+          fi
+          .venv314/bin/python scripts/release_build.py smoke-wheel "${wheels[0]}"
 
-      - name: Upload wheel artifacts
-        uses: actions/upload-artifact@v6
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: wheelhouse/*.whl
+          name: ${{ matrix.platform }}-wheel-v${{ needs.validate.outputs.version }}
+          path: wheelhouse-post${{ needs.validate.outputs.post }}-${{ matrix.wheelhouse_suffix }}/*.whl
+          if-no-files-found: error
 
-  upload_release_assets:
-    name: Upload Release Assets
-    needs: build_wheels
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    if: github.event_name == 'release' && github.event.action == 'published'
+  final-check:
+    name: Audit release wheels
+    needs:
+      - validate
+      - build
+    runs-on: ubuntu-24.04
 
     steps:
-      - name: Download wheel artifacts
-        uses: actions/download-artifact@v7
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          pattern: wheels-*
-          path: dist
-          merge-multiple: true
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
 
-      - name: Attach wheels to GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" dist/*.whl --clobber --repo "${{ github.repository }}"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install release environment
+        run: |
+          uv venv --python "${PYTHON_VERSION}" .venv314
+          uv pip install --python .venv314/bin/python "build==1.5.0" "cibuildwheel==3.3.1" "cmake==4.3.2" "delocate==0.13.0" "setuptools==81.0.0" "twine==6.2.0" "wheel==0.47.0"
+
+      - name: Download macOS wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-wheel-v${{ needs.validate.outputs.version }}
+          path: wheelhouse-post${{ needs.validate.outputs.post }}-repaired
+
+      - name: Download Linux wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-wheel-v${{ needs.validate.outputs.version }}
+          path: wheelhouse-post${{ needs.validate.outputs.post }}-linux
+
+      - name: Final audit
+        run: .venv314/bin/python scripts/release_build.py final-check --version "${{ needs.validate.outputs.version }}"
+
+      - name: Prepare publish distributions
+        run: |
+          mkdir -p dist
+          cp wheelhouse-post*-repaired/*.whl dist/
+          cp wheelhouse-post*-linux/*.whl dist/
+
+      - name: Upload final wheel bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-v${{ needs.validate.outputs.version }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs:
+      - validate
+      - final-check
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+      url: https://pypi.org/p/stable-retro-turbo
+    permissions:
+      id-token: write
+    steps:
+      - name: Download audited distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: release-v${{ needs.validate.outputs.version }}
+          path: dist
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

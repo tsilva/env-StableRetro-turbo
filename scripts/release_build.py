@@ -12,6 +12,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 import zipfile
 from pathlib import Path
 
@@ -19,6 +21,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VERSION_PATH = REPO_ROOT / "stable_retro" / "VERSION.txt"
 PYTHON = REPO_ROOT / ".venv314" / "bin" / "python"
+PACKAGE_NAME = "stable-retro-turbo"
 
 PUBLIC_CORES = ("gambatte", "fceumm", "snes9x", "genesis_plus_gx")
 PUBLIC_DATA_PLATFORMS = "GameBoy,Nes,Snes,Genesis,Sms,SCD"
@@ -65,6 +68,26 @@ VERSION_RE = re.compile(r"^(?P<base>\d+\.\d+\.\d+)(?:\.post(?P<post>\d+))?$")
 
 def read_version() -> str:
     return VERSION_PATH.read_text(encoding="utf-8").strip()
+
+
+def check_version(args: argparse.Namespace) -> None:
+    version = read_version()
+    parse_version(version)
+    package_code, package_output = run_capture([str(PYTHON), "setup.py", "--name"])
+    result = {
+        "package": package_output,
+        "version": version,
+    }
+    print(json.dumps(result, indent=2))
+    failures = []
+    if package_code != 0:
+        failures.append(f"setup.py --name failed: {package_output}")
+    if package_output != PACKAGE_NAME:
+        failures.append(f"package name is {package_output!r}, expected {PACKAGE_NAME!r}")
+    if args.version is not None and version != args.version:
+        failures.append(f"expected version {args.version!r}, saw {version!r}")
+    if failures:
+        raise SystemExit("; ".join(failures))
 
 
 def parse_version(version: str) -> tuple[str, int]:
@@ -172,6 +195,21 @@ def shell_quote(value: str | Path) -> str:
     return shlex.quote(str(value))
 
 
+def run_capture(args_list: list[str]) -> tuple[int, str]:
+    try:
+        completed = subprocess.run(
+            args_list,
+            check=False,
+            cwd=REPO_ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        return 127, str(exc)
+    return completed.returncode, completed.stdout.strip()
+
+
 def env_lines(env: dict[str, str]) -> str:
     return " ".join(f"{key}={shell_quote(value)}" for key, value in env.items())
 
@@ -228,6 +266,25 @@ def bump_version(args: argparse.Namespace) -> None:
     print(target)
 
 
+def check_pypi(args: argparse.Namespace) -> None:
+    version = args.version or read_version()
+    parse_version(version)
+    url = f"https://pypi.org/pypi/{PACKAGE_NAME}/json"
+    try:
+        with urllib.request.urlopen(url, timeout=20) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            print(json.dumps({"package": PACKAGE_NAME, "exists": False, "version_exists": False}, indent=2))
+            return
+        raise
+    releases = data.get("releases", {})
+    exists = version in releases and bool(releases[version])
+    print(json.dumps({"package": PACKAGE_NAME, "version": version, "version_exists": exists}, indent=2))
+    if exists:
+        raise SystemExit(f"{PACKAGE_NAME} {version} already exists on PyPI")
+
+
 def build_commands(args: argparse.Namespace) -> None:
     version = args.version or read_version()
     macos_src = Path(args.macos_src) if args.macos_src else Path("<macos-src>")
@@ -255,6 +312,77 @@ def build_commands(args: argparse.Namespace) -> None:
         f"{env_lines(linux_env())} {shell_quote(PYTHON)} -m cibuildwheel "
         f"--platform linux --output-dir {shell_quote(linux_wheelhouse)}"
     )
+
+
+def clean_output_paths(version: str, platform_name: str) -> None:
+    wheelhouse = expected_wheelhouse(version, platform_name)
+    if wheelhouse.exists():
+        shutil.rmtree(wheelhouse)
+    if platform_name == "macos":
+        dist = REPO_ROOT / "dist"
+        build = REPO_ROOT / "build"
+        for path in (dist, build):
+            if path.exists():
+                shutil.rmtree(path)
+
+
+def build_platform(args: argparse.Namespace) -> None:
+    version = args.version or read_version()
+    parse_version(version)
+    clean_output_paths(version, args.platform)
+    if args.platform == "macos":
+        env = os.environ.copy()
+        env.update(macos_env())
+        env["PATH"] = f"{PYTHON.parent}{os.pathsep}{env.get('PATH', '')}"
+        run(
+            [
+                str(PYTHON),
+                "setup.py",
+                "bdist_wheel",
+                "--plat-name",
+                "macosx_14_0_arm64",
+            ],
+            cwd=REPO_ROOT,
+            env=env,
+        )
+        raw_wheels = sorted((REPO_ROOT / "dist").glob("*.whl"))
+        if len(raw_wheels) != 1:
+            raise SystemExit(f"expected one raw macOS wheel, found {len(raw_wheels)}")
+        run(
+            [
+                str(PYTHON),
+                "-m",
+                "delocate.cmd.delocate_wheel",
+                "--require-archs",
+                "arm64",
+                "-w",
+                str(expected_wheelhouse(version, "macos")),
+                "-v",
+                str(raw_wheels[0]),
+            ]
+        )
+        run([str(PYTHON), "scripts/strip_macos_wheel.py", str(expected_macos_wheel(version))], cwd=REPO_ROOT)
+        print(expected_macos_wheel(version))
+    elif args.platform == "linux":
+        env = os.environ.copy()
+        env.update(linux_env())
+        env["PATH"] = f"{PYTHON.parent}{os.pathsep}{env.get('PATH', '')}"
+        run(
+            [
+                str(PYTHON),
+                "-m",
+                "cibuildwheel",
+                "--platform",
+                "linux",
+                "--output-dir",
+                str(expected_wheelhouse(version, "linux")),
+            ],
+            cwd=REPO_ROOT,
+            env=env,
+        )
+        print(expected_linux_wheel(version))
+    else:  # pragma: no cover - argparse choices guard this.
+        raise ValueError(args.platform)
 
 
 def wheel_names(wheel: Path) -> list[str]:
@@ -348,7 +476,7 @@ def run(args_list: list[str], **kwargs: object) -> None:
     subprocess.run(args_list, check=True, **kwargs)
 
 
-def smoke_macos_wheel(args: argparse.Namespace) -> None:
+def smoke_wheel(args: argparse.Namespace) -> None:
     wheel = args.wheel.absolute()
     python = args.python.absolute()
     uv_env = os.environ.copy()
@@ -415,11 +543,10 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def upload_command(version: str) -> str:
+def publish_note(version: str) -> str:
     return (
-        f"{shell_quote(PYTHON)} -m twine upload \\\n"
-        f"  {shell_quote(expected_macos_wheel(version))} \\\n"
-        f"  {shell_quote(expected_linux_wheel(version))}"
+        "GitHub trusted publishing handles the PyPI upload for tag pushes.\n"
+        f"Push tag v{version} after the release commit is ready; do not upload these wheels with local Twine."
     )
 
 
@@ -436,17 +563,25 @@ def final_check(args: argparse.Namespace) -> None:
     hashes = {str(wheel): sha256(wheel) for wheel in (macos_wheel, linux_wheel)}
     print(json.dumps({"audits": results, "sha256": hashes}, indent=2))
     print()
-    print(upload_command(version))
+    print(publish_note(version))
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    check = subparsers.add_parser("check-version", help="Validate package name and version")
+    check.add_argument("--version")
+    check.set_defaults(func=check_version)
+
     bump = subparsers.add_parser("bump-version", help="Print or write the next post version")
     bump.add_argument("--to", help="Set an explicit target version instead of incrementing")
     bump.add_argument("--write", action="store_true", help="Write the target to stable_retro/VERSION.txt")
     bump.set_defaults(func=bump_version)
+
+    pypi = subparsers.add_parser("check-pypi", help="Check whether a PyPI version is still unused")
+    pypi.add_argument("--version")
+    pypi.set_defaults(func=check_pypi)
 
     prepare = subparsers.add_parser("prepare-sources", help="Create clean macOS/Linux source copies")
     prepare.add_argument("--version")
@@ -460,19 +595,30 @@ def main() -> None:
     commands.add_argument("--linux-src")
     commands.set_defaults(func=build_commands)
 
+    build = subparsers.add_parser("build-platform", help="Build one release wheel platform")
+    build.add_argument("--platform", choices=("macos", "linux"), required=True)
+    build.add_argument("--version")
+    build.set_defaults(func=build_platform)
+
     audit = subparsers.add_parser("audit-wheels", help="Audit macOS and Linux wheel contents")
     audit.add_argument("--version")
     audit.add_argument("--macos-wheel", type=Path)
     audit.add_argument("--linux-wheel", type=Path)
     audit.set_defaults(func=audit_wheels)
 
-    smoke = subparsers.add_parser("smoke-macos-wheel", help="Install and import-test a macOS wheel")
+    smoke = subparsers.add_parser("smoke-wheel", help="Install and import-test a wheel")
     smoke.add_argument("wheel", type=Path)
     smoke.add_argument("--python", type=Path, default=PYTHON)
     smoke.add_argument("--installer", choices=("auto", "uv", "pip"), default="auto")
-    smoke.set_defaults(func=smoke_macos_wheel)
+    smoke.set_defaults(func=smoke_wheel)
 
-    final = subparsers.add_parser("final-check", help="Audit wheels, run twine check, hash, and print upload command")
+    smoke_macos = subparsers.add_parser("smoke-macos-wheel", help="Install and import-test a macOS wheel")
+    smoke_macos.add_argument("wheel", type=Path)
+    smoke_macos.add_argument("--python", type=Path, default=PYTHON)
+    smoke_macos.add_argument("--installer", choices=("auto", "uv", "pip"), default="auto")
+    smoke_macos.set_defaults(func=smoke_wheel)
+
+    final = subparsers.add_parser("final-check", help="Audit wheels, run twine check, hash, and print publishing handoff")
     final.add_argument("--version")
     final.set_defaults(func=final_check)
 
