@@ -109,7 +109,7 @@ def _parse_state(value, retro, *, allow_state_none: bool):
     return normalized
 
 
-def _parse_info_keys(value, *, game, info, retro):
+def _parse_info_filter_keys(value, *, game, info, retro):
     if value is None:
         return None
     normalized = str(value).strip()
@@ -375,7 +375,7 @@ def _build_native_vec(
     info=None,
     scenario=None,
     num_threads=None,
-    copy_observations=True,
+    obs_copy="copy",
 ):
     from stable_retro.vec_env import RetroVecEnv
 
@@ -396,7 +396,7 @@ def _build_native_vec(
         info=info,
         scenario=scenario,
         num_threads=num_threads,
-        copy_observations=copy_observations,
+        obs_copy=obs_copy,
         **env_kwargs,
     )
 
@@ -438,8 +438,9 @@ def _build_regular_vec(
 ):
     if rom_path is not None:
         raise SystemExit("--rom-path is only supported with --backend=native")
-    if env_kwargs.get("info_keys") is not None:
-        raise SystemExit("--info-keys is only supported with --backend=native")
+    info_filter = env_kwargs.get("info_filter")
+    if isinstance(info_filter, dict) and info_filter.get("keys") is not None:
+        raise SystemExit("--info-filter-keys is only supported with --backend=native")
     if env_kwargs.get("obs_layout", "hwc") != "hwc":
         raise SystemExit("--obs-layout=chw requires --backend=native")
     from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
@@ -529,12 +530,12 @@ def main(argv=None) -> int:
     parser.add_argument("--obs-crop", default=None)
     parser.add_argument("--resize-algorithm", default=None)
     parser.add_argument(
-        "--info-mode",
+        "--info-filter",
         choices=("terminal", "all", "none"),
         default="terminal",
     )
     parser.add_argument(
-        "--info-keys",
+        "--info-filter-keys",
         default=None,
         help="Comma-separated info keys to emit, or 'all' to pass all keys from data.json.",
     )
@@ -546,7 +547,11 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--no-maxpool-last-two", action="store_true")
     parser.add_argument("--fixed-actions", action="store_true")
-    parser.add_argument("--copy-observations", action="store_true")
+    parser.add_argument(
+        "--obs-copy",
+        choices=("copy", "safe_view", "unsafe_view"),
+        default="safe_view",
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -636,7 +641,12 @@ def main(argv=None) -> int:
         else args.resize_algorithm
     )
     maxpool_last_two = profile.maxpool_last_two and not args.no_maxpool_last_two
-    info_keys = _parse_info_keys(args.info_keys, game=game, info=info, retro=retro)
+    info_filter_keys = _parse_info_filter_keys(
+        args.info_filter_keys,
+        game=game,
+        info=info,
+        retro=retro,
+    )
 
     env_kwargs = {
         "render_mode": "rgb_array",
@@ -647,11 +657,14 @@ def main(argv=None) -> int:
         "frame_skip": frame_skip,
         "frame_stack": frame_stack,
         "maxpool_last_two": maxpool_last_two,
-        "info_mode": args.info_mode,
+        "info_filter": args.info_filter,
         "obs_layout": args.obs_layout,
     }
-    if info_keys is not None:
-        env_kwargs["info_keys"] = info_keys
+    if info_filter_keys is not None:
+        env_kwargs["info_filter"] = {
+            "mode": args.info_filter,
+            "keys": info_filter_keys,
+        }
     if args.vec_transpose_image and args.obs_layout != "hwc":
         raise SystemExit("--vec-transpose-image requires --obs-layout=hwc")
     backend = _resolve_backend(args.backend)
@@ -677,10 +690,10 @@ def main(argv=None) -> int:
         f"envs={num_envs} {parallel_label} "
         f"resize={resize} grayscale={grayscale} crop={obs_crop} "
         f"resize_algorithm={resize_algorithm} frame_skip={frame_skip} "
-        f"frame_stack={frame_stack} info_mode={args.info_mode} "
-        f"info_keys={'default' if info_keys is None else len(info_keys)} "
+        f"frame_stack={frame_stack} info_filter={args.info_filter} "
+        f"info_filter_keys={'default' if info_filter_keys is None else len(info_filter_keys)} "
         f"obs_layout={args.obs_layout} vec_transpose_image={args.vec_transpose_image} "
-        f"actions={action_label}",
+        f"obs_copy={args.obs_copy} actions={action_label}",
     )
     if args.dry_run:
         return 0
@@ -701,7 +714,7 @@ def main(argv=None) -> int:
                 info=info,
                 scenario=scenario,
                 num_threads=num_threads,
-                copy_observations=args.copy_observations,
+                obs_copy=args.obs_copy,
             )
             result_name = "native_vec_fused"
         else:

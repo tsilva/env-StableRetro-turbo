@@ -195,7 +195,7 @@ def _build_env(args, profile, retro):
         "frame_skip": frame_skip,
         "frame_stack": frame_stack,
         "maxpool_last_two": maxpool_last_two,
-        "info_mode": args.info_mode,
+        "info_filter": args.info_filter,
         "obs_layout": args.obs_layout,
     }
     native_only_env_kwargs = {
@@ -213,13 +213,13 @@ def _build_env(args, profile, retro):
             state=state,
             num_envs=args.num_envs,
             num_threads=args.num_threads,
-            copy_observations=args.copy_observations,
+            obs_copy=args.obs_copy,
             **env_kwargs,
             **native_only_env_kwargs,
         )
     else:
-        if args.copy_observations:
-            raise SystemExit("--copy-observations requires --backend=native")
+        if args.obs_copy != "safe_view":
+            raise SystemExit("--obs-copy requires --backend=native")
         if any(native_only_env_kwargs.values()):
             raise SystemExit(
                 "--noop-reset-max, --sticky-action-prob, and --reward-clip "
@@ -255,10 +255,10 @@ def _build_env(args, profile, retro):
         "frame_skip": frame_skip,
         "frame_stack": frame_stack,
         "maxpool_last_two": maxpool_last_two,
-        "info_mode": args.info_mode,
+        "info_filter": args.info_filter,
         "obs_layout": args.obs_layout,
         "vec_transpose_image": args.vec_transpose_image,
-        "copy_observations": args.copy_observations,
+        "obs_copy": args.obs_copy,
         "noop_reset_max": args.noop_reset_max,
         "sticky_action_prob": args.sticky_action_prob,
         "reward_clip": args.reward_clip,
@@ -296,10 +296,10 @@ def _resolved_config(args, profile, retro) -> dict[str, Any]:
         "frame_skip": frame_skip,
         "frame_stack": frame_stack,
         "maxpool_last_two": profile.maxpool_last_two and not args.no_maxpool_last_two,
-        "info_mode": args.info_mode,
+        "info_filter": args.info_filter,
         "obs_layout": args.obs_layout,
         "vec_transpose_image": args.vec_transpose_image,
-        "copy_observations": args.copy_observations,
+        "obs_copy": args.obs_copy,
         "noop_reset_max": args.noop_reset_max,
         "sticky_action_prob": args.sticky_action_prob,
         "reward_clip": args.reward_clip,
@@ -344,7 +344,7 @@ def main(argv=None) -> int:
     parser.add_argument("--obs-crop", default=None)
     parser.add_argument("--resize-algorithm", default=None)
     parser.add_argument(
-        "--info-mode",
+        "--info-filter",
         choices=("terminal", "all", "none"),
         default="terminal",
     )
@@ -355,7 +355,11 @@ def main(argv=None) -> int:
         default=None,
         help="Transpose HWC observations to CHW for SB3 CnnPolicy.",
     )
-    parser.add_argument("--copy-observations", action="store_true")
+    parser.add_argument(
+        "--obs-copy",
+        choices=("copy", "safe_view", "unsafe_view"),
+        default="safe_view",
+    )
     parser.add_argument("--no-maxpool-last-two", action="store_true")
     parser.add_argument("--noop-reset-max", type=int, default=0)
     parser.add_argument("--sticky-action-prob", type=float, default=0.0)

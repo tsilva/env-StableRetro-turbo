@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record a video of native vector env observations."""
+"""Record a video of RetroVecEnv observations."""
 
 from __future__ import annotations
 
@@ -139,7 +139,7 @@ def main(argv=None) -> int:
         num_envs=1,
         rom_path=None if args.rom_path is None else str(Path(args.rom_path).resolve()),
         num_threads=1,
-        copy_observations=False,
+        obs_copy="safe_view",
         render_mode="rgb_array",
         obs_resize=obs_resize,
         obs_grayscale=obs_grayscale,

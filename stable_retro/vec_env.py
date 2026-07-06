@@ -1,4 +1,4 @@
-"""Native vector environment for stable-retro rollouts."""
+"""RetroVecEnv for stable-retro rollouts."""
 
 from __future__ import annotations
 
@@ -18,20 +18,21 @@ try:
 except ImportError:  # pragma: no cover - import remains cheap without SB3.
     VecEnv = object
 
-
-_UNSET = object()
+_SERIALIZED_UNSET = object()
 
 
 class RetroVecEnv(VecEnv):
-    """SB3-compatible native vector env for stable-retro rollouts.
+    """SB3-compatible vector env for stable-retro rollouts.
 
     This is the supported high-throughput path. C++ owns the emulator pool,
     frame skip, preprocessing, frame stacking, autoreset, reward/done
     evaluation, and batched observation buffer.
 
     ``state`` accepts a single state name, a sequence of one state per env slot,
-    or a mapping of state names to positive sampling weights. Mapping weights are
-    normalized and sampled independently for each env on every episode reset.
+    or a mapping of state names to non-negative sampling weights. Mapping weights
+    are normalized and sampled independently for each env on every episode reset.
+    Use ``set_state()`` with the same shapes to update the reset policy used by
+    future resets and autoresets.
 
     Native info-transition termination is opt-in and game/config-specific.
     Pass done_on={"name": ("key", "decrease")} to terminate and autoreset
@@ -79,11 +80,6 @@ class RetroVecEnv(VecEnv):
         reward_clip=False,
         info_filter="all",
         done_on=None,
-        copy_observations=_UNSET,
-        info_mode=_UNSET,
-        info_keys=_UNSET,
-        done_on_info=_UNSET,
-        unsafe_zero_copy=_UNSET,
     ):
         if VecEnv is object:
             raise ImportError(
@@ -92,39 +88,16 @@ class RetroVecEnv(VecEnv):
         import stable_retro as retro
         from stable_retro import _retro
 
-        (
-            state_values,
-            state_labels,
-            state_probs,
-            state_collection,
-        ) = self._resolve_state_config(
-            retro,
-            game,
-            num_envs,
-            state,
-        )
         self.waiting = False
         self.closed = False
         self._actions = None
         self._observations = None
+        self._game = game
+        self._inttype = inttype
+        self._rom_path = rom_path
 
-        info_mode, info_keys = self._normalize_info_filter(
-            info_filter,
-            info_mode,
-            info_keys,
-        )
-        done_on = self._resolve_alias(
-            "done_on",
-            done_on,
-            "done_on_info",
-            done_on_info,
-            None,
-        )
-        copy_observations, unsafe_zero_copy = self._normalize_obs_copy(
-            obs_copy,
-            copy_observations,
-            unsafe_zero_copy,
-        )
+        info_filter_mode, info_filter_keys = self._normalize_info_filter(info_filter)
+        copy_obs, unsafe_view = self._normalize_obs_copy(obs_copy)
         obs_crop_mode = self._normalize_obs_crop_mode(obs_crop_mode)
         obs_crop_fill = self._normalize_obs_crop_fill(obs_crop_fill)
 
@@ -149,7 +122,21 @@ class RetroVecEnv(VecEnv):
         }
         info_path = self._resolve_info_path(retro, game, info, inttype)
         scenario_path = self._resolve_scenario_path(retro, game, scenario, inttype)
-        done_on_info_rules = self._normalize_done_on(
+        self._info_path = info_path
+        self._scenario_path = scenario_path
+        self._env_kwargs = env_kwargs
+        (
+            state_values,
+            state_labels,
+            state_probs,
+            state_collection,
+        ) = self._resolve_state_config(
+            retro,
+            game,
+            num_envs,
+            state,
+        )
+        done_on_rules = self._normalize_done_on(
             done_on,
             label="done_on",
             game=game,
@@ -162,11 +149,11 @@ class RetroVecEnv(VecEnv):
         self.obs_layout = obs_layout
         self.obs_copy = (
             "unsafe_view"
-            if unsafe_zero_copy
-            else "copy" if copy_observations else "safe_view"
+            if unsafe_view
+            else "copy" if copy_obs else "safe_view"
         )
-        self.copy_observations = copy_observations
-        self.unsafe_zero_copy = unsafe_zero_copy
+        self._copy_obs = copy_obs
+        self._unsafe_view = unsafe_view
         self.render_mode = render_mode
         self.viewer = None
         if players != 1:
@@ -212,47 +199,26 @@ class RetroVecEnv(VecEnv):
         finally:
             template.close()
 
-        initial_state_labels = None
-        initial_state_weights = None
-        if state_collection:
-            initial_states = [initial_state]
-            state_cache = {state_labels[0]: initial_state}
-            for value, label in zip(state_values[1:], state_labels[1:]):
-                cached = state_cache.get(label)
-                if cached is not None:
-                    initial_states.append(cached)
-                    continue
-                state_template = self._make_template_env(
-                    retro,
-                    game,
-                    value,
-                    inttype,
-                    rom_path,
-                    info_path,
-                    scenario_path,
-                    env_kwargs,
-                )
-                try:
-                    serialized = (
-                        state_template.initial_state
-                        if state_template.initial_state
-                        else None
-                    )
-                finally:
-                    state_template.close()
-                if not serialized:
-                    raise ValueError(
-                        f"state {label!r} did not resolve to a non-empty state",
-                    )
-                state_cache[label] = serialized
-                initial_states.append(serialized)
-            if any(not value for value in initial_states):
-                raise ValueError("states must resolve to non-empty start states")
-            initial_state = initial_states
-            initial_state_labels = state_labels
-            initial_state_weights = state_probs
-        elif initial_state is not None:
-            initial_state_labels = state_labels
+        initial_state, initial_state_labels, initial_state_weights = (
+            self._resolve_initial_state_payload(
+                retro,
+                game,
+                int(num_envs),
+                state,
+                inttype,
+                rom_path,
+                info_path,
+                scenario_path,
+                env_kwargs,
+                first_initial_state=initial_state,
+                resolved_config=(
+                    state_values,
+                    state_labels,
+                    state_probs,
+                    state_collection,
+                ),
+            )
+        )
 
         resolved_rom_path = rom_path or retro.data.get_original_romfile_path(
             game,
@@ -260,7 +226,7 @@ class RetroVecEnv(VecEnv):
         )
         if num_threads is None:
             num_threads = num_envs
-        self.native = _retro.NativeVectorEnv(
+        self.native = _retro._RetroVecEnv(
             int(num_envs),
             str(resolved_rom_path),
             str(info_path),
@@ -281,11 +247,11 @@ class RetroVecEnv(VecEnv):
             float(reward_low),
             float(reward_high),
             int(num_threads),
-            info_mode,
-            unsafe_zero_copy,
+            info_filter_mode,
+            unsafe_view,
             obs_layout,
-            info_keys,
-            done_on_info_rules,
+            info_filter_keys,
+            done_on_rules,
             initial_state_labels,
             initial_state_weights,
             crop_mask,
@@ -296,10 +262,59 @@ class RetroVecEnv(VecEnv):
         self._active_state_indices = self.native.active_state_indices()
         self._active_state_indices.setflags(write=False)
 
+    def set_state(self, state):
+        """Update the reset policy used at future episode boundaries.
+
+        Accepts the same shapes as the constructor ``state`` argument: a single
+        state, a per-lane sequence, or a weighted mapping. Currently active lanes
+        are not interrupted; the new policy is used by the next explicit reset or
+        per-lane autoreset.
+        """
+        import stable_retro as retro
+
+        initial_state, initial_state_labels, initial_state_weights = (
+            self._resolve_initial_state_payload(
+                retro,
+                self._game,
+                self.num_envs,
+                state,
+                self._inttype,
+                self._rom_path,
+                self._info_path,
+                self._scenario_path,
+                self._env_kwargs,
+            )
+        )
+        self.native.set_initial_states(
+            initial_state,
+            initial_state_labels,
+            initial_state_weights,
+        )
+        self.initial_state_names = tuple(self.native.initial_state_names)
+
+    def set_state_sampling_weights(self, weights):
+        """Compatibility alias for updating a weighted state reset policy."""
+        if isinstance(weights, Mapping):
+            self.set_state(weights)
+            return
+        self.set_state(
+            dict(zip(self.native.initial_state_policy_names(), weights, strict=True)),
+        )
+
+    def state_sampling_weights(self):
+        """Return current normalized reset-sampling weights by state name."""
+        return dict(
+            zip(
+                self.native.initial_state_policy_names(),
+                self.native.initial_state_weights(),
+                strict=True,
+            ),
+        )
+
     def active_state_indices(self):
         """Return a read-only int32 NumPy view of active initial-state indices.
 
-        The returned array is owned by the native vector env and mutates in place
+        The returned array is owned by this env and mutates in place
         after ``reset()`` and after per-lane automatic resets inside
         ``step_wait()``. Copy it when a stable snapshot is needed.
         Lanes without a serialized initial state report ``-1``.
@@ -315,36 +330,49 @@ class RetroVecEnv(VecEnv):
         )
 
     @staticmethod
-    def _resolve_alias(preferred_name, preferred_value, alias_name, alias_value, default):
-        if alias_value is _UNSET:
-            return preferred_value
-        if preferred_value != default:
-            raise ValueError(f"cannot pass both {preferred_name} and {alias_name}")
-        return alias_value
+    def _normalize_state_sampling_weights(weights, state_names):
+        if not state_names:
+            raise ValueError("state sampling weights require named initial states")
+
+        if isinstance(weights, Mapping):
+            unknown = set(weights) - set(state_names)
+            missing = set(state_names) - set(weights)
+            if unknown:
+                names = ", ".join(sorted(str(name) for name in unknown))
+                raise ValueError(f"unknown state sampling weight names: {names}")
+            if missing:
+                names = ", ".join(sorted(str(name) for name in missing))
+                raise ValueError(f"missing state sampling weights: {names}")
+            raw_weights = [weights[name] for name in state_names]
+        elif isinstance(weights, Sequence) and not isinstance(
+            weights,
+            (str, bytes, bytearray),
+        ):
+            raw_weights = list(weights)
+            if len(raw_weights) != len(state_names):
+                raise ValueError(
+                    "state sampling weight sequence length must match initial_state_names",
+                )
+        else:
+            raise ValueError(
+                "state sampling weights must be a mapping or a sequence",
+            )
+
+        normalized_weights = []
+        for weight in raw_weights:
+            value = float(weight)
+            if not math.isfinite(value) or value < 0.0:
+                raise ValueError(
+                    "state sampling weights must contain non-negative finite numbers",
+                )
+            normalized_weights.append(value)
+        total = math.fsum(normalized_weights)
+        if not math.isfinite(total) or total <= 0.0:
+            raise ValueError("state sampling weights must sum to a positive number")
+        return [value / total for value in normalized_weights]
 
     @staticmethod
-    def _normalize_obs_copy(obs_copy, copy_observations, unsafe_zero_copy):
-        if copy_observations is not _UNSET or unsafe_zero_copy is not _UNSET:
-            if obs_copy != "copy":
-                raise ValueError(
-                    "cannot pass both obs_copy and copy_observations/unsafe_zero_copy",
-                )
-            legacy_copy = (
-                True
-                if copy_observations is _UNSET
-                else bool(copy_observations)
-            )
-            legacy_unsafe = (
-                False
-                if unsafe_zero_copy is _UNSET
-                else bool(unsafe_zero_copy)
-            )
-            if legacy_copy and legacy_unsafe:
-                raise ValueError(
-                    "unsafe_zero_copy=True is only valid with copy_observations=False",
-                )
-            return legacy_copy, legacy_unsafe
-
+    def _normalize_obs_copy(obs_copy):
         if isinstance(obs_copy, bool):
             raise ValueError(
                 "obs_copy must be 'copy', 'safe_view', or 'unsafe_view'",
@@ -373,16 +401,7 @@ class RetroVecEnv(VecEnv):
         return fill
 
     @classmethod
-    def _normalize_info_filter(cls, info_filter, info_mode, info_keys):
-        if info_mode is not _UNSET or info_keys is not _UNSET:
-            if info_filter != "all":
-                raise ValueError(
-                    "cannot pass both info_filter and info_mode/info_keys",
-                )
-            mode = "all" if info_mode is _UNSET else str(info_mode)
-            keys = None if info_keys is _UNSET else info_keys
-            return mode, cls._normalize_info_keys(keys)
-
+    def _normalize_info_filter(cls, info_filter):
         if info_filter is None:
             return "all", None
         if isinstance(info_filter, str):
@@ -396,18 +415,18 @@ class RetroVecEnv(VecEnv):
             names = ", ".join(sorted(str(key) for key in unknown))
             raise ValueError(f"unknown info_filter keys: {names}")
         mode = str(info_filter.get("mode", "all"))
-        keys = cls._normalize_info_keys(info_filter.get("keys", None))
+        keys = cls._normalize_info_filter_keys(info_filter.get("keys", None))
         return mode, keys
 
     @staticmethod
-    def _normalize_info_keys(info_keys):
-        if isinstance(info_keys, str):
+    def _normalize_info_filter_keys(info_filter_keys):
+        if isinstance(info_filter_keys, str):
             raise ValueError(
                 "info_filter keys must be a sequence of strings, not a string",
             )
-        if info_keys is None:
+        if info_filter_keys is None:
             return None
-        return [str(key) for key in info_keys]
+        return [str(key) for key in info_filter_keys]
 
     @classmethod
     def _normalize_done_on(
@@ -587,36 +606,6 @@ class RetroVecEnv(VecEnv):
         return compare
 
     @staticmethod
-    def _normalize_done_on_info(done_on_info):
-        return RetroVecEnv._normalize_done_on(done_on_info, label="done_on_info")
-
-    @staticmethod
-    def metadata_info_events(game, inttype=None):
-        """Return named info-event rules declared by a game's metadata.
-
-        Kept as a compatibility fallback for versions that stored events there.
-        New game integrations should prefer scenario ``events``.
-        """
-
-        if not game:
-            return {}
-        if inttype is None:
-            inttype = retro_data.Integrations.STABLE
-        try:
-            metadata_path = retro_data.get_file_path(game, "metadata.json", inttype)
-        except FileNotFoundError:
-            return {}
-        if not metadata_path:
-            return {}
-        try:
-            with open(metadata_path, encoding="utf-8") as handle:
-                metadata = json.load(handle)
-        except (OSError, json.JSONDecodeError):
-            return {}
-        info_events = metadata.get("info_events", {})
-        return info_events if isinstance(info_events, Mapping) else {}
-
-    @staticmethod
     def scenario_events(scenario_path):
         """Return named event rules declared by a scenario file."""
 
@@ -642,12 +631,9 @@ class RetroVecEnv(VecEnv):
     ):
         """Resolve configured event names to raw done_on rule specs."""
 
-        if not game and not scenario_path:
-            raise ValueError(f"{label} named events require a game or scenario")
-        event_rules = {}
-        if game:
-            event_rules.update(cls.metadata_info_events(game, inttype=inttype))
-        event_rules.update(cls.scenario_events(scenario_path))
+        if not scenario_path:
+            raise ValueError(f"{label} named events require a scenario")
+        event_rules = cls.scenario_events(scenario_path)
         resolved = {}
         missing = []
         for raw_name in names:
@@ -660,9 +646,8 @@ class RetroVecEnv(VecEnv):
             resolved[name] = event_rules[name]
         if missing:
             available = ", ".join(sorted(str(name) for name in event_rules)) or "none"
-            source = game or str(scenario_path)
             raise ValueError(
-                f"{label} unknown configured event(s) for {source}: "
+                f"{label} unknown configured event(s) for {scenario_path}: "
                 f"{', '.join(missing)}. Available events: {available}",
             )
         return resolved
@@ -730,14 +715,110 @@ class RetroVecEnv(VecEnv):
         normalized_probs = []
         for prob in probs:
             value = float(prob)
-            if not math.isfinite(value) or value <= 0.0:
-                raise ValueError("state weights must contain positive finite numbers")
+            if not math.isfinite(value) or value < 0.0:
+                raise ValueError(
+                    "state weights must contain non-negative finite numbers",
+                )
             normalized_probs.append(value)
         total = math.fsum(normalized_probs)
         if not math.isfinite(total) or total <= 0.0:
-            raise ValueError("state weights must sum to a positive finite number")
+            raise ValueError("state weights must sum to a positive number")
         normalized_probs = [value / total for value in normalized_probs]
         return state_values, state_labels, normalized_probs, state_collection
+
+    @classmethod
+    def _resolve_initial_state_payload(
+        cls,
+        retro,
+        game,
+        num_envs,
+        state,
+        inttype,
+        rom_path,
+        info_path,
+        scenario_path,
+        env_kwargs,
+        *,
+        first_initial_state=_SERIALIZED_UNSET,
+        resolved_config=None,
+    ):
+        if resolved_config is None:
+            resolved_config = cls._resolve_state_config(retro, game, num_envs, state)
+        state_values, state_labels, state_probs, state_collection = resolved_config
+
+        if first_initial_state is _SERIALIZED_UNSET:
+            first_initial_state = cls._serialize_initial_state(
+                retro,
+                game,
+                state_values[0],
+                inttype,
+                rom_path,
+                info_path,
+                scenario_path,
+                env_kwargs,
+            )
+
+        initial_state = first_initial_state
+        initial_state_labels = None
+        initial_state_weights = None
+        if state_collection:
+            initial_states = [initial_state]
+            state_cache = {state_labels[0]: initial_state}
+            for value, label in zip(state_values[1:], state_labels[1:]):
+                cached = state_cache.get(label)
+                if cached is not None:
+                    initial_states.append(cached)
+                    continue
+                serialized = cls._serialize_initial_state(
+                    retro,
+                    game,
+                    value,
+                    inttype,
+                    rom_path,
+                    info_path,
+                    scenario_path,
+                    env_kwargs,
+                )
+                if not serialized:
+                    raise ValueError(
+                        f"state {label!r} did not resolve to a non-empty state",
+                    )
+                state_cache[label] = serialized
+                initial_states.append(serialized)
+            if any(not value for value in initial_states):
+                raise ValueError("states must resolve to non-empty start states")
+            initial_state = initial_states
+            initial_state_labels = state_labels
+            initial_state_weights = state_probs
+        elif initial_state is not None:
+            initial_state_labels = state_labels
+        return initial_state, initial_state_labels, initial_state_weights
+
+    @staticmethod
+    def _serialize_initial_state(
+        retro,
+        game,
+        state,
+        inttype,
+        rom_path,
+        info_path,
+        scenario_path,
+        env_kwargs,
+    ):
+        template = RetroVecEnv._make_template_env(
+            retro,
+            game,
+            state,
+            inttype,
+            rom_path,
+            info_path,
+            scenario_path,
+            env_kwargs,
+        )
+        try:
+            return template.initial_state if template.initial_state else None
+        finally:
+            template.close()
 
     @staticmethod
     def _resolve_info_path(retro, game, info, inttype):
@@ -811,7 +892,7 @@ class RetroVecEnv(VecEnv):
             retro.data.get_file_path = original_get_file_path
 
     def _obs(self):
-        if self.copy_observations:
+        if self._copy_obs:
             return self._observations.copy()
         return self._observations
 

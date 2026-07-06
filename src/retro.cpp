@@ -1343,9 +1343,9 @@ void processNativeGrayscaleFrameToBuffer(
 	}
 }
 
-class PyNativeVectorEnv {
+class PyRetroVecEnv {
 public:
-	PyNativeVectorEnv(
+	PyRetroVecEnv(
 		size_t numEnvs,
 		const string& romPath,
 		const string& dataPath,
@@ -1366,11 +1366,11 @@ public:
 		float rewardClipLow,
 		float rewardClipHigh,
 		int numThreads,
-		const string& infoMode,
-		bool unsafeZeroCopy,
+		const string& infoFilterMode,
+		bool unsafeView,
 		const string& obsLayout,
-		py::object infoKeysObj,
-		py::object doneOnInfoObj = py::none(),
+		py::object infoFilterKeysObj,
+		py::object doneOnRulesObj = py::none(),
 		py::object initialStateLabelsObj = py::none(),
 		py::object initialStateWeightsObj = py::none(),
 		py::object maskCropObj = py::none(),
@@ -1392,9 +1392,9 @@ public:
 		, m_rewardClip(rewardClip)
 		, m_rewardClipLow(rewardClipLow)
 		, m_rewardClipHigh(rewardClipHigh)
-		, m_fullInfo(infoMode == "all")
-		, m_noInfo(infoMode == "none")
-		, m_unsafeZeroCopy(unsafeZeroCopy)
+		, m_fullInfo(infoFilterMode == "all")
+		, m_noInfo(infoFilterMode == "none")
+		, m_unsafeZeroCopy(unsafeView)
 		, m_numThreads(numThreads) {
 		if (numEnvs == 0) {
 			throw std::runtime_error("num_envs must be positive");
@@ -1420,8 +1420,8 @@ public:
 		if (algorithm != "nearest" && algorithm != "bilinear" && algorithm != "area") {
 			throw std::runtime_error("algorithm must be nearest, bilinear, or area");
 		}
-		if (infoMode != "terminal" && infoMode != "all" && infoMode != "none") {
-			throw std::runtime_error("info_mode must be terminal, all, or none");
+		if (infoFilterMode != "terminal" && infoFilterMode != "all" && infoFilterMode != "none") {
+			throw std::runtime_error("info_filter mode must be terminal, all, or none");
 		}
 		if (obsLayout == "hwc") {
 			m_channelsFirst = false;
@@ -1430,13 +1430,13 @@ public:
 		} else {
 			throw std::runtime_error("obs_layout must be hwc or chw");
 		}
-		parseDoneOnInfoRules(doneOnInfoObj);
-		if (!infoKeysObj.is_none()) {
-			py::sequence infoKeys = py::reinterpret_borrow<py::sequence>(infoKeysObj);
+		parseDoneOnInfoRules(doneOnRulesObj);
+		if (!infoFilterKeysObj.is_none()) {
+			py::sequence infoKeys = py::reinterpret_borrow<py::sequence>(infoFilterKeysObj);
 			m_infoKeys.reserve(static_cast<size_t>(infoKeys.size()));
 			for (py::handle key : infoKeys) {
 				if (!PyUnicode_Check(key.ptr())) {
-					throw std::runtime_error("info_keys must contain only strings");
+					throw std::runtime_error("info_filter keys must contain only strings");
 				}
 				m_infoKeys.push_back(py::str(key));
 			}
@@ -1540,6 +1540,10 @@ public:
 	}
 
 	void parseInitialStates(py::object initialStateObj, py::object labelsObj, py::object weightsObj, size_t numEnvs) {
+		m_initialStates.clear();
+		m_initialStateCumulative.clear();
+		m_initialStateMode = InitialStateMode::None;
+		m_reportInitialState = false;
 		if (initialStateObj.is_none()) {
 			if (!labelsObj.is_none() || !weightsObj.is_none()) {
 				throw std::runtime_error("initial_state labels/weights require initial_state");
@@ -1576,15 +1580,15 @@ public:
 			double cumulative = 0.0;
 			for (size_t i = 0; i < stateCount; ++i) {
 				const double weight = py::float_(weightsSeq[static_cast<py::ssize_t>(i)]).cast<double>();
-				if (!std::isfinite(weight) || weight <= 0.0) {
-					throw std::runtime_error("initial_state_weights must contain positive finite numbers");
+				if (!std::isfinite(weight) || weight < 0.0) {
+					throw std::runtime_error("initial_state_weights must contain non-negative finite numbers");
 				}
 				weights[i] = weight;
 				cumulative += weight;
 				m_initialStateCumulative.push_back(cumulative);
 			}
 			if (!std::isfinite(cumulative) || cumulative <= 0.0) {
-				throw std::runtime_error("initial_state_weights must sum to a positive finite number");
+				throw std::runtime_error("initial_state_weights must sum to a positive number");
 			}
 			m_initialStateMode = InitialStateMode::Sample;
 		} else {
@@ -1667,6 +1671,70 @@ public:
 			names[static_cast<py::ssize_t>(i)] = py::str(m_initialStateNames[i]);
 		}
 		return names;
+	}
+
+	py::tuple initialStatePolicyNames() const {
+		py::tuple names(m_initialStates.size());
+		for (size_t i = 0; i < m_initialStates.size(); ++i) {
+			names[static_cast<py::ssize_t>(i)] = py::str(m_initialStates[i].label);
+		}
+		return names;
+	}
+
+	py::tuple initialStateWeights() const {
+		if (m_initialStateMode != InitialStateMode::Sample) {
+			throw std::runtime_error("initial_state_weights are only available for weighted state sampling");
+		}
+		py::tuple weights(m_initialStates.size());
+		const double total = m_initialStateCumulative.empty() ? 0.0 : m_initialStateCumulative.back();
+		double previous = 0.0;
+		for (size_t i = 0; i < m_initialStates.size(); ++i) {
+			const double cumulative = m_initialStateCumulative[i];
+			const double weight = total > 0.0 ? (cumulative - previous) / total : 0.0;
+			weights[static_cast<py::ssize_t>(i)] = weight;
+			previous = cumulative;
+		}
+		return weights;
+	}
+
+	void setInitialStates(
+		py::object initialStateObj,
+		py::object labelsObj = py::none(),
+		py::object weightsObj = py::none()
+	) {
+		parseInitialStates(initialStateObj, labelsObj, weightsObj, m_slots.size());
+	}
+
+	void setInitialStateWeights(py::object weightsObj) {
+		if (m_initialStateMode != InitialStateMode::Sample) {
+			throw std::runtime_error("initial_state_weights can only be updated for weighted state sampling");
+		}
+		py::sequence weightsSeq = py::reinterpret_borrow<py::sequence>(weightsObj);
+		if (static_cast<size_t>(weightsSeq.size()) != m_initialStates.size()) {
+			throw std::runtime_error("initial_state_weights length must match initial_state length");
+		}
+
+		std::vector<double> weights(m_initialStates.size(), 0.0);
+		std::vector<double> cumulativeWeights;
+		cumulativeWeights.reserve(m_initialStates.size());
+		double cumulative = 0.0;
+		for (size_t i = 0; i < m_initialStates.size(); ++i) {
+			const double weight = py::float_(weightsSeq[static_cast<py::ssize_t>(i)]).cast<double>();
+			if (!std::isfinite(weight) || weight < 0.0) {
+				throw std::runtime_error("initial_state_weights must contain non-negative finite numbers");
+			}
+			weights[i] = weight;
+			cumulative += weight;
+			cumulativeWeights.push_back(cumulative);
+		}
+		if (!std::isfinite(cumulative) || cumulative <= 0.0) {
+			throw std::runtime_error("initial_state_weights must sum to a positive number");
+		}
+
+		for (size_t i = 0; i < weights.size(); ++i) {
+			m_initialStates[i].weight = weights[i];
+		}
+		m_initialStateCumulative = std::move(cumulativeWeights);
 	}
 
 	void addStartStateInfo(py::dict& info, const std::string& label) const {
@@ -1949,7 +2017,7 @@ private:
 		if (op == "decrease") {
 			return DoneOnInfoOp::Decrease;
 		}
-		throw std::runtime_error("done_on_info op must be change, increase, or decrease");
+		throw std::runtime_error("done_on op must be change, increase, or decrease");
 	}
 
 	void parseDoneOnInfoRules(py::object doneOnInfoObj) {
@@ -1962,12 +2030,12 @@ private:
 			py::sequence rule = py::reinterpret_borrow<py::sequence>(rawRule);
 			const py::ssize_t ruleSize = rule.size();
 			if (ruleSize != 3 && ruleSize != 5) {
-				throw std::runtime_error("done_on_info native rules must be (name, keys, op) or (name, trigger, keys, op, compare)");
+				throw std::runtime_error("done_on native rules must be (name, keys, op) or (name, trigger, keys, op, compare)");
 			}
 			DoneOnInfoRule parsed;
 			parsed.name = py::str(rule[0]);
 			if (parsed.name.empty()) {
-				throw std::runtime_error("done_on_info rule names must not be empty");
+				throw std::runtime_error("done_on rule names must not be empty");
 			}
 			const py::ssize_t triggerIndex = ruleSize == 5 ? 1 : -1;
 			const py::ssize_t keysIndex = ruleSize == 5 ? 2 : 1;
@@ -1976,27 +2044,27 @@ private:
 			if (triggerIndex >= 0) {
 				parsed.triggerId = py::str(rule[triggerIndex]);
 				if (parsed.triggerId.empty()) {
-					throw std::runtime_error("done_on_info trigger ids must not be empty");
+					throw std::runtime_error("done_on trigger ids must not be empty");
 				}
 			}
 			if (compareIndex >= 0) {
 				parsed.compare = py::str(rule[compareIndex]);
 				if (parsed.compare != "reset") {
-					throw std::runtime_error("done_on_info compare must be reset");
+					throw std::runtime_error("done_on compare must be reset");
 				}
 			}
 			py::sequence keys = py::reinterpret_borrow<py::sequence>(rule[keysIndex]);
 			if (keys.size() == 0) {
-				throw std::runtime_error("done_on_info rules must reference at least one key");
+				throw std::runtime_error("done_on rules must reference at least one key");
 			}
 			parsed.keyNames.reserve(static_cast<size_t>(keys.size()));
 			for (py::handle rawKey : keys) {
 				if (!PyUnicode_Check(rawKey.ptr())) {
-					throw std::runtime_error("done_on_info keys must contain only strings");
+					throw std::runtime_error("done_on keys must contain only strings");
 				}
 				std::string key = py::str(rawKey);
 				if (key.empty()) {
-					throw std::runtime_error("done_on_info keys must not be empty");
+					throw std::runtime_error("done_on keys must not be empty");
 				}
 				parsed.keyNames.push_back(key);
 			}
@@ -2011,7 +2079,7 @@ private:
 			for (const std::string& key : rule.keyNames) {
 				auto variable = variables.find(key);
 				if (variable == variables.end()) {
-					throw std::runtime_error("unknown done_on_info key: " + key);
+					throw std::runtime_error("unknown done_on key: " + key);
 				}
 				rule.variables.push_back(variable->second);
 			}
@@ -2854,7 +2922,7 @@ PYBIND11_MODULE(_retro, m) {
 		.def("get_state", &PyMovie::getState)
 		.def("set_state", &PyMovie::setState);
 
-	py::class_<PyNativeVectorEnv>(m, "NativeVectorEnv")
+	py::class_<PyRetroVecEnv>(m, "_RetroVecEnv")
 		.def(
 			py::init<
 				size_t,
@@ -2906,23 +2974,33 @@ PYBIND11_MODULE(_retro, m) {
 			py::arg("reward_clip_low"),
 			py::arg("reward_clip_high"),
 			py::arg("num_threads") = 0,
-			py::arg("info_mode") = "all",
-			py::arg("unsafe_zero_copy") = false,
+			py::arg("info_filter_mode") = "all",
+			py::arg("unsafe_view") = false,
 			py::arg("obs_layout") = "hwc",
-			py::arg("info_keys") = py::none(),
-			py::arg("done_on_info") = py::none(),
+			py::arg("info_filter_keys") = py::none(),
+			py::arg("done_on_rules") = py::none(),
 			py::arg("initial_state_labels") = py::none(),
 			py::arg("initial_state_weights") = py::none(),
 			py::arg("mask_crop") = py::none(),
 			py::arg("crop_fill") = 0
 		)
-		.def("reset", &PyNativeVectorEnv::reset, py::arg("seed") = py::none())
-		.def("step", &PyNativeVectorEnv::step)
-		.def("active_state_indices", &PyNativeVectorEnv::activeStateIndices)
-		.def("observation_shape", &PyNativeVectorEnv::observationShape)
-		.def("get_screen", &PyNativeVectorEnv::getScreen, py::arg("index") = 0)
-		.def_property_readonly("initial_state_names", &PyNativeVectorEnv::initialStateNames)
-		.def_property_readonly("num_envs", &PyNativeVectorEnv::numEnvs);
+		.def("reset", &PyRetroVecEnv::reset, py::arg("seed") = py::none())
+		.def("step", &PyRetroVecEnv::step)
+		.def("active_state_indices", &PyRetroVecEnv::activeStateIndices)
+		.def("initial_state_policy_names", &PyRetroVecEnv::initialStatePolicyNames)
+		.def("initial_state_weights", &PyRetroVecEnv::initialStateWeights)
+		.def(
+			"set_initial_states",
+			&PyRetroVecEnv::setInitialStates,
+			py::arg("initial_state"),
+			py::arg("initial_state_labels") = py::none(),
+			py::arg("initial_state_weights") = py::none()
+		)
+		.def("set_initial_state_weights", &PyRetroVecEnv::setInitialStateWeights)
+		.def("observation_shape", &PyRetroVecEnv::observationShape)
+		.def("get_screen", &PyRetroVecEnv::getScreen, py::arg("index") = 0)
+		.def_property_readonly("initial_state_names", &PyRetroVecEnv::initialStateNames)
+		.def_property_readonly("num_envs", &PyRetroVecEnv::numEnvs);
 
 	m.def("core_path", &::corePath, py::arg("hint") = py::none());
 	m.def("data_path", &::dataPath, py::arg("hint") = py::none());

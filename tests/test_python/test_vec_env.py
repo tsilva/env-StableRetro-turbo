@@ -20,6 +20,28 @@ def _ptr(array):
     return int(np.asarray(array).__array_interface__["data"][0])
 
 
+def test_retro_vec_env_binding_is_private():
+    from stable_retro import _retro
+
+    assert not hasattr(_retro, "RetroVecEnv")
+    assert hasattr(_retro, "_RetroVecEnv")
+    assert hasattr(_retro._RetroVecEnv, "set_initial_states")
+
+
+def test_retro_vec_env_legacy_aliases_are_removed():
+    from stable_retro.vec_env import RetroVecEnv
+
+    params = inspect.signature(RetroVecEnv.__init__).parameters
+    for name in (
+        "copy_observations",
+        "unsafe_zero_copy",
+        "info_mode",
+        "info_keys",
+        "done_on_info",
+    ):
+        assert name not in params
+
+
 def _empty_info_path(tmp_path):
     empty_info = tmp_path / "empty_info.json"
     empty_info.write_text('{"info": {}}', encoding="utf-8")
@@ -97,7 +119,7 @@ def _life_counter_info_path(tmp_path):
     return life_info
 
 
-def _make_test_native_vec_env(tmp_path, **kwargs):
+def _make_test_retro_vec_env(tmp_path, **kwargs):
     import stable_retro as retro
     from stable_retro.vec_env import RetroVecEnv
 
@@ -122,7 +144,7 @@ def _make_test_native_vec_env(tmp_path, **kwargs):
     )
 
 
-def _make_crop_native_vec_env(tmp_path, **kwargs):
+def _make_crop_retro_vec_env(tmp_path, **kwargs):
     import stable_retro as retro
     from stable_retro.vec_env import RetroVecEnv
 
@@ -136,7 +158,7 @@ def _make_crop_native_vec_env(tmp_path, **kwargs):
         "frame_skip": 1,
         "frame_stack": 1,
         "num_threads": 1,
-        "info_mode": "terminal",
+        "info_filter": "terminal",
     }
     defaults.update(kwargs)
 
@@ -151,7 +173,7 @@ def _make_crop_native_vec_env(tmp_path, **kwargs):
     )
 
 
-def test_stable_retro_native_vec_env_crop_mask_signature_defaults():
+def test_retro_vec_env_crop_mask_signature_defaults():
     from stable_retro.retro_env import RetroEnv
     from stable_retro.vec_env import RetroVecEnv
 
@@ -164,11 +186,11 @@ def test_stable_retro_native_vec_env_crop_mask_signature_defaults():
     assert env_sig.parameters["obs_crop_fill"].default == 0
 
 
-def test_stable_retro_native_vec_env_crop_mask_preserves_full_canvas_shape(tmp_path):
+def test_retro_vec_env_crop_mask_preserves_full_canvas_shape(tmp_path):
     pytest.importorskip("stable_baselines3")
 
-    full_env = _make_crop_native_vec_env(tmp_path)
-    mask_env = _make_crop_native_vec_env(
+    full_env = _make_crop_retro_vec_env(tmp_path)
+    mask_env = _make_crop_retro_vec_env(
         tmp_path,
         obs_crop=(32, 0, 0, 0),
         obs_crop_mode="mask",
@@ -184,19 +206,19 @@ def test_stable_retro_native_vec_env_crop_mask_preserves_full_canvas_shape(tmp_p
         mask_env.close()
 
 
-def test_stable_retro_native_vec_env_crop_remove_matches_default(tmp_path):
+def test_retro_vec_env_crop_remove_matches_default(tmp_path):
     pytest.importorskip("stable_baselines3")
 
-    default_env = _make_crop_native_vec_env(
+    default_env = _make_crop_retro_vec_env(
         tmp_path,
         obs_crop=(32, 0, 0, 0),
     )
-    explicit_env = _make_crop_native_vec_env(
+    explicit_env = _make_crop_retro_vec_env(
         tmp_path,
         obs_crop=(32, 0, 0, 0),
         obs_crop_mode="remove",
     )
-    full_env = _make_crop_native_vec_env(tmp_path)
+    full_env = _make_crop_retro_vec_env(tmp_path)
     try:
         default_obs = default_env.reset()
         explicit_obs = explicit_env.reset()
@@ -211,11 +233,11 @@ def test_stable_retro_native_vec_env_crop_remove_matches_default(tmp_path):
         full_env.close()
 
 
-def test_stable_retro_native_vec_env_crop_none_ignores_mask_mode(tmp_path):
+def test_retro_vec_env_crop_none_ignores_mask_mode(tmp_path):
     pytest.importorskip("stable_baselines3")
 
-    default_env = _make_crop_native_vec_env(tmp_path)
-    mask_mode_env = _make_crop_native_vec_env(
+    default_env = _make_crop_retro_vec_env(tmp_path)
+    mask_mode_env = _make_crop_retro_vec_env(
         tmp_path,
         obs_crop=None,
         obs_crop_mode="mask",
@@ -232,13 +254,13 @@ def test_stable_retro_native_vec_env_crop_none_ignores_mask_mode(tmp_path):
         mask_mode_env.close()
 
 
-def test_stable_retro_native_vec_env_crop_mask_fills_region_before_postprocess(
+def test_retro_vec_env_crop_mask_fills_region_before_postprocess(
     tmp_path,
 ):
     pytest.importorskip("stable_baselines3")
 
-    full_env = _make_crop_native_vec_env(tmp_path)
-    mask_env = _make_crop_native_vec_env(
+    full_env = _make_crop_retro_vec_env(tmp_path)
+    mask_env = _make_crop_retro_vec_env(
         tmp_path,
         obs_crop=(32, 0, 0, 0),
         obs_crop_mode="mask",
@@ -258,11 +280,11 @@ def test_stable_retro_native_vec_env_crop_mask_fills_region_before_postprocess(
 
 
 @pytest.mark.parametrize("bad_mode", ["hide", "", "MASKED"])
-def test_stable_retro_native_vec_env_rejects_invalid_crop_mode(tmp_path, bad_mode):
+def test_retro_vec_env_rejects_invalid_crop_mode(tmp_path, bad_mode):
     pytest.importorskip("stable_baselines3")
 
     with pytest.raises(ValueError, match="obs_crop_mode must be 'remove' or 'mask'"):
-        _make_crop_native_vec_env(
+        _make_crop_retro_vec_env(
             tmp_path,
             obs_crop=(32, 0, 0, 0),
             obs_crop_mode=bad_mode,
@@ -270,11 +292,11 @@ def test_stable_retro_native_vec_env_rejects_invalid_crop_mode(tmp_path, bad_mod
 
 
 @pytest.mark.parametrize("bad_fill", [-1, 256])
-def test_stable_retro_native_vec_env_rejects_invalid_crop_fill(tmp_path, bad_fill):
+def test_retro_vec_env_rejects_invalid_crop_fill(tmp_path, bad_fill):
     pytest.importorskip("stable_baselines3")
 
     with pytest.raises(ValueError, match="obs_crop_fill must be between 0 and 255"):
-        _make_crop_native_vec_env(
+        _make_crop_retro_vec_env(
             tmp_path,
             obs_crop=(32, 0, 0, 0),
             obs_crop_mode="mask",
@@ -285,7 +307,7 @@ def test_stable_retro_native_vec_env_rejects_invalid_crop_fill(tmp_path, bad_fil
 @pytest.mark.parametrize("obs_copy", ["copy", "safe_view", "unsafe_view"])
 @pytest.mark.parametrize("obs_layout", ["hwc", "chw"])
 @pytest.mark.parametrize("obs_crop_mode", ["remove", "mask"])
-def test_stable_retro_native_vec_env_crop_modes_terminal_layout_semantics(
+def test_retro_vec_env_crop_modes_terminal_layout_semantics(
     tmp_path,
     obs_copy,
     obs_layout,
@@ -294,7 +316,7 @@ def test_stable_retro_native_vec_env_crop_modes_terminal_layout_semantics(
     pytest.importorskip("stable_baselines3")
 
     done_info = _done_on_frame_info_path(tmp_path)
-    env = _make_crop_native_vec_env(
+    env = _make_crop_retro_vec_env(
         tmp_path,
         info_path=done_info,
         obs_crop=(1, 0, 0, 0),
@@ -305,7 +327,7 @@ def test_stable_retro_native_vec_env_crop_modes_terminal_layout_semantics(
         frame_stack=2,
         obs_copy=obs_copy,
         obs_layout=obs_layout,
-        info_mode="all",
+        info_filter="all",
     )
     try:
         obs = env.reset()
@@ -328,20 +350,20 @@ def test_stable_retro_native_vec_env_crop_modes_terminal_layout_semantics(
 
 
 @pytest.mark.parametrize("sticky_action_prob", [-0.01, 1.01])
-def test_stable_retro_native_vec_env_rejects_invalid_sticky_action_prob(
+def test_retro_vec_env_rejects_invalid_sticky_action_prob(
     tmp_path,
     sticky_action_prob,
 ):
     pytest.importorskip("stable_baselines3")
 
     with pytest.raises((RuntimeError, ValueError), match="sticky_action_prob"):
-        _make_test_native_vec_env(
+        _make_test_retro_vec_env(
             tmp_path,
             sticky_action_prob=sticky_action_prob,
         )
 
 
-def _make_dr88_native_vec_env(tmp_path, info_path, **kwargs):
+def _make_dr88_retro_vec_env(tmp_path, info_path, **kwargs):
     import stable_retro as retro
     from stable_retro.vec_env import RetroVecEnv
 
@@ -365,13 +387,13 @@ def _make_dr88_native_vec_env(tmp_path, info_path, **kwargs):
     )
 
 
-def test_stable_retro_native_vec_env_same_process(tmp_path):
+def test_retro_vec_env_same_process(tmp_path):
     pytest.importorskip("stable_baselines3")
 
-    env = _make_test_native_vec_env(
+    env = _make_test_retro_vec_env(
         tmp_path,
         num_envs=4,
-        info_mode="terminal",
+        info_filter="terminal",
     )
     try:
         obs = env.reset()
@@ -391,14 +413,14 @@ def test_stable_retro_native_vec_env_same_process(tmp_path):
         env.close()
 
 
-def test_stable_retro_native_vec_env_rgb_array_render_returns_raw_screen(tmp_path):
+def test_retro_vec_env_rgb_array_render_returns_raw_screen(tmp_path):
     pytest.importorskip("stable_baselines3")
 
-    env = _make_test_native_vec_env(
+    env = _make_test_retro_vec_env(
         tmp_path,
         num_envs=2,
         render_mode="rgb_array",
-        info_mode="terminal",
+        info_filter="terminal",
     )
     try:
         obs = env.reset()
@@ -414,19 +436,19 @@ def test_stable_retro_native_vec_env_rgb_array_render_returns_raw_screen(tmp_pat
         env.close()
 
 
-def test_stable_retro_native_vec_env_rgb_array_render_updates_with_indexed_video(
+def test_retro_vec_env_rgb_array_render_updates_with_indexed_video(
     tmp_path,
 ):
     pytest.importorskip("stable_baselines3")
 
     os.environ["STABLE_RETRO_DISABLE_RENDER_SKIP"] = "1"
-    env = _make_test_native_vec_env(
+    env = _make_test_retro_vec_env(
         tmp_path,
         num_envs=1,
         render_mode="rgb_array",
         obs_resize_algorithm="area",
         maxpool_last_two=True,
-        info_mode="terminal",
+        info_filter="terminal",
     )
     try:
         env.reset()
@@ -461,13 +483,13 @@ def test_stable_retro_simple_image_viewer_close_ignores_cocoa_shutdown_error():
     assert viewer.isopen is False
 
 
-def test_stable_retro_native_vec_env_chw_observation_layout(tmp_path):
+def test_retro_vec_env_chw_observation_layout(tmp_path):
     pytest.importorskip("stable_baselines3")
 
-    env = _make_test_native_vec_env(
+    env = _make_test_retro_vec_env(
         tmp_path,
         obs_layout="chw",
-        info_mode="terminal",
+        info_filter="terminal",
     )
     try:
         obs = env.reset()
@@ -488,11 +510,11 @@ def test_stable_retro_native_vec_env_chw_observation_layout(tmp_path):
         env.close()
 
 
-@pytest.mark.parametrize("info_mode", ["terminal", "none"])
-def test_stable_retro_native_vec_env_fast_info_modes(info_mode, tmp_path):
+@pytest.mark.parametrize("info_filter", ["terminal", "none"])
+def test_retro_vec_env_fast_info_filters(info_filter, tmp_path):
     pytest.importorskip("stable_baselines3")
 
-    env = _make_test_native_vec_env(tmp_path, info_mode=info_mode)
+    env = _make_test_retro_vec_env(tmp_path, info_filter=info_filter)
     try:
         env.reset()
         actions = np.zeros((env.num_envs, env.num_buttons), dtype=np.uint8)
@@ -505,10 +527,10 @@ def test_stable_retro_native_vec_env_fast_info_modes(info_mode, tmp_path):
         env.close()
 
 
-def test_stable_retro_native_vec_env_no_rule_no_done_omits_done_on_info(tmp_path):
+def test_retro_vec_env_no_rule_no_done_omits_done_on_info(tmp_path):
     pytest.importorskip("stable_baselines3")
 
-    env = _make_test_native_vec_env(tmp_path, info_mode="all")
+    env = _make_test_retro_vec_env(tmp_path, info_filter="all")
     try:
         env.reset()
         actions = np.zeros((env.num_envs, env.num_buttons), dtype=np.uint8)
@@ -521,11 +543,12 @@ def test_stable_retro_native_vec_env_no_rule_no_done_omits_done_on_info(tmp_path
         env.close()
 
 
-def test_stable_retro_native_vec_env_done_on_info_validation():
+def test_retro_vec_env_done_on_info_validation():
     pytest.importorskip("stable_baselines3")
     from stable_retro.vec_env import RetroVecEnv
 
-    normalize = RetroVecEnv._normalize_done_on_info
+    def normalize(value):
+        return RetroVecEnv._normalize_done_on(value, label="done_on")
 
     assert normalize(
         {"level_change": [["levelHi", "levelLo"], "change"]},
@@ -559,7 +582,7 @@ def test_stable_retro_native_vec_env_done_on_info_validation():
         ("life_loss", "health_decrease", ("health",), "decrease", "reset"),
     )
 
-    with pytest.raises(ValueError, match="done_on_info ops"):
+    with pytest.raises(ValueError, match="done_on ops"):
         normalize(
             {"bad": ("lives", "less")},
         )
@@ -570,7 +593,7 @@ def test_stable_retro_native_vec_env_done_on_info_validation():
         )
 
 
-def test_stable_retro_native_vec_env_resolves_scenario_done_on_events(tmp_path):
+def test_retro_vec_env_resolves_scenario_done_on_events(tmp_path):
     pytest.importorskip("stable_baselines3")
     import stable_retro as retro
     from stable_retro.vec_env import RetroVecEnv
@@ -685,37 +708,53 @@ def test_stable_retro_native_vec_env_resolves_scenario_done_on_events(tmp_path):
         )
 
 
-def test_stable_retro_native_vec_env_keyword_normalization():
+def test_retro_vec_env_keyword_normalization():
     pytest.importorskip("stable_baselines3")
-    from stable_retro.vec_env import RetroVecEnv, _UNSET
+    from stable_retro.vec_env import RetroVecEnv
 
-    assert RetroVecEnv._normalize_obs_copy("copy", _UNSET, _UNSET) == (
+    assert RetroVecEnv._normalize_obs_copy("copy") == (
         True,
         False,
     )
-    assert RetroVecEnv._normalize_obs_copy("safe_view", _UNSET, _UNSET) == (
+    assert RetroVecEnv._normalize_obs_copy("safe_view") == (
         False,
         False,
     )
-    assert RetroVecEnv._normalize_obs_copy("unsafe_view", _UNSET, _UNSET) == (
+    assert RetroVecEnv._normalize_obs_copy("unsafe_view") == (
         False,
         True,
     )
     assert RetroVecEnv._normalize_info_filter(
         {"mode": "terminal", "keys": ("lives", "x_pos")},
-        _UNSET,
-        _UNSET,
     ) == ("terminal", ["lives", "x_pos"])
     assert RetroVecEnv._normalize_done_on(
         {"life_loss": ("lives", "decrease")},
         label="done_on",
     ) == (("life_loss", "default", ("lives",), "decrease", "reset"),)
+    assert RetroVecEnv._normalize_state_sampling_weights(
+        {"Level1-1": 1.0, "Level1-2": 3.0},
+        ("Level1-1", "Level1-2"),
+    ) == [0.25, 0.75]
+    assert RetroVecEnv._normalize_state_sampling_weights(
+        [0.0, 4.0],
+        ("Level1-1", "Level1-2"),
+    ) == [0.0, 1.0]
+    with pytest.raises(ValueError, match="missing state sampling weights"):
+        RetroVecEnv._normalize_state_sampling_weights(
+            {"Level1-1": 1.0},
+            ("Level1-1", "Level1-2"),
+        )
+    with pytest.raises(ValueError, match="positive number"):
+        RetroVecEnv._normalize_state_sampling_weights(
+            {"Level1-1": 0.0, "Level1-2": 0.0},
+            ("Level1-1", "Level1-2"),
+        )
 
 
-def test_stable_retro_native_vec_env_accepts_retro_env_keyword_shape(tmp_path):
+def test_retro_vec_env_accepts_retro_env_keyword_shape(tmp_path):
     pytest.importorskip("stable_baselines3")
 
-    env = _make_test_native_vec_env(
+    env = _make_test_retro_vec_env(
         tmp_path,
         obs_layout="chw",
         obs_copy="safe_view",
@@ -727,8 +766,8 @@ def test_stable_retro_native_vec_env_accepts_retro_env_keyword_shape(tmp_path):
     try:
         obs = env.reset()
         assert env.obs_copy == "safe_view"
-        assert env.copy_observations is False
-        assert env.unsafe_zero_copy is False
+        assert not hasattr(env, "copy_observations")
+        assert not hasattr(env, "unsafe_zero_copy")
         assert obs.shape == (2, 4, 84, 84)
 
         actions = np.zeros((env.num_envs, env.num_buttons), dtype=np.uint8)
@@ -750,17 +789,17 @@ def test_stable_retro_native_vec_env_accepts_retro_env_keyword_shape(tmp_path):
         {"action_sticky_prob": 0.0},
     ],
 )
-def test_stable_retro_native_vec_env_rejects_legacy_vector_keyword_shape(
+def test_retro_vec_env_rejects_legacy_vector_keyword_shape(
     tmp_path,
     legacy_kwarg,
 ):
     pytest.importorskip("stable_baselines3")
 
     with pytest.raises(TypeError, match="unexpected keyword argument"):
-        _make_test_native_vec_env(tmp_path, **legacy_kwarg)
+        _make_test_retro_vec_env(tmp_path, **legacy_kwarg)
 
 
-def test_stable_retro_native_vec_env_validates_mixed_state_config():
+def test_retro_vec_env_validates_mixed_state_config():
     pytest.importorskip("stable_baselines3")
     import stable_retro as retro
     from stable_retro.vec_env import RetroVecEnv
@@ -771,12 +810,20 @@ def test_stable_retro_native_vec_env_validates_mixed_state_config():
     with pytest.raises(ValueError, match="state sequence length must match num_envs"):
         resolve(retro, game, 4, ["Level1-1", "Level1-2"])
 
-    with pytest.raises(ValueError, match="positive finite"):
+    with pytest.raises(ValueError, match="non-negative finite"):
         resolve(
             retro,
             game,
             4,
-            {"Level1-1": 1.0, "Level1-2": 0.0},
+            {"Level1-1": 1.0, "Level1-2": -0.1},
+        )
+
+    with pytest.raises(ValueError, match="positive number"):
+        resolve(
+            retro,
+            game,
+            4,
+            {"Level1-1": 0.0, "Level1-2": 0.0},
         )
 
     with pytest.raises(ValueError, match="unknown state"):
@@ -804,6 +851,17 @@ def test_stable_retro_native_vec_env_validates_mixed_state_config():
     assert states == ["Level1-1", "Level1-2"]
     assert labels == ["Level1-1", "Level1-2"]
     assert probs == [0.25, 0.75]
+    assert state_collection is True
+
+    states, labels, probs, state_collection = resolve(
+        retro,
+        game,
+        4,
+        {"Level1-1": 0.0, "Level1-2": 3.0},
+    )
+    assert states == ["Level1-1", "Level1-2"]
+    assert labels == ["Level1-1", "Level1-2"]
+    assert probs == [0.0, 1.0]
     assert state_collection is True
 
     states, labels, probs, state_collection = resolve(
@@ -849,7 +907,7 @@ def _mario_rom_path_or_skip():
         pytest.skip("SuperMarioBros-Nes-v0 ROM is not imported locally")
 
 
-def _make_mario_native_vec_env(num_envs, rom_path, **kwargs):
+def _make_mario_retro_vec_env(num_envs, rom_path, **kwargs):
     from stable_retro.vec_env import RetroVecEnv
 
     state = kwargs.pop("state", "Level1-1")
@@ -868,20 +926,20 @@ def _make_mario_native_vec_env(num_envs, rom_path, **kwargs):
     )
 
 
-def test_stable_retro_native_vec_env_done_on_info_default_disabled():
+def test_retro_vec_env_done_on_info_default_disabled():
     pytest.importorskip("stable_baselines3")
 
     rom_path = _mario_rom_path_or_skip()
-    env = _make_mario_native_vec_env(
+    env = _make_mario_retro_vec_env(
         1,
         rom_path,
-        info_mode="terminal",
+        info_filter="terminal",
     )
-    enabled_env = _make_mario_native_vec_env(
+    enabled_env = _make_mario_retro_vec_env(
         1,
         rom_path,
-        info_mode="terminal",
-        done_on_info={"life_loss": ["lives", "decrease"]},
+        info_filter="terminal",
+        done_on={"life_loss": ["lives", "decrease"]},
     )
     try:
         env.reset()
@@ -908,20 +966,20 @@ def test_stable_retro_native_vec_env_done_on_info_default_disabled():
         enabled_env.close()
 
 
-def test_stable_retro_native_vec_env_done_on_info_life_loss_autoresets_only_one_lane():
+def test_retro_vec_env_done_on_info_life_loss_autoresets_only_one_lane():
     pytest.importorskip("stable_baselines3")
 
     rom_path = _mario_rom_path_or_skip()
-    life_env = _make_mario_native_vec_env(
+    life_env = _make_mario_retro_vec_env(
         2,
         rom_path,
-        info_mode="terminal",
-        done_on_info={"life_loss": ["lives", "decrease"]},
+        info_filter="terminal",
+        done_on={"life_loss": ["lives", "decrease"]},
     )
-    baseline_env = _make_mario_native_vec_env(
+    baseline_env = _make_mario_retro_vec_env(
         2,
         rom_path,
-        info_mode="terminal",
+        info_filter="terminal",
     )
     try:
         life_env.reset()
@@ -956,22 +1014,22 @@ def test_stable_retro_native_vec_env_done_on_info_life_loss_autoresets_only_one_
         baseline_env.close()
 
 
-def test_stable_retro_native_vec_env_done_on_info_autoresets_only_changed_lane():
+def test_retro_vec_env_done_on_info_autoresets_only_changed_lane():
     pytest.importorskip("stable_baselines3")
 
     rom_path = _mario_rom_path_or_skip()
-    env = _make_mario_native_vec_env(
+    env = _make_mario_retro_vec_env(
         2,
         rom_path,
         state=["Level1-1", "Level1-1"],
-        info_mode="terminal",
-        done_on_info={"scroll_change": [["xscrollHi", "xscrollLo"], "change"]},
+        info_filter="terminal",
+        done_on={"scroll_change": [["xscrollHi", "xscrollLo"], "change"]},
     )
-    baseline_env = _make_mario_native_vec_env(
+    baseline_env = _make_mario_retro_vec_env(
         2,
         rom_path,
         state=["Level1-1", "Level1-1"],
-        info_mode="terminal",
+        info_filter="terminal",
     )
     try:
         env.reset()
@@ -1009,15 +1067,15 @@ def test_stable_retro_native_vec_env_done_on_info_autoresets_only_changed_lane()
         baseline_env.close()
 
 
-def test_stable_retro_native_vec_env_done_on_info_reports_multiple_triggers_same_event():
+def test_retro_vec_env_done_on_info_reports_multiple_triggers_same_event():
     pytest.importorskip("stable_baselines3")
 
     rom_path = _mario_rom_path_or_skip()
-    env = _make_mario_native_vec_env(
+    env = _make_mario_retro_vec_env(
         1,
         rom_path,
-        info_mode="terminal",
-        done_on_info={
+        info_filter="terminal",
+        done_on={
             "life_loss": {
                 "triggers": [
                     {
@@ -1066,16 +1124,16 @@ def test_stable_retro_native_vec_env_done_on_info_reports_multiple_triggers_same
         env.close()
 
 
-def test_stable_retro_native_vec_env_done_on_info_weighted_state_autoreset_updates_active_index():
+def test_retro_vec_env_done_on_info_weighted_state_autoreset_updates_active_index():
     pytest.importorskip("stable_baselines3")
 
     rom_path = _mario_rom_path_or_skip()
-    env = _make_mario_native_vec_env(
+    env = _make_mario_retro_vec_env(
         2,
         rom_path,
         state={"Level1-1": 1.0},
-        info_mode="terminal",
-        done_on_info={"scroll_change": [["xscrollHi", "xscrollLo"], "change"]},
+        info_filter="terminal",
+        done_on={"scroll_change": [["xscrollHi", "xscrollLo"], "change"]},
     )
     try:
         env.seed(20260624)
@@ -1102,14 +1160,14 @@ def test_stable_retro_native_vec_env_done_on_info_weighted_state_autoreset_updat
         env.close()
 
 
-def test_stable_retro_native_vec_env_single_state_active_indices_if_rom_present():
+def test_retro_vec_env_single_state_active_indices_if_rom_present():
     pytest.importorskip("stable_baselines3")
 
     rom_path = _mario_rom_path_or_skip()
-    env = _make_mario_native_vec_env(
+    env = _make_mario_retro_vec_env(
         4,
         rom_path,
-        info_mode="none",
+        info_filter="none",
     )
     try:
         indices = env.active_state_indices()
@@ -1128,7 +1186,7 @@ def test_stable_retro_native_vec_env_single_state_active_indices_if_rom_present(
         env.close()
 
 
-def test_stable_retro_native_vec_env_mixed_states_reset_infos_if_rom_present():
+def test_retro_vec_env_mixed_states_reset_infos_if_rom_present():
     pytest.importorskip("stable_baselines3")
     from stable_retro.vec_env import RetroVecEnv
 
@@ -1145,7 +1203,7 @@ def test_stable_retro_native_vec_env_mixed_states_reset_infos_if_rom_present():
         frame_stack=4,
         maxpool_last_two=True,
         num_threads=3,
-        info_mode="terminal",
+        info_filter="terminal",
     )
     try:
         env.reset()
@@ -1168,7 +1226,7 @@ def test_stable_retro_native_vec_env_mixed_states_reset_infos_if_rom_present():
         env.close()
 
 
-def test_stable_retro_native_vec_env_fixed_duplicate_states_are_canonical_if_rom_present():
+def test_retro_vec_env_fixed_duplicate_states_are_canonical_if_rom_present():
     pytest.importorskip("stable_baselines3")
     from stable_retro.vec_env import RetroVecEnv
 
@@ -1185,7 +1243,7 @@ def test_stable_retro_native_vec_env_fixed_duplicate_states_are_canonical_if_rom
         frame_stack=4,
         maxpool_last_two=True,
         num_threads=4,
-        info_mode="terminal",
+        info_filter="terminal",
     )
     try:
         env.reset()
@@ -1200,7 +1258,7 @@ def test_stable_retro_native_vec_env_fixed_duplicate_states_are_canonical_if_rom
         env.close()
 
 
-def test_stable_retro_native_vec_env_weighted_states_sample_on_reset_if_rom_present():
+def test_retro_vec_env_weighted_states_sample_on_reset_if_rom_present():
     pytest.importorskip("stable_baselines3")
     from stable_retro.vec_env import RetroVecEnv
 
@@ -1217,7 +1275,7 @@ def test_stable_retro_native_vec_env_weighted_states_sample_on_reset_if_rom_pres
         frame_stack=4,
         maxpool_last_two=True,
         num_threads=4,
-        info_mode="terminal",
+        info_filter="terminal",
     )
     try:
         env.seed(20260620)
@@ -1241,7 +1299,124 @@ def test_stable_retro_native_vec_env_weighted_states_sample_on_reset_if_rom_pres
         env.close()
 
 
-def test_stable_retro_native_vec_env_active_indices_update_after_autoreset_if_rom_present(
+def test_retro_vec_env_set_state_updates_reset_policy_if_rom_present():
+    pytest.importorskip("stable_baselines3")
+    from stable_retro.vec_env import RetroVecEnv
+
+    rom_path = _mario_rom_path_or_skip()
+    states = ["Level1-1", "Level1-2", "Level1-3"]
+    env = RetroVecEnv(
+        "SuperMarioBros-Nes-v0",
+        state={state: 1.0 for state in states},
+        num_envs=8,
+        rom_path=rom_path,
+        obs_resize=(84, 84),
+        obs_grayscale=True,
+        frame_skip=4,
+        frame_stack=4,
+        maxpool_last_two=True,
+        num_threads=4,
+        info_filter="terminal",
+    )
+    try:
+        assert env.initial_state_names == tuple(states)
+        env.reset()
+        assert set(env.active_states()).issubset(states)
+
+        env.set_state(
+            {"Level1-1": 0.0, "Level1-2": 1.0, "Level1-3": 0.0},
+        )
+        assert env.state_sampling_weights() == {
+            "Level1-1": 0.0,
+            "Level1-2": 1.0,
+            "Level1-3": 0.0,
+        }
+        assert set(env.active_states()).issubset(states)
+
+        env.reset()
+        np.testing.assert_array_equal(
+            env.active_state_indices(),
+            np.ones(env.num_envs, dtype=np.int32),
+        )
+        assert env.active_states() == ("Level1-2",) * env.num_envs
+        assert [info["start_state"] for info in env.reset_infos] == [
+            "Level1-2",
+        ] * env.num_envs
+
+        env.set_state("Level1-3")
+        env.reset()
+        np.testing.assert_array_equal(
+            env.active_state_indices(),
+            np.full(env.num_envs, 2, dtype=np.int32),
+        )
+        assert env.active_states() == ("Level1-3",) * env.num_envs
+
+        fixed_states = ["Level1-1", "Level1-2"] * 4
+        env.set_state(fixed_states)
+        env.reset()
+        assert env.active_states() == tuple(fixed_states)
+
+        env.set_state(["Level1-3"] * env.num_envs)
+        assert env.active_states() == tuple(fixed_states)
+        env.reset()
+        assert env.active_states() == ("Level1-3",) * env.num_envs
+    finally:
+        env.close()
+
+
+def test_retro_vec_env_set_state_applies_on_autoreset_if_rom_present(
+    tmp_path,
+):
+    pytest.importorskip("stable_baselines3")
+    from stable_retro.vec_env import RetroVecEnv
+
+    rom_path = _mario_rom_path_or_skip()
+    done_info = _done_on_frame_info_path(tmp_path)
+    env = RetroVecEnv(
+        "SuperMarioBros-Nes-v0",
+        state=["Level1-1", "Level1-1"],
+        num_envs=2,
+        rom_path=rom_path,
+        info=str(done_info),
+        scenario=str(done_info),
+        obs_resize=(84, 84),
+        obs_grayscale=True,
+        frame_skip=4,
+        frame_stack=4,
+        maxpool_last_two=True,
+        num_threads=2,
+        info_filter="terminal",
+    )
+    try:
+        env.reset()
+        assert env.active_states() == ("Level1-1", "Level1-1")
+
+        env.set_state({"Level1-2": 1.0})
+        assert env.active_states() == ("Level1-1", "Level1-1")
+
+        actions = np.zeros((env.num_envs, env.num_buttons), dtype=np.uint8)
+        done_lanes = []
+        infos = None
+        for _ in range(12):
+            _, _, dones, infos = env.step(actions)
+            done_lanes = [
+                lane
+                for lane, done in enumerate(dones)
+                if bool(done)
+            ]
+            if done_lanes:
+                break
+
+        assert done_lanes
+        active_states = env.active_states()
+        for lane in done_lanes:
+            assert active_states[lane] == "Level1-2"
+            assert infos[lane]["reset_info"]["start_state"] == "Level1-2"
+    finally:
+        env.close()
+
+
+def test_retro_vec_env_active_indices_update_after_autoreset_if_rom_present(
     tmp_path,
 ):
     pytest.importorskip("stable_baselines3")
@@ -1263,7 +1438,7 @@ def test_stable_retro_native_vec_env_active_indices_update_after_autoreset_if_ro
         frame_stack=4,
         maxpool_last_two=True,
         num_threads=3,
-        info_mode="terminal",
+        info_filter="terminal",
     )
     try:
         env.seed(20260623)
@@ -1283,7 +1458,7 @@ def test_stable_retro_native_vec_env_active_indices_update_after_autoreset_if_ro
         env.close()
 
 
-def test_stable_retro_native_vec_env_selected_info_keys(tmp_path):
+def test_retro_vec_env_selected_info_keys(tmp_path):
     pytest.importorskip("stable_baselines3")
     import stable_retro as retro
     from stable_retro.vec_env import RetroVecEnv
@@ -1302,14 +1477,17 @@ def test_stable_retro_native_vec_env_selected_info_keys(tmp_path):
         frame_skip=2,
         frame_stack=4,
         num_threads=1,
-        info_mode="all",
+        info_filter="all",
     )
     default_env = RetroVecEnv("Dr88-FamiconIntro", num_envs=1, **common_kwargs)
+    selected_kwargs = {
+        **common_kwargs,
+        "info_filter": {"mode": "all", "keys": ["frame_reward_source"]},
+    }
     selected_env = RetroVecEnv(
         "Dr88-FamiconIntro",
         num_envs=1,
-        info_keys=["frame_reward_source"],
-        **common_kwargs,
+        **selected_kwargs,
     )
     try:
         default_env.reset()
@@ -1329,13 +1507,13 @@ def test_stable_retro_native_vec_env_selected_info_keys(tmp_path):
         selected_env.close()
 
 
-def test_stable_retro_native_vec_env_observations_do_not_alias_previous_step(tmp_path):
+def test_retro_vec_env_observations_do_not_alias_previous_step(tmp_path):
     pytest.importorskip("stable_baselines3")
 
-    env = _make_test_native_vec_env(
+    env = _make_test_retro_vec_env(
         tmp_path,
-        copy_observations=False,
-        info_mode="terminal",
+        obs_copy="safe_view",
+        info_filter="terminal",
     )
     try:
         obs0 = env.reset()
@@ -1352,14 +1530,13 @@ def test_stable_retro_native_vec_env_observations_do_not_alias_previous_step(tmp
         env.close()
 
 
-def test_stable_retro_native_vec_env_unsafe_zero_copy_aliases_observations(tmp_path):
+def test_retro_vec_env_unsafe_view_aliases_observations(tmp_path):
     pytest.importorskip("stable_baselines3")
 
-    env = _make_test_native_vec_env(
+    env = _make_test_retro_vec_env(
         tmp_path,
-        copy_observations=False,
-        unsafe_zero_copy=True,
-        info_mode="terminal",
+        obs_copy="unsafe_view",
+        info_filter="terminal",
     )
     try:
         obs0 = env.reset()
@@ -1374,7 +1551,7 @@ def test_stable_retro_native_vec_env_unsafe_zero_copy_aliases_observations(tmp_p
         env.close()
 
 
-def test_stable_retro_native_vec_env_forwards_per_env_reset_seeds():
+def test_retro_vec_env_forwards_per_env_reset_seeds():
     pytest.importorskip("stable_baselines3")
     from stable_retro.vec_env import RetroVecEnv
 
@@ -1389,7 +1566,7 @@ def test_stable_retro_native_vec_env_forwards_per_env_reset_seeds():
     env = RetroVecEnv.__new__(RetroVecEnv)
     env.native = FakeNative()
     env.num_envs = 3
-    env.copy_observations = True
+    env._copy_obs = True
     env._seeds = [11, None, 37]
     env._options = [{}, {}, {}]
 
@@ -1400,10 +1577,10 @@ def test_stable_retro_native_vec_env_forwards_per_env_reset_seeds():
     assert env._seeds == [None, None, None]
 
 
-def test_stable_retro_native_vec_env_frame_stack_order(tmp_path):
+def test_retro_vec_env_frame_stack_order(tmp_path):
     pytest.importorskip("stable_baselines3")
 
-    env = _make_test_native_vec_env(tmp_path, info_mode="terminal")
+    env = _make_test_retro_vec_env(tmp_path, info_filter="terminal")
     try:
         obs = env.reset()
         actions = np.zeros((env.num_envs, env.num_buttons), dtype=np.uint8)
@@ -1424,7 +1601,7 @@ def test_stable_retro_native_vec_env_frame_stack_order(tmp_path):
         env.close()
 
 
-def _native_test_rom_trace(tmp_path, copy_observations, num_threads, seed, actions):
+def _native_test_rom_trace(tmp_path, obs_copy, num_threads, seed, actions):
     import stable_retro as retro
     from stable_retro.vec_env import RetroVecEnv
 
@@ -1445,10 +1622,10 @@ def _native_test_rom_trace(tmp_path, copy_observations, num_threads, seed, actio
         frame_stack=4,
         maxpool_last_two=True,
         num_threads=num_threads,
-        copy_observations=copy_observations,
+        obs_copy=obs_copy,
         noop_reset_max=1,
         sticky_action_prob=0.25,
-        info_mode="all",
+        info_filter="all",
     )
     try:
         env.seed(seed)
@@ -1472,11 +1649,11 @@ def _native_test_rom_trace(tmp_path, copy_observations, num_threads, seed, actio
         env.close()
 
 
-@pytest.mark.parametrize("copy_observations", [True, False])
+@pytest.mark.parametrize("obs_copy", ["copy", "safe_view"])
 @pytest.mark.parametrize("num_threads", [1, 4])
-def test_stable_retro_native_vec_env_seed_determinism_ci_rom(
+def test_retro_vec_env_seed_determinism_ci_rom(
     tmp_path,
-    copy_observations,
+    obs_copy,
     num_threads,
 ):
     pytest.importorskip("stable_baselines3")
@@ -1490,14 +1667,14 @@ def test_stable_retro_native_vec_env_seed_determinism_ci_rom(
 
     first = _native_test_rom_trace(
         tmp_path,
-        copy_observations,
+        obs_copy,
         num_threads,
         123,
         actions,
     )
     second = _native_test_rom_trace(
         tmp_path,
-        copy_observations,
+        obs_copy,
         num_threads,
         123,
         actions,
@@ -1531,8 +1708,8 @@ def _native_render_skip_trace(tmp_path, *, disable_render_skip, maxpool_last_two
         frame_stack=4,
         maxpool_last_two=maxpool_last_two,
         num_threads=2,
-        copy_observations=True,
-        info_mode="all",
+        obs_copy="copy",
+        info_filter="all",
     )
     try:
         env.seed(20260616)
@@ -1559,7 +1736,7 @@ def _native_render_skip_trace(tmp_path, *, disable_render_skip, maxpool_last_two
 
 
 @pytest.mark.parametrize("maxpool_last_two", [True, False])
-def test_stable_retro_native_vec_env_nes_render_skip_matches_full_render(
+def test_retro_vec_env_nes_render_skip_matches_full_render(
     tmp_path,
     maxpool_last_two,
 ):
@@ -1632,8 +1809,8 @@ def _native_layout_trace(tmp_path, obs_layout, actions):
         frame_stack=4,
         maxpool_last_two=True,
         num_threads=2,
-        copy_observations=False,
-        info_mode="all",
+        obs_copy="safe_view",
+        info_filter="all",
         obs_layout=obs_layout,
     )
     try:
@@ -1658,7 +1835,7 @@ def _native_layout_trace(tmp_path, obs_layout, actions):
         env.close()
 
 
-def test_stable_retro_native_vec_env_chw_matches_hwc_trace(tmp_path):
+def test_retro_vec_env_chw_matches_hwc_trace(tmp_path):
     pytest.importorskip("stable_baselines3")
 
     actions = np.random.default_rng(20260617).integers(
@@ -1674,7 +1851,7 @@ def test_stable_retro_native_vec_env_chw_matches_hwc_trace(tmp_path):
     _assert_native_traces_equal(hwc, chw)
 
 
-def test_stable_retro_native_vec_env_mario_infos_if_rom_present():
+def test_retro_vec_env_mario_infos_if_rom_present():
     pytest.importorskip("stable_baselines3")
     import stable_retro as retro
     from stable_retro.vec_env import RetroVecEnv
@@ -1719,7 +1896,7 @@ def test_stable_retro_native_vec_env_mario_infos_if_rom_present():
         frame_stack=4,
         maxpool_last_two=True,
         num_threads=1,
-        info_mode="terminal",
+        info_filter="terminal",
     )
     try:
         env.reset()
@@ -1739,7 +1916,7 @@ def test_stable_retro_native_vec_env_mario_infos_if_rom_present():
         terminal_env.close()
 
 
-def test_stable_retro_native_vec_env_mario_life_decrease_terminates_if_rom_present():
+def test_retro_vec_env_mario_life_decrease_terminates_if_rom_present():
     pytest.importorskip("stable_baselines3")
     import stable_retro as retro
     from stable_retro.vec_env import RetroVecEnv
@@ -1760,7 +1937,7 @@ def test_stable_retro_native_vec_env_mario_life_decrease_terminates_if_rom_prese
         frame_stack=4,
         maxpool_last_two=True,
         num_threads=1,
-        info_mode="terminal",
+        info_filter="terminal",
         done_on=["life_loss"],
     )
     try:
@@ -1876,7 +2053,7 @@ def test_stable_retro_hf_mario_policy_playback_command_parses():
     assert args.deterministic is False
 
 
-def test_stable_retro_native_vec_env_mario_all_info_keys_match_default():
+def test_retro_vec_env_mario_all_info_keys_match_default():
     pytest.importorskip("stable_baselines3")
 
     mario_keys = [
@@ -1897,13 +2074,19 @@ def test_stable_retro_native_vec_env_mario_all_info_keys_match_default():
         dtype=np.uint8,
     )
 
-    baseline = _mario_native_trace(True, 4, 321, actions)
-    selected = _mario_native_trace(True, 4, 321, actions, info_keys=mario_keys)
+    baseline = _mario_native_trace("copy", 4, 321, actions)
+    selected = _mario_native_trace(
+        "copy",
+        4,
+        321,
+        actions,
+        info_filter={"mode": "all", "keys": mario_keys},
+    )
 
     _assert_native_traces_equal(baseline, selected)
 
 
-def _mario_native_trace(copy_observations, num_threads, seed, actions, **env_kwargs):
+def _mario_native_trace(obs_copy, num_threads, seed, actions, **env_kwargs):
     import stable_retro as retro
     from stable_retro.vec_env import RetroVecEnv
 
@@ -1915,6 +2098,7 @@ def _mario_native_trace(copy_observations, num_threads, seed, actions, **env_kwa
     num_envs = int(env_kwargs.pop("num_envs", 8))
     frame_skip = int(env_kwargs.pop("frame_skip", 4))
     maxpool_last_two = bool(env_kwargs.pop("maxpool_last_two", True))
+    info_filter = env_kwargs.pop("info_filter", "all")
 
     env = RetroVecEnv(
         "SuperMarioBros-Nes-v0",
@@ -1929,8 +2113,8 @@ def _mario_native_trace(copy_observations, num_threads, seed, actions, **env_kwa
         frame_stack=4,
         maxpool_last_two=maxpool_last_two,
         num_threads=num_threads,
-        copy_observations=copy_observations,
-        info_mode="all",
+        obs_copy=obs_copy,
+        info_filter=info_filter,
         **env_kwargs,
     )
     try:
@@ -2008,7 +2192,7 @@ def _native_traces_equal(left, right):
         (4, 4),
     ],
 )
-def test_stable_retro_native_vec_env_mario_sticky_extremes_match_effective_actions(
+def test_retro_vec_env_mario_sticky_extremes_match_effective_actions(
     num_envs,
     frame_skip,
 ):
@@ -2025,7 +2209,7 @@ def test_stable_retro_native_vec_env_mario_sticky_extremes_match_effective_actio
     )
 
     sticky_trace = _mario_native_trace(
-        True,
+        "copy",
         max(1, num_envs),
         123,
         actions,
@@ -2033,7 +2217,7 @@ def test_stable_retro_native_vec_env_mario_sticky_extremes_match_effective_actio
         **trace_kwargs,
     )
     expected_trace = _mario_native_trace(
-        True,
+        "copy",
         max(1, num_envs),
         123,
         repeated_first_action,
@@ -2041,7 +2225,7 @@ def test_stable_retro_native_vec_env_mario_sticky_extremes_match_effective_actio
         **trace_kwargs,
     )
     non_sticky_trace = _mario_native_trace(
-        True,
+        "copy",
         max(1, num_envs),
         123,
         actions,
@@ -2053,10 +2237,10 @@ def test_stable_retro_native_vec_env_mario_sticky_extremes_match_effective_actio
     assert not _native_traces_equal(sticky_trace, non_sticky_trace)
 
 
-@pytest.mark.parametrize("copy_observations", [True, False])
+@pytest.mark.parametrize("obs_copy", ["copy", "safe_view"])
 @pytest.mark.parametrize("num_threads", [1, 4])
-def test_stable_retro_native_vec_env_mario_seed_trace_determinism(
-    copy_observations,
+def test_retro_vec_env_mario_seed_trace_determinism(
+    obs_copy,
     num_threads,
 ):
     pytest.importorskip("stable_baselines3")
@@ -2069,7 +2253,7 @@ def test_stable_retro_native_vec_env_mario_seed_trace_determinism(
     )
 
     first = _mario_native_trace(
-        copy_observations,
+        obs_copy,
         num_threads,
         123,
         actions,
@@ -2077,7 +2261,7 @@ def test_stable_retro_native_vec_env_mario_seed_trace_determinism(
         sticky_action_prob=0.25,
     )
     second = _mario_native_trace(
-        copy_observations,
+        obs_copy,
         num_threads,
         123,
         actions,
@@ -2097,9 +2281,9 @@ def test_stable_retro_native_vec_env_mario_seed_trace_determinism(
         (4, 1, 0.25),
     ],
 )
-@pytest.mark.parametrize("copy_observations", [True, False])
-def test_stable_retro_native_vec_env_mario_seed_matrix(
-    copy_observations,
+@pytest.mark.parametrize("obs_copy", ["copy", "safe_view"])
+def test_retro_vec_env_mario_seed_matrix(
+    obs_copy,
     num_threads,
     noop_reset_max,
     sticky_action_prob,
@@ -2114,7 +2298,7 @@ def test_stable_retro_native_vec_env_mario_seed_matrix(
     )
 
     first = _mario_native_trace(
-        copy_observations,
+        obs_copy,
         num_threads,
         123,
         actions,
@@ -2122,7 +2306,7 @@ def test_stable_retro_native_vec_env_mario_seed_matrix(
         sticky_action_prob=sticky_action_prob,
     )
     second = _mario_native_trace(
-        copy_observations,
+        obs_copy,
         num_threads,
         123,
         actions,
@@ -2133,8 +2317,8 @@ def test_stable_retro_native_vec_env_mario_seed_matrix(
     _assert_native_traces_equal(first, second)
 
 
-@pytest.mark.parametrize("copy_observations", [True, False])
-def test_stable_retro_native_vec_env_mario_noop_seed_divergence(copy_observations):
+@pytest.mark.parametrize("obs_copy", ["copy", "safe_view"])
+def test_retro_vec_env_mario_noop_seed_divergence(obs_copy):
     pytest.importorskip("stable_baselines3")
 
     actions = np.random.default_rng(777).integers(
@@ -2145,21 +2329,21 @@ def test_stable_retro_native_vec_env_mario_noop_seed_divergence(copy_observation
     )
 
     seed_123_first = _mario_native_trace(
-        copy_observations,
+        obs_copy,
         4,
         123,
         actions,
         noop_reset_max=1,
     )
     seed_123_second = _mario_native_trace(
-        copy_observations,
+        obs_copy,
         4,
         123,
         actions,
         noop_reset_max=1,
     )
     seed_456 = _mario_native_trace(
-        copy_observations,
+        obs_copy,
         4,
         456,
         actions,

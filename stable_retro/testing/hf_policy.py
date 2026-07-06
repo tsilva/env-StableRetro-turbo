@@ -86,7 +86,7 @@ def load_sb3_policy(path: str | os.PathLike[str], *, device: str = "cpu"):
         raise RuntimeError(f"failed to deserialize SB3 policy: {e}") from e
 
 
-def make_mario_level1_policy_env(*, done_on, info_mode="terminal") -> RetroVecEnv:
+def make_mario_level1_policy_env(*, done_on, info_filter="terminal") -> RetroVecEnv:
     """Create the Super Mario Bros Level1-1 env shape used by the HF policy."""
 
     rom_path = retro.data.get_original_romfile_path("SuperMarioBros-Nes-v0")
@@ -106,7 +106,7 @@ def make_mario_level1_policy_env(*, done_on, info_mode="terminal") -> RetroVecEn
         maxpool_last_two=True,
         obs_layout="chw",
         num_threads=1,
-        info_mode=info_mode,
+        info_filter=info_filter,
         done_on=done_on,
     )
 

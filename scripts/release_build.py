@@ -492,12 +492,15 @@ def audit_wheel(wheel: Path, version: str, platform_name: str) -> dict[str, obje
     with zipfile.ZipFile(wheel) as zf:
         init = zf.read("stable_retro/__init__.py").decode("utf-8")
         vec_env = zf.read("stable_retro/vec_env.py").decode("utf-8")
+    legacy_vec_env_name = "StableRetro" + "Native" + "VecEnv"
     checks.update(
         {
             "exports_retro_vec_env": "RetroVecEnv" in init,
-            "no_stable_retro_native_vec_env_export": "StableRetroNativeVecEnv" not in init,
+            "no_legacy_vec_env_export": legacy_vec_env_name not in init,
             "class_retro_vec_env": "class RetroVecEnv" in vec_env,
-            "no_stable_retro_native_vec_env_class": "StableRetroNativeVecEnv" not in vec_env,
+            "no_legacy_vec_env_class": legacy_vec_env_name not in vec_env,
+            "uses_private_retro_vec_env_binding": "_RetroVecEnv" in vec_env,
+            "does_not_use_public_retro_vec_env_binding": "_retro.RetroVecEnv" not in vec_env,
         }
     )
     return {
@@ -588,9 +591,10 @@ from stable_retro import _retro
 print(stable_retro.__file__)
 print(_retro.__file__)
 assert stable_retro.__file__.startswith({target!r})
-assert hasattr(_retro, "NativeVectorEnv")
+assert hasattr(_retro, "_RetroVecEnv")
+assert not hasattr(_retro, "RetroVecEnv")
 assert hasattr(stable_retro, "RetroVecEnv")
-assert not hasattr(stable_retro, "StableRetroNativeVecEnv")
+assert not hasattr(stable_retro, "StableRetro" + "Native" + "VecEnv")
 """.format(target=str(target))
         env = os.environ.copy()
         env["PYTHONPATH"] = str(target)

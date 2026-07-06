@@ -17,7 +17,7 @@
 Compared with upstream Stable Retro's single-environment `RetroEnv` API,
 `stable-retro-turbo` adds a training-oriented fast path:
 
-- **⚡ Native vector environment**: `RetroVecEnv` provides an SB3-compatible fast
+- **⚡ RetroVecEnv**: `RetroVecEnv` provides an SB3-compatible fast
   path for many emulator lanes at once.
 - **🧪 Fused native preprocessing**: RL image transforms, frame handling, and
   reward clipping can run in the native rollout path.
@@ -254,6 +254,9 @@ Modal runs: full env benchmark
   first-life-loss terminal transitions.
 - `active_state_indices()` returns a read-only `int32` NumPy view for
   task-conditioned training; copy it when you need a stable snapshot.
+- `set_state(...)` accepts the same string, sequence, or weighted mapping forms
+  as constructor `state=` and updates the policy used by future resets/autoresets
+  without interrupting active lanes.
 - Third-party emulator cores carry their own licenses; see [`LICENSES.md`](LICENSES.md).
 
 ## Architecture
