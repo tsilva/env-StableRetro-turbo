@@ -236,8 +236,9 @@ Modal runs: full env benchmark
 
 - The import package is `stable_retro`; `retro` remains as a compatibility shim.
 - `RetroVecEnv` is the turbo-specific SB3-compatible vector environment.
-- Source builds and CI cover Python `3.10` through `3.14`; the repo-local
-  deterministic release helper currently targets Python `3.14` wheels.
+- Source builds and CI cover Python `3.11` through `3.14`; the repo-local
+  deterministic release helper publishes `cp311`, `cp312`, `cp313`, and `cp314`
+  wheels for the supported release platforms.
   Building from source also requires CMake, a C/C++ compiler, and platform core
   build dependencies.
 - ROMs are not included. Import ROMs and read game/core docs through upstream

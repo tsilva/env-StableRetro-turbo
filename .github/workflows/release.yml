@@ -77,7 +77,7 @@ jobs:
         run: .venv314/bin/python scripts/release_build.py check-pypi --version "${{ steps.version.outputs.version }}"
 
   build:
-    name: Build ${{ matrix.platform }} wheel
+    name: Build ${{ matrix.platform }} wheels
     needs: validate
     strategy:
       fail-fast: false
@@ -117,17 +117,17 @@ jobs:
       - name: Build wheels
         run: .venv314/bin/python scripts/release_build.py build-platform --platform "${{ matrix.platform }}" --version "${{ needs.validate.outputs.version }}"
 
-      - name: Smoke built wheel
+      - name: Smoke built cp314 wheel
         shell: bash
         run: |
           set -euo pipefail
           shopt -s nullglob
           case "${{ matrix.platform }}" in
-            macos) wheels=(wheelhouse-post*-repaired/*.whl) ;;
-            linux) wheels=(wheelhouse-post*-linux/*.whl) ;;
+            macos) wheels=(wheelhouse-post*-repaired/*-cp314-cp314-*.whl) ;;
+            linux) wheels=(wheelhouse-post*-linux/*-cp314-cp314-*.whl) ;;
           esac
           if (( ${#wheels[@]} != 1 )); then
-            printf 'expected one wheel, found %s\n' "${#wheels[@]}" >&2
+            printf 'expected one cp314 wheel, found %s\n' "${#wheels[@]}" >&2
             printf '%s\n' "${wheels[@]}" >&2
             exit 1
           fi

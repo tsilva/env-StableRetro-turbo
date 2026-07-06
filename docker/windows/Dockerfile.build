@@ -41,9 +41,9 @@ RUN dos2unix scripts/build_capnproto.sh
 COPY third-party/libzip libzip
 ARG ARCH=x86_64
 ARG BITS=64
-ENV PYVER=3.10
+ENV PYVER=3.11
 
-RUN CROSS=win${BITS} ROOT=/usr/${ARCH}-w64-mingw32 ./scripts/install_python.sh # Requires update to include python 3 10 6
+RUN CROSS=win${BITS} ROOT=/usr/${ARCH}-w64-mingw32 ./scripts/install_python.sh
 
 RUN CROSS=win${BITS} ROOT=/usr/${ARCH}-w64-mingw32 ./scripts/build_libzip.sh && \
     rm -rf libzip
@@ -53,7 +53,7 @@ WORKDIR /root/stable-retro
 
 RUN python3 -m pip install --upgrade pip wheel setuptools
 
-RUN cmake . -DBUILD_TESTS=ON -DBUILD_MANYLINUX=ON -DPYTHON_INCLUDE_DIR=/usr/include/python3.10 -DCMAKE_TOOLCHAIN_FILE=../cmake/win64.cmake
+RUN cmake . -DBUILD_TESTS=ON -DBUILD_MANYLINUX=ON -DPYTHON_INCLUDE_DIR=/usr/include/python3.11 -DCMAKE_TOOLCHAIN_FILE=../cmake/win64.cmake
 
 RUN python3 setup.py -q build_ext -i -j3
 
