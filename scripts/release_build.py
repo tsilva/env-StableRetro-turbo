@@ -499,8 +499,10 @@ def audit_wheel(wheel: Path, version: str, platform_name: str) -> dict[str, obje
     checks.update(
         {
             "exports_retro_vec_env": "RetroVecEnv" in init,
+            "does_not_export_retro_vector_env": "RetroVectorEnv" not in init,
             "no_legacy_vec_env_export": legacy_vec_env_name not in init,
             "class_retro_vec_env": "class RetroVecEnv" in vec_env,
+            "does_not_define_retro_vector_env": "class RetroVectorEnv" not in vec_env,
             "no_legacy_vec_env_class": legacy_vec_env_name not in vec_env,
             "uses_private_retro_vec_env_binding": "_RetroVecEnv" in vec_env,
             "does_not_use_public_retro_vec_env_binding": "_retro.RetroVecEnv" not in vec_env,
@@ -597,6 +599,7 @@ assert stable_retro.__file__.startswith({target!r})
 assert hasattr(_retro, "_RetroVecEnv")
 assert not hasattr(_retro, "RetroVecEnv")
 assert hasattr(stable_retro, "RetroVecEnv")
+assert not hasattr(stable_retro, "RetroVectorEnv")
 assert not hasattr(stable_retro, "StableRetro" + "Native" + "VecEnv")
 """.format(target=str(target))
         env = os.environ.copy()

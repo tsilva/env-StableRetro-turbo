@@ -206,16 +206,10 @@ def _build_env(args, profile, retro):
     backend = _resolve_backend(args.backend)
 
     if backend == "native":
-        from stable_retro.vec_env import RetroVecEnv
-
-        env = RetroVecEnv(
-            game,
-            state=state,
-            num_envs=args.num_envs,
-            num_threads=args.num_threads,
-            obs_copy=args.obs_copy,
-            **env_kwargs,
-            **native_only_env_kwargs,
+        raise SystemExit(
+            "Native RetroVecEnv is Gymnasium-first and no longer implements "
+            "SB3 VecEnv. Run SB3 adaptation downstream, e.g. through rlab, or "
+            "choose a classic benchmark backend.",
         )
     else:
         if args.obs_copy != "safe_view":

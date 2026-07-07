@@ -730,6 +730,12 @@ def main(argv=None) -> int:
                 start_method=args.subproc_start_method,
             )
             result_name = f"{backend}_vec_retro"
+        if args.vec_transpose_image and backend == "native":
+            raise SystemExit(
+                "--vec-transpose-image is an SB3 VecEnv wrapper; native "
+                "RetroVecEnv is Gymnasium-first. Use obs_layout=chw or a "
+                "downstream SB3 adapter.",
+            )
         if args.vec_transpose_image:
             from stable_baselines3.common.vec_env import VecTransposeImage
 

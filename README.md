@@ -17,8 +17,8 @@
 Compared with upstream Stable Retro's single-environment `RetroEnv` API,
 `stable-retro-turbo` adds a training-oriented fast path:
 
-- **⚡ RetroVecEnv**: `RetroVecEnv` provides an SB3-compatible fast
-  path for many emulator lanes at once.
+- **⚡ RetroVecEnv**: `RetroVecEnv` provides a Gymnasium `VectorEnv`
+  fast path for many emulator lanes at once.
 - **🧪 Fused native preprocessing**: RL image transforms, frame handling, and
   reward clipping can run in the native rollout path.
 - **📦 Observation ownership modes**: Callers can choose copy-safe observations
@@ -28,7 +28,7 @@ Compared with upstream Stable Retro's single-environment `RetroEnv` API,
 - **🛤️ Multi-state training support**: Lanes can use fixed, sampled, and tracked
   start states for curricula or task-conditioned agents.
 - **🔁 Lane-local autoreset**: Finished lanes reset independently while keeping
-  SB3 vector-env episode metadata.
+  Gymnasium same-step `final_obs` / `final_info` metadata.
 - **🚦 Info-transition terminals**: Episodes can end on changes in game info,
   such as first life loss.
 - **🧾 Scenario-defined events**: Integrations can declare reusable named
@@ -56,7 +56,7 @@ uv pip install stable-retro-turbo
 ```python
 import stable_retro as retro  # Uses the upstream-compatible import name.
 
-# RetroVecEnv is a stable-retro-turbo interface
+# RetroVecEnv is the stable-retro-turbo native vector interface.
 env = retro.RetroVecEnv(
     # stable-retro params (all stable-retro params can still be used)
     "SuperMarioBros-Nes-v0",      # Stable Retro game integration.
@@ -72,7 +72,7 @@ env = retro.RetroVecEnv(
     obs_resize=(84, 84),          # Resize observations natively for RL input.
     obs_resize_algorithm="area",  # Area resize is a good downsampling default.
     obs_grayscale=True,           # Convert RGB frames to grayscale natively.
-    obs_layout="chw",             # Return channel-first tensors for PyTorch/SB3.
+    obs_layout="chw",             # Return channel-first tensors for PyTorch.
     obs_copy="safe_view",         # Avoid extra copies while keeping observations safe.
     frame_skip=4,                 # Repeat each action for 4 emulator frames.
     frame_stack=4,                # Stack the last 4 processed frames.
@@ -82,10 +82,8 @@ env = retro.RetroVecEnv(
     info_filter="terminal",       # Only return full info payloads at episode end.
 )
 
-obs = env.reset()  # Shape follows the native preprocessing choices above.
-obs, rewards, dones, infos = env.step(
-    [env.action_space.sample() for _ in range(32)]  # One action per env lane.
-)
+obs, infos = env.reset(seed=123)
+obs, rewards, terminations, truncations, infos = env.step(env.action_space.sample())
 env.close()  # Release native emulator resources.
 ```
 
@@ -159,23 +157,25 @@ example, `obs_crop=(32, 0, 0, 0), obs_crop_mode="mask"` hides the top 32 pixels
 before resize and frame stacking, while keeping the same observation geometry as
 the full-canvas path for later fine-tuning on unmasked observations.
 
-## Why SB3 VecEnv?
+## Gymnasium VectorEnv
 
-`RetroVecEnv` is specific to `stable-retro-turbo` and requires
-`stable-baselines3` at runtime because it subclasses SB3's `VecEnv` interface.
-That makes the native vector path usable as a drop-in environment for SB3
-algorithms such as PPO while preserving the vector-env contract SB3 expects:
-batched observations, async step/wait calls, autoreset behavior, terminal
-observations, reset info, and wrapper compatibility.
+`RetroVecEnv` is specific to `stable-retro-turbo` and implements the
+Gymnasium vector API directly. It does not subclass SB3 `VecEnv`, and
+`stable-baselines3` is not a runtime dependency for the native vector path.
 
-The advantage is that training code can keep the familiar SB3-facing API while
-the expensive rollout work happens underneath it in native code. Upstream Stable
-Retro users typically combine many Python `RetroEnv` instances through
-`SubprocVecEnv`, `DummyVecEnv`, or Gymnasium vector wrappers, then apply Python
-wrappers for frame skip, resize, grayscale, frame stack, and other preprocessing.
-`stable-retro-turbo` keeps those model-facing semantics, but steps many emulator
-lanes and applies preprocessing in one native batch, reducing Python dispatch,
-process/wrapper overhead, memory copies, and per-frame preprocessing cost.
+The native env uses Gymnasium same-step autoreset semantics:
+
+```python
+obs, infos = env.reset(seed=seed)
+obs, rewards, terminations, truncations, infos = env.step(actions)
+```
+
+When a lane terminates, the returned observation for that lane is already the
+reset observation. The final episode observation and info are exposed through
+`infos["final_obs"]` and `infos["final_info"]`. SB3 compatibility is a
+downstream responsibility; for example, use an adapter in `rlab` rather than
+expecting this package to emit SB3-only `terminal_observation`, `reset_infos`, or
+`TimeLimit.truncated` fields.
 
 ## Commands
 
@@ -183,7 +183,6 @@ process/wrapper overhead, memory copies, and per-frame preprocessing cost.
 uv run python scripts/benchmark_vec_env.py --list-profiles                         # show saved benchmark profiles
 uv run python scripts/benchmark_vec_env.py --profile supermario-level1-1 --dry-run # print resolved env benchmark config
 uv run python scripts/benchmark_vec_env.py --profile supermario-level1-1           # run native/classic rollout benchmark
-uv run python scripts/benchmark_sb3_ppo.py --profile supermario-level1-1 --dry-run # print resolved PPO benchmark config
 uv run pytest tests/test_python/test_vec_env.py                                    # run focused RetroVecEnv tests
 uv run --with build python -m build                                                # build source and wheel artifacts
 ```
@@ -235,7 +234,8 @@ Modal runs: full env benchmark
 ## Notes
 
 - The import package is `stable_retro`; `retro` remains as a compatibility shim.
-- `RetroVecEnv` is the turbo-specific SB3-compatible vector environment.
+- `RetroVecEnv` is the turbo-specific Gymnasium vector environment.
+- `RetroVectorEnv` is not exposed; `RetroVecEnv` is the public native vector API.
 - Source builds and CI cover Python `3.11` through `3.14`; the repo-local
   deterministic release helper publishes `cp311`, `cp312`, `cp313`, and `cp314`
   wheels for the supported release platforms.

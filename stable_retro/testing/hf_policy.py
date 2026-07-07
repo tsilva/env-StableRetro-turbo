@@ -27,6 +27,21 @@ MARIO_SIMPLE_ACTIONS = np.array(
 )
 
 
+def _single_vector_info(vector_infos, env_num):
+    info = {}
+    for key, value in vector_infos.items():
+        if key.startswith("_"):
+            continue
+        mask = vector_infos.get(f"_{key}")
+        if mask is not None and not bool(mask[env_num]):
+            continue
+        if isinstance(value, dict):
+            info[key] = _single_vector_info(value, env_num)
+        else:
+            info[key] = value[env_num]
+    return info
+
+
 @dataclass(frozen=True)
 class PolicyEventResult:
     event_name: str
@@ -126,16 +141,16 @@ def run_policy_until_event(
 
     for episode in range(int(episodes)):
         env.seed(int(seed_start) + episode)
-        obs = env.reset()
+        obs, _infos = env.reset()
         for step in range(1, int(max_steps) + 1):
             action, _state = model.predict(obs, deterministic=deterministic)
             action_value = int(np.asarray(action).reshape(-1)[0])
             masks = action_map[np.asarray(action, dtype=np.int64).reshape(-1)]
-            obs, _rewards, dones, infos = env.step(masks)
-            if not bool(dones[0]):
+            obs, _rewards, terminations, truncations, infos = env.step(masks)
+            if not bool(terminations[0] or truncations[0]):
                 continue
 
-            info = infos[0]
+            info = _single_vector_info(infos, 0)
             payload = info.get("done_on_info", {})
             if event_name not in payload:
                 break

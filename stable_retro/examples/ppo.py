@@ -1,9 +1,10 @@
-"""Train an agent using PPO with the native stable-retro vector env."""
+"""Native vector rollout example.
+
+SB3 adapters are intentionally downstream; use RetroVecEnv as a Gymnasium
+VectorEnv and adapt it in the training project that owns SB3 integration.
+"""
 
 import argparse
-
-from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import VecTransposeImage
 
 import stable_retro as retro
 
@@ -15,42 +16,33 @@ def main():
     parser.add_argument("--scenario", default=None)
     parser.add_argument("--num-envs", type=int, default=8)
     parser.add_argument("--num-threads", type=int, default=None)
+    parser.add_argument("--steps", type=int, default=128)
     args = parser.parse_args()
 
-    venv = VecTransposeImage(
-        retro.RetroVecEnv(
-            args.game,
-            num_envs=args.num_envs,
-            state=args.state,
-            scenario=args.scenario,
-            num_threads=args.num_threads,
-            render_mode="rgb_array",
-            obs_resize=(84, 84),
-            obs_grayscale=True,
-            frame_skip=4,
-            frame_stack=4,
-            maxpool_last_two=True,
-            sticky_action_prob=0.25,
-            reward_clip=True,
-        ),
+    env = retro.RetroVecEnv(
+        args.game,
+        num_envs=args.num_envs,
+        state=args.state,
+        scenario=args.scenario,
+        num_threads=args.num_threads,
+        render_mode="rgb_array",
+        obs_resize=(84, 84),
+        obs_grayscale=True,
+        obs_layout="chw",
+        frame_skip=4,
+        frame_stack=4,
+        maxpool_last_two=True,
+        sticky_action_prob=0.25,
+        reward_clip=True,
     )
-    model = PPO(
-        policy="CnnPolicy",
-        env=venv,
-        learning_rate=lambda f: f * 2.5e-4,
-        n_steps=128,
-        batch_size=32,
-        n_epochs=4,
-        gamma=0.99,
-        gae_lambda=0.95,
-        clip_range=0.1,
-        ent_coef=0.01,
-        verbose=1,
-    )
-    model.learn(
-        total_timesteps=100_000_000,
-        log_interval=1,
-    )
+    try:
+        obs, infos = env.reset(seed=123)
+        for _ in range(args.steps):
+            obs, rewards, terminations, truncations, infos = env.step(
+                env.action_space.sample(),
+            )
+    finally:
+        env.close()
 
 
 if __name__ == "__main__":

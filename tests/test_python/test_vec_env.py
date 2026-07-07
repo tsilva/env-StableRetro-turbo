@@ -1,6 +1,8 @@
 import hashlib
 import inspect
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -18,6 +20,32 @@ def _sha(array):
 
 def _ptr(array):
     return int(np.asarray(array).__array_interface__["data"][0])
+
+
+def _single_info(vector_infos, env_num):
+    info = {}
+    for key, value in vector_infos.items():
+        if key.startswith("_"):
+            continue
+        mask = vector_infos.get(f"_{key}")
+        if mask is not None and not bool(mask[env_num]):
+            continue
+        if isinstance(value, dict):
+            info[key] = _single_info(value, env_num)
+        else:
+            info[key] = value[env_num]
+    return info
+
+
+def _infos_to_list(vector_infos, num_envs):
+    return [_single_info(vector_infos, env_num) for env_num in range(num_envs)]
+
+
+def _step(env, actions):
+    obs, rewards, terminations, truncations, infos = env.step(actions)
+    assert truncations.shape == (env.num_envs,)
+    assert not np.any(truncations)
+    return obs, rewards, terminations, _infos_to_list(infos, env.num_envs)
 
 
 def test_retro_vec_env_binding_is_private():
@@ -40,6 +68,37 @@ def test_retro_vec_env_legacy_aliases_are_removed():
         "done_on_info",
     ):
         assert name not in params
+
+
+def test_retro_vec_env_public_export():
+    import gymnasium as gym
+    import stable_retro as retro
+    from gymnasium.vector import AutoresetMode
+
+    assert issubclass(retro.RetroVecEnv, gym.vector.VectorEnv)
+    assert retro.RetroVecEnv.metadata["autoreset_mode"] is AutoresetMode.SAME_STEP
+    assert "RetroVectorEnv" not in retro.__all__
+    assert not hasattr(retro, "RetroVectorEnv")
+
+
+def test_retro_vec_env_imports_without_sb3():
+    code = """
+import builtins
+original_import = builtins.__import__
+def blocked_import(name, *args, **kwargs):
+    if name == 'stable_baselines3' or name.startswith('stable_baselines3.'):
+        raise ModuleNotFoundError(name)
+    return original_import(name, *args, **kwargs)
+builtins.__import__ = blocked_import
+import stable_retro
+from stable_retro.vec_env import RetroVecEnv
+assert stable_retro.RetroVecEnv is RetroVecEnv
+"""
+    subprocess.run(
+        [sys.executable, "-c", code],
+        check=True,
+        cwd=Path(__file__).resolve().parents[2],
+    )
 
 
 def _empty_info_path(tmp_path):
@@ -144,6 +203,35 @@ def _make_test_retro_vec_env(tmp_path, **kwargs):
     )
 
 
+def test_retro_vec_env_gymnasium_contract(tmp_path):
+    from gymnasium.vector import AutoresetMode
+
+    env = _make_test_retro_vec_env(tmp_path, info_filter="terminal")
+    try:
+        obs, infos = env.reset(seed=123)
+        assert obs.shape == env.observation_space.shape
+        assert isinstance(infos, dict)
+        assert env.metadata["autoreset_mode"] is AutoresetMode.SAME_STEP
+        assert env.num_envs == 2
+        assert env.action_space.shape == (2, *env.single_action_space.shape)
+        assert env.observation_space.shape == (
+            2,
+            *env.single_observation_space.shape,
+        )
+
+        actions = np.zeros((env.num_envs, env.num_buttons), dtype=np.uint8)
+        step_result = env.step(actions)
+        assert len(step_result) == 5
+        obs, rewards, terminations, truncations, infos = step_result
+        assert obs.shape == env.observation_space.shape
+        assert rewards.shape == (env.num_envs,)
+        assert terminations.shape == (env.num_envs,)
+        assert truncations.shape == (env.num_envs,)
+        assert isinstance(infos, dict)
+    finally:
+        env.close()
+
+
 def _make_crop_retro_vec_env(tmp_path, **kwargs):
     import stable_retro as retro
     from stable_retro.vec_env import RetroVecEnv
@@ -187,8 +275,6 @@ def test_retro_vec_env_crop_mask_signature_defaults():
 
 
 def test_retro_vec_env_crop_mask_preserves_full_canvas_shape(tmp_path):
-    pytest.importorskip("stable_baselines3")
-
     full_env = _make_crop_retro_vec_env(tmp_path)
     mask_env = _make_crop_retro_vec_env(
         tmp_path,
@@ -196,8 +282,8 @@ def test_retro_vec_env_crop_mask_preserves_full_canvas_shape(tmp_path):
         obs_crop_mode="mask",
     )
     try:
-        full_obs = full_env.reset()
-        mask_obs = mask_env.reset()
+        full_obs = full_env.reset()[0]
+        mask_obs = mask_env.reset()[0]
 
         assert mask_env.observation_space.shape == full_env.observation_space.shape
         assert mask_obs.shape == full_obs.shape
@@ -207,8 +293,6 @@ def test_retro_vec_env_crop_mask_preserves_full_canvas_shape(tmp_path):
 
 
 def test_retro_vec_env_crop_remove_matches_default(tmp_path):
-    pytest.importorskip("stable_baselines3")
-
     default_env = _make_crop_retro_vec_env(
         tmp_path,
         obs_crop=(32, 0, 0, 0),
@@ -220,9 +304,9 @@ def test_retro_vec_env_crop_remove_matches_default(tmp_path):
     )
     full_env = _make_crop_retro_vec_env(tmp_path)
     try:
-        default_obs = default_env.reset()
-        explicit_obs = explicit_env.reset()
-        full_obs = full_env.reset()
+        default_obs = default_env.reset()[0]
+        explicit_obs = explicit_env.reset()[0]
+        full_obs = full_env.reset()[0]
 
         np.testing.assert_array_equal(explicit_obs, default_obs)
         assert explicit_obs.shape[1] == full_obs.shape[1] - 32
@@ -234,8 +318,6 @@ def test_retro_vec_env_crop_remove_matches_default(tmp_path):
 
 
 def test_retro_vec_env_crop_none_ignores_mask_mode(tmp_path):
-    pytest.importorskip("stable_baselines3")
-
     default_env = _make_crop_retro_vec_env(tmp_path)
     mask_mode_env = _make_crop_retro_vec_env(
         tmp_path,
@@ -244,8 +326,8 @@ def test_retro_vec_env_crop_none_ignores_mask_mode(tmp_path):
         obs_crop_fill=123,
     )
     try:
-        default_obs = default_env.reset()
-        mask_mode_obs = mask_mode_env.reset()
+        default_obs = default_env.reset()[0]
+        mask_mode_obs = mask_mode_env.reset()[0]
 
         np.testing.assert_array_equal(mask_mode_obs, default_obs)
         assert mask_mode_env.observation_space.shape == default_env.observation_space.shape
@@ -257,8 +339,6 @@ def test_retro_vec_env_crop_none_ignores_mask_mode(tmp_path):
 def test_retro_vec_env_crop_mask_fills_region_before_postprocess(
     tmp_path,
 ):
-    pytest.importorskip("stable_baselines3")
-
     full_env = _make_crop_retro_vec_env(tmp_path)
     mask_env = _make_crop_retro_vec_env(
         tmp_path,
@@ -267,8 +347,8 @@ def test_retro_vec_env_crop_mask_fills_region_before_postprocess(
         obs_crop_fill=17,
     )
     try:
-        full_obs = full_env.reset()[0]
-        mask_obs = mask_env.reset()[0]
+        full_obs = full_env.reset()[0][0]
+        mask_obs = mask_env.reset()[0][0]
 
         assert mask_obs.shape == full_obs.shape
         assert not np.array_equal(mask_obs, full_obs)
@@ -281,8 +361,6 @@ def test_retro_vec_env_crop_mask_fills_region_before_postprocess(
 
 @pytest.mark.parametrize("bad_mode", ["hide", "", "MASKED"])
 def test_retro_vec_env_rejects_invalid_crop_mode(tmp_path, bad_mode):
-    pytest.importorskip("stable_baselines3")
-
     with pytest.raises(ValueError, match="obs_crop_mode must be 'remove' or 'mask'"):
         _make_crop_retro_vec_env(
             tmp_path,
@@ -293,8 +371,6 @@ def test_retro_vec_env_rejects_invalid_crop_mode(tmp_path, bad_mode):
 
 @pytest.mark.parametrize("bad_fill", [-1, 256])
 def test_retro_vec_env_rejects_invalid_crop_fill(tmp_path, bad_fill):
-    pytest.importorskip("stable_baselines3")
-
     with pytest.raises(ValueError, match="obs_crop_fill must be between 0 and 255"):
         _make_crop_retro_vec_env(
             tmp_path,
@@ -313,8 +389,6 @@ def test_retro_vec_env_crop_modes_terminal_layout_semantics(
     obs_layout,
     obs_crop_mode,
 ):
-    pytest.importorskip("stable_baselines3")
-
     done_info = _done_on_frame_info_path(tmp_path)
     env = _make_crop_retro_vec_env(
         tmp_path,
@@ -330,21 +404,60 @@ def test_retro_vec_env_crop_modes_terminal_layout_semantics(
         info_filter="all",
     )
     try:
-        obs = env.reset()
-        assert env.observation_space.contains(obs[0])
+        obs = env.reset()[0]
+        assert env.single_observation_space.contains(obs[0])
 
         actions = np.zeros((1, env.num_buttons), dtype=np.uint8)
         for _ in range(12):
-            obs, _rewards, dones, infos = env.step(actions)
+            obs, _rewards, dones, infos = _step(env, actions)
             if bool(dones[0]):
                 break
         else:
             pytest.fail("Dr88 fixture did not reach the terminal frame")
 
         assert dones.tolist() == [True]
-        assert env.observation_space.contains(obs[0])
-        assert "terminal_observation" in infos[0]
-        assert env.observation_space.contains(infos[0]["terminal_observation"])
+        assert env.single_observation_space.contains(obs[0])
+        assert "final_obs" in infos[0]
+        assert env.single_observation_space.contains(infos[0]["final_obs"])
+    finally:
+        env.close()
+
+
+def test_retro_vec_env_same_step_final_obs_and_info(tmp_path):
+    done_info = _done_on_frame_info_path(tmp_path)
+    env = _make_crop_retro_vec_env(
+        tmp_path,
+        info_path=done_info,
+        obs_resize=(16, 16),
+        obs_grayscale=True,
+        frame_stack=2,
+        info_filter="terminal",
+    )
+    try:
+        obs, reset_infos = env.reset()
+        assert obs.shape == env.observation_space.shape
+        assert reset_infos == {}
+
+        actions = np.zeros((1, env.num_buttons), dtype=np.uint8)
+        for _ in range(12):
+            obs, rewards, terminations, truncations, infos = env.step(actions)
+            if bool(terminations[0]):
+                break
+        else:
+            pytest.fail("Dr88 fixture did not reach the terminal frame")
+
+        assert not bool(truncations[0])
+        assert env.single_observation_space.contains(obs[0])
+        assert "final_obs" in infos
+        assert "final_info" in infos
+        assert bool(infos["_final_obs"][0])
+        assert bool(infos["_final_info"][0])
+        assert env.single_observation_space.contains(infos["final_obs"][0])
+        final_info = _single_info(infos, 0)["final_info"]
+        assert "frame_reward_source" in final_info
+        assert "terminal_observation" not in infos
+        assert "reset_info" not in infos
+        assert "TimeLimit.truncated" not in infos
     finally:
         env.close()
 
@@ -354,8 +467,6 @@ def test_retro_vec_env_rejects_invalid_sticky_action_prob(
     tmp_path,
     sticky_action_prob,
 ):
-    pytest.importorskip("stable_baselines3")
-
     with pytest.raises((RuntimeError, ValueError), match="sticky_action_prob"):
         _make_test_retro_vec_env(
             tmp_path,
@@ -388,34 +499,30 @@ def _make_dr88_retro_vec_env(tmp_path, info_path, **kwargs):
 
 
 def test_retro_vec_env_same_process(tmp_path):
-    pytest.importorskip("stable_baselines3")
-
     env = _make_test_retro_vec_env(
         tmp_path,
         num_envs=4,
         info_filter="terminal",
     )
     try:
-        obs = env.reset()
+        obs = env.reset()[0]
         assert obs.shape == (4, 84, 84, 4)
         assert obs.dtype == np.uint8
-        assert all(env.observation_space.contains(obs[i]) for i in range(env.num_envs))
+        assert all(env.single_observation_space.contains(obs[i]) for i in range(env.num_envs))
 
-        actions = np.asarray([env.action_space.sample() for _ in range(env.num_envs)])
-        obs, rewards, dones, infos = env.step(actions)
+        actions = np.asarray([env.single_action_space.sample() for _ in range(env.num_envs)])
+        obs, rewards, dones, infos = _step(env, actions)
         assert obs.shape == (4, 84, 84, 4)
         assert rewards.shape == (4,)
         assert rewards.dtype == np.float32
         assert dones.tolist() == [False, False, False, False]
         assert len(infos) == 4
-        assert all(env.observation_space.contains(obs[i]) for i in range(env.num_envs))
+        assert all(env.single_observation_space.contains(obs[i]) for i in range(env.num_envs))
     finally:
         env.close()
 
 
 def test_retro_vec_env_rgb_array_render_returns_raw_screen(tmp_path):
-    pytest.importorskip("stable_baselines3")
-
     env = _make_test_retro_vec_env(
         tmp_path,
         num_envs=2,
@@ -423,7 +530,7 @@ def test_retro_vec_env_rgb_array_render_returns_raw_screen(tmp_path):
         info_filter="terminal",
     )
     try:
-        obs = env.reset()
+        obs = env.reset()[0]
         screen = env.render("rgb_array")
         other_screen = env.native.get_screen(1)
 
@@ -439,8 +546,6 @@ def test_retro_vec_env_rgb_array_render_returns_raw_screen(tmp_path):
 def test_retro_vec_env_rgb_array_render_updates_with_indexed_video(
     tmp_path,
 ):
-    pytest.importorskip("stable_baselines3")
-
     os.environ["STABLE_RETRO_DISABLE_RENDER_SKIP"] = "1"
     env = _make_test_retro_vec_env(
         tmp_path,
@@ -456,7 +561,7 @@ def test_retro_vec_env_rgb_array_render_updates_with_indexed_video(
         frame_hashes = []
         for _ in range(30):
             frame_hashes.append(_sha(env.render("rgb_array")))
-            env.step(action)
+            _step(env, action)
 
         assert len(set(frame_hashes)) > 1
     finally:
@@ -484,41 +589,38 @@ def test_stable_retro_simple_image_viewer_close_ignores_cocoa_shutdown_error():
 
 
 def test_retro_vec_env_chw_observation_layout(tmp_path):
-    pytest.importorskip("stable_baselines3")
-
     env = _make_test_retro_vec_env(
         tmp_path,
         obs_layout="chw",
         info_filter="terminal",
     )
     try:
-        obs = env.reset()
+        obs = env.reset()[0]
         assert obs.shape == (2, 4, 84, 84)
         assert obs.dtype == np.uint8
-        assert env.observation_space.shape == (4, 84, 84)
-        assert all(env.observation_space.contains(obs[i]) for i in range(env.num_envs))
+        assert env.single_observation_space.shape == (4, 84, 84)
+        assert env.observation_space.shape == (2, 4, 84, 84)
+        assert all(env.single_observation_space.contains(obs[i]) for i in range(env.num_envs))
 
-        actions = np.asarray([env.action_space.sample() for _ in range(env.num_envs)])
-        obs, rewards, dones, infos = env.step(actions)
+        actions = np.asarray([env.single_action_space.sample() for _ in range(env.num_envs)])
+        obs, rewards, dones, infos = _step(env, actions)
         assert obs.shape == (2, 4, 84, 84)
         assert rewards.shape == (2,)
         assert rewards.dtype == np.float32
         assert dones.tolist() == [False, False]
         assert len(infos) == 2
-        assert all(env.observation_space.contains(obs[i]) for i in range(env.num_envs))
+        assert all(env.single_observation_space.contains(obs[i]) for i in range(env.num_envs))
     finally:
         env.close()
 
 
 @pytest.mark.parametrize("info_filter", ["terminal", "none"])
 def test_retro_vec_env_fast_info_filters(info_filter, tmp_path):
-    pytest.importorskip("stable_baselines3")
-
     env = _make_test_retro_vec_env(tmp_path, info_filter=info_filter)
     try:
         env.reset()
         actions = np.zeros((env.num_envs, env.num_buttons), dtype=np.uint8)
-        _, rewards, dones, infos = env.step(actions)
+        _, rewards, dones, infos = _step(env, actions)
 
         assert rewards.tolist() == [0.0, 0.0]
         assert dones.tolist() == [False, False]
@@ -528,13 +630,11 @@ def test_retro_vec_env_fast_info_filters(info_filter, tmp_path):
 
 
 def test_retro_vec_env_no_rule_no_done_omits_done_on_info(tmp_path):
-    pytest.importorskip("stable_baselines3")
-
     env = _make_test_retro_vec_env(tmp_path, info_filter="all")
     try:
         env.reset()
         actions = np.zeros((env.num_envs, env.num_buttons), dtype=np.uint8)
-        _, _, dones, infos = env.step(actions)
+        _, _, dones, infos = _step(env, actions)
 
         assert dones.tolist() == [False, False]
         assert "done_on_info" not in infos[0]
@@ -544,7 +644,6 @@ def test_retro_vec_env_no_rule_no_done_omits_done_on_info(tmp_path):
 
 
 def test_retro_vec_env_done_on_info_validation():
-    pytest.importorskip("stable_baselines3")
     from stable_retro.vec_env import RetroVecEnv
 
     def normalize(value):
@@ -594,7 +693,6 @@ def test_retro_vec_env_done_on_info_validation():
 
 
 def test_retro_vec_env_resolves_scenario_done_on_events(tmp_path):
-    pytest.importorskip("stable_baselines3")
     import stable_retro as retro
     from stable_retro.vec_env import RetroVecEnv
 
@@ -709,7 +807,6 @@ def test_retro_vec_env_resolves_scenario_done_on_events(tmp_path):
 
 
 def test_retro_vec_env_keyword_normalization():
-    pytest.importorskip("stable_baselines3")
     from stable_retro.vec_env import RetroVecEnv
 
     assert RetroVecEnv._normalize_obs_copy("copy") == (
@@ -752,8 +849,6 @@ def test_retro_vec_env_keyword_normalization():
 
 
 def test_retro_vec_env_accepts_retro_env_keyword_shape(tmp_path):
-    pytest.importorskip("stable_baselines3")
-
     env = _make_test_retro_vec_env(
         tmp_path,
         obs_layout="chw",
@@ -764,14 +859,14 @@ def test_retro_vec_env_accepts_retro_env_keyword_shape(tmp_path):
         info_filter="terminal",
     )
     try:
-        obs = env.reset()
+        obs = env.reset()[0]
         assert env.obs_copy == "safe_view"
         assert not hasattr(env, "copy_observations")
         assert not hasattr(env, "unsafe_zero_copy")
         assert obs.shape == (2, 4, 84, 84)
 
         actions = np.zeros((env.num_envs, env.num_buttons), dtype=np.uint8)
-        obs, rewards, dones, infos = env.step(actions)
+        obs, rewards, dones, infos = _step(env, actions)
 
         assert obs.shape == (2, 4, 84, 84)
         assert rewards.shape == (2,)
@@ -793,14 +888,11 @@ def test_retro_vec_env_rejects_legacy_vector_keyword_shape(
     tmp_path,
     legacy_kwarg,
 ):
-    pytest.importorskip("stable_baselines3")
-
     with pytest.raises(TypeError, match="unexpected keyword argument"):
         _make_test_retro_vec_env(tmp_path, **legacy_kwarg)
 
 
 def test_retro_vec_env_validates_mixed_state_config():
-    pytest.importorskip("stable_baselines3")
     import stable_retro as retro
     from stable_retro.vec_env import RetroVecEnv
 
@@ -927,8 +1019,6 @@ def _make_mario_retro_vec_env(num_envs, rom_path, **kwargs):
 
 
 def test_retro_vec_env_done_on_info_default_disabled():
-    pytest.importorskip("stable_baselines3")
-
     rom_path = _mario_rom_path_or_skip()
     env = _make_mario_retro_vec_env(
         1,
@@ -947,8 +1037,8 @@ def test_retro_vec_env_done_on_info_default_disabled():
         actions = np.zeros((env.num_envs, env.num_buttons), dtype=np.uint8)
         actions[0, 7] = 1
         for _ in range(180):
-            _, _, dones, infos = env.step(actions)
-            _, _, enabled_dones, enabled_infos = enabled_env.step(actions)
+            _, _, dones, infos = _step(env, actions)
+            _, _, enabled_dones, enabled_infos = _step(enabled_env, actions)
             if not bool(enabled_dones[0]):
                 assert dones.tolist() == [False]
                 continue
@@ -957,7 +1047,7 @@ def test_retro_vec_env_done_on_info_default_disabled():
             assert dones.tolist() == [False]
             assert "life_loss" not in infos[0]
             assert "done_on_info" not in infos[0]
-            assert "terminal_observation" not in infos[0]
+            assert "final_obs" not in infos[0]
             return
 
         pytest.fail("Mario did not lose a life within the test step budget")
@@ -967,8 +1057,6 @@ def test_retro_vec_env_done_on_info_default_disabled():
 
 
 def test_retro_vec_env_done_on_info_life_loss_autoresets_only_one_lane():
-    pytest.importorskip("stable_baselines3")
-
     rom_path = _mario_rom_path_or_skip()
     life_env = _make_mario_retro_vec_env(
         2,
@@ -988,8 +1076,8 @@ def test_retro_vec_env_done_on_info_life_loss_autoresets_only_one_lane():
         actions[0, 7] = 1
 
         for _ in range(180):
-            obs, _, dones, infos = life_env.step(actions)
-            baseline_obs, _, baseline_dones, _ = baseline_env.step(actions)
+            obs, _, dones, infos = _step(life_env, actions)
+            baseline_obs, _, baseline_dones, _ = _step(baseline_env, actions)
             assert baseline_dones.tolist() == [False, False]
             if not bool(dones[0]):
                 assert dones.tolist() == [False, False]
@@ -1004,8 +1092,8 @@ def test_retro_vec_env_done_on_info_life_loss_autoresets_only_one_lane():
             assert payload["keys"] == ["lives"]
             assert payload["variables"] == ["lives"]
             assert payload["next"][0] < payload["prev"][0]
-            assert "terminal_observation" in infos[0]
-            assert "terminal_observation" not in infos[1]
+            assert "final_obs" in infos[0]
+            assert "final_obs" not in infos[1]
             return
 
         pytest.fail("Mario did not lose a life within the test step budget")
@@ -1015,8 +1103,6 @@ def test_retro_vec_env_done_on_info_life_loss_autoresets_only_one_lane():
 
 
 def test_retro_vec_env_done_on_info_autoresets_only_changed_lane():
-    pytest.importorskip("stable_baselines3")
-
     rom_path = _mario_rom_path_or_skip()
     env = _make_mario_retro_vec_env(
         2,
@@ -1038,8 +1124,8 @@ def test_retro_vec_env_done_on_info_autoresets_only_changed_lane():
         actions[0, 7] = 1
 
         for _ in range(80):
-            obs, _, dones, infos = env.step(actions)
-            baseline_obs, _, baseline_dones, _ = baseline_env.step(actions)
+            obs, _, dones, infos = _step(env, actions)
+            baseline_obs, _, baseline_dones, _ = _step(baseline_env, actions)
             assert baseline_dones.tolist() == [False, False]
             if not bool(dones[0]):
                 assert dones.tolist() == [False, False]
@@ -1056,8 +1142,8 @@ def test_retro_vec_env_done_on_info_autoresets_only_changed_lane():
             assert len(payload["prev"]) == 2
             assert len(payload["next"]) == 2
             assert payload["prev"] != payload["next"]
-            assert "terminal_observation" in infos[0]
-            assert "terminal_observation" not in infos[1]
+            assert "final_obs" in infos[0]
+            assert "final_obs" not in infos[1]
             assert "done_on_info" not in infos[1]
             return
 
@@ -1068,8 +1154,6 @@ def test_retro_vec_env_done_on_info_autoresets_only_changed_lane():
 
 
 def test_retro_vec_env_done_on_info_reports_multiple_triggers_same_event():
-    pytest.importorskip("stable_baselines3")
-
     rom_path = _mario_rom_path_or_skip()
     env = _make_mario_retro_vec_env(
         1,
@@ -1097,7 +1181,7 @@ def test_retro_vec_env_done_on_info_reports_multiple_triggers_same_event():
         actions = np.zeros((1, env.num_buttons), dtype=np.uint8)
         actions[0, 7] = 1
         for _ in range(180):
-            _, _, dones, infos = env.step(actions)
+            _, _, dones, infos = _step(env, actions)
             if not bool(dones[0]):
                 continue
 
@@ -1125,8 +1209,6 @@ def test_retro_vec_env_done_on_info_reports_multiple_triggers_same_event():
 
 
 def test_retro_vec_env_done_on_info_weighted_state_autoreset_updates_active_index():
-    pytest.importorskip("stable_baselines3")
-
     rom_path = _mario_rom_path_or_skip()
     env = _make_mario_retro_vec_env(
         2,
@@ -1142,7 +1224,7 @@ def test_retro_vec_env_done_on_info_weighted_state_autoreset_updates_active_inde
         actions[0, 7] = 1
 
         for _ in range(80):
-            _, _, dones, infos = env.step(actions)
+            _, _, dones, infos = _step(env, actions)
             if not bool(dones[0]):
                 continue
 
@@ -1152,7 +1234,7 @@ def test_retro_vec_env_done_on_info_weighted_state_autoreset_updates_active_inde
                 env.active_state_indices(),
                 np.zeros(2, dtype=np.int32),
             )
-            assert infos[0]["reset_info"]["start_state"] == "Level1-1"
+            assert infos[0]["start_state"] == "Level1-1"
             return
 
         pytest.fail("Mario xscroll did not change within the test step budget")
@@ -1161,8 +1243,6 @@ def test_retro_vec_env_done_on_info_weighted_state_autoreset_updates_active_inde
 
 
 def test_retro_vec_env_single_state_active_indices_if_rom_present():
-    pytest.importorskip("stable_baselines3")
-
     rom_path = _mario_rom_path_or_skip()
     env = _make_mario_retro_vec_env(
         4,
@@ -1187,7 +1267,6 @@ def test_retro_vec_env_single_state_active_indices_if_rom_present():
 
 
 def test_retro_vec_env_mixed_states_reset_infos_if_rom_present():
-    pytest.importorskip("stable_baselines3")
     from stable_retro.vec_env import RetroVecEnv
 
     rom_path = _mario_rom_path_or_skip()
@@ -1206,28 +1285,29 @@ def test_retro_vec_env_mixed_states_reset_infos_if_rom_present():
         info_filter="terminal",
     )
     try:
-        env.reset()
+        _, reset_infos = env.reset()
+        reset_infos = _infos_to_list(reset_infos, env.num_envs)
         np.testing.assert_array_equal(
             env.active_state_indices(),
             np.arange(len(states), dtype=np.int32),
         )
         assert env.initial_state_names == tuple(states)
         assert env.active_states() == tuple(states)
-        assert [info["start_state"] for info in env.reset_infos] == states
-        assert [info["state"] for info in env.reset_infos] == states
+        assert [info["start_state"] for info in reset_infos] == states
+        assert [info["state"] for info in reset_infos] == states
 
-        env.reset()
+        _, reset_infos = env.reset()
+        reset_infos = _infos_to_list(reset_infos, env.num_envs)
         np.testing.assert_array_equal(
             env.active_state_indices(),
             np.arange(len(states), dtype=np.int32),
         )
-        assert [info["start_state"] for info in env.reset_infos] == states
+        assert [info["start_state"] for info in reset_infos] == states
     finally:
         env.close()
 
 
 def test_retro_vec_env_fixed_duplicate_states_are_canonical_if_rom_present():
-    pytest.importorskip("stable_baselines3")
     from stable_retro.vec_env import RetroVecEnv
 
     rom_path = _mario_rom_path_or_skip()
@@ -1246,20 +1326,20 @@ def test_retro_vec_env_fixed_duplicate_states_are_canonical_if_rom_present():
         info_filter="terminal",
     )
     try:
-        env.reset()
+        _, reset_infos = env.reset()
+        reset_infos = _infos_to_list(reset_infos, env.num_envs)
         assert env.initial_state_names == ("Level1-1", "Level1-2")
         np.testing.assert_array_equal(
             env.active_state_indices(),
             np.array([0, 1, 0, 1], dtype=np.int32),
         )
         assert env.active_states() == tuple(states)
-        assert [info["start_state"] for info in env.reset_infos] == states
+        assert [info["start_state"] for info in reset_infos] == states
     finally:
         env.close()
 
 
 def test_retro_vec_env_weighted_states_sample_on_reset_if_rom_present():
-    pytest.importorskip("stable_baselines3")
     from stable_retro.vec_env import RetroVecEnv
 
     rom_path = _mario_rom_path_or_skip()
@@ -1283,11 +1363,12 @@ def test_retro_vec_env_weighted_states_sample_on_reset_if_rom_present():
         assert env.initial_state_names == tuple(states)
         seen = set()
         for _ in range(20):
-            env.reset()
+            _, reset_infos = env.reset()
+            reset_infos = _infos_to_list(reset_infos, env.num_envs)
             reset_indices = indices.copy()
             assert reset_indices.dtype == np.int32
             assert np.all((0 <= reset_indices) & (reset_indices < len(states)))
-            reset_states = [info["start_state"] for info in env.reset_infos]
+            reset_states = [info["start_state"] for info in reset_infos]
             assert set(reset_states).issubset(states)
             assert tuple(reset_states) == env.active_states()
             assert reset_states == [
@@ -1300,7 +1381,6 @@ def test_retro_vec_env_weighted_states_sample_on_reset_if_rom_present():
 
 
 def test_retro_vec_env_set_state_updates_reset_policy_if_rom_present():
-    pytest.importorskip("stable_baselines3")
     from stable_retro.vec_env import RetroVecEnv
 
     rom_path = _mario_rom_path_or_skip()
@@ -1333,13 +1413,14 @@ def test_retro_vec_env_set_state_updates_reset_policy_if_rom_present():
         }
         assert set(env.active_states()).issubset(states)
 
-        env.reset()
+        _, reset_infos = env.reset()
+        reset_infos = _infos_to_list(reset_infos, env.num_envs)
         np.testing.assert_array_equal(
             env.active_state_indices(),
             np.ones(env.num_envs, dtype=np.int32),
         )
         assert env.active_states() == ("Level1-2",) * env.num_envs
-        assert [info["start_state"] for info in env.reset_infos] == [
+        assert [info["start_state"] for info in reset_infos] == [
             "Level1-2",
         ] * env.num_envs
 
@@ -1367,7 +1448,6 @@ def test_retro_vec_env_set_state_updates_reset_policy_if_rom_present():
 def test_retro_vec_env_set_state_applies_on_autoreset_if_rom_present(
     tmp_path,
 ):
-    pytest.importorskip("stable_baselines3")
     from stable_retro.vec_env import RetroVecEnv
 
     rom_path = _mario_rom_path_or_skip()
@@ -1398,7 +1478,7 @@ def test_retro_vec_env_set_state_applies_on_autoreset_if_rom_present(
         done_lanes = []
         infos = None
         for _ in range(12):
-            _, _, dones, infos = env.step(actions)
+            _, _, dones, infos = _step(env, actions)
             done_lanes = [
                 lane
                 for lane, done in enumerate(dones)
@@ -1411,7 +1491,7 @@ def test_retro_vec_env_set_state_applies_on_autoreset_if_rom_present(
         active_states = env.active_states()
         for lane in done_lanes:
             assert active_states[lane] == "Level1-2"
-            assert infos[lane]["reset_info"]["start_state"] == "Level1-2"
+            assert infos[lane]["start_state"] == "Level1-2"
     finally:
         env.close()
 
@@ -1419,7 +1499,6 @@ def test_retro_vec_env_set_state_applies_on_autoreset_if_rom_present(
 def test_retro_vec_env_active_indices_update_after_autoreset_if_rom_present(
     tmp_path,
 ):
-    pytest.importorskip("stable_baselines3")
     from stable_retro.vec_env import RetroVecEnv
 
     rom_path = _mario_rom_path_or_skip()
@@ -1444,7 +1523,7 @@ def test_retro_vec_env_active_indices_update_after_autoreset_if_rom_present(
         env.seed(20260623)
         env.reset()
         action = np.zeros((env.num_envs, env.num_buttons), dtype=np.uint8)
-        _, _, dones, infos = env.step(action)
+        _, _, dones, infos = _step(env, action)
 
         assert np.any(dones)
         active_indices = env.active_state_indices().copy()
@@ -1452,14 +1531,13 @@ def test_retro_vec_env_active_indices_update_after_autoreset_if_rom_present(
         for lane, done in enumerate(dones):
             if not bool(done):
                 continue
-            reset_state = infos[lane]["reset_info"]["start_state"]
+            reset_state = infos[lane]["start_state"]
             assert reset_state == env.initial_state_names[int(active_indices[lane])]
     finally:
         env.close()
 
 
 def test_retro_vec_env_selected_info_keys(tmp_path):
-    pytest.importorskip("stable_baselines3")
     import stable_retro as retro
     from stable_retro.vec_env import RetroVecEnv
 
@@ -1493,8 +1571,8 @@ def test_retro_vec_env_selected_info_keys(tmp_path):
         default_env.reset()
         selected_env.reset()
         action = np.zeros((1, default_env.num_buttons), dtype=np.uint8)
-        default_obs, default_rewards, default_dones, default_infos = default_env.step(action)
-        selected_obs, selected_rewards, selected_dones, selected_infos = selected_env.step(action)
+        default_obs, default_rewards, default_dones, default_infos = _step(default_env, action)
+        selected_obs, selected_rewards, selected_dones, selected_infos = _step(selected_env, action)
 
         np.testing.assert_array_equal(default_obs, selected_obs)
         np.testing.assert_array_equal(default_rewards, selected_rewards)
@@ -1508,20 +1586,18 @@ def test_retro_vec_env_selected_info_keys(tmp_path):
 
 
 def test_retro_vec_env_observations_do_not_alias_previous_step(tmp_path):
-    pytest.importorskip("stable_baselines3")
-
     env = _make_test_retro_vec_env(
         tmp_path,
         obs_copy="safe_view",
         info_filter="terminal",
     )
     try:
-        obs0 = env.reset()
+        obs0 = env.reset()[0]
         obs0_hash = _sha(obs0)
         obs0_ptr = _ptr(obs0)
 
         actions = np.zeros((env.num_envs, env.num_buttons), dtype=np.uint8)
-        obs1, _, _, _ = env.step(actions)
+        obs1, _, _, _ = _step(env, actions)
 
         assert _sha(obs0) == obs0_hash
         assert _ptr(obs1) != obs0_ptr
@@ -1531,19 +1607,17 @@ def test_retro_vec_env_observations_do_not_alias_previous_step(tmp_path):
 
 
 def test_retro_vec_env_unsafe_view_aliases_observations(tmp_path):
-    pytest.importorskip("stable_baselines3")
-
     env = _make_test_retro_vec_env(
         tmp_path,
         obs_copy="unsafe_view",
         info_filter="terminal",
     )
     try:
-        obs0 = env.reset()
+        obs0 = env.reset()[0]
         obs0_ptr = _ptr(obs0)
 
         actions = np.zeros((env.num_envs, env.num_buttons), dtype=np.uint8)
-        obs1, _, _, _ = env.step(actions)
+        obs1, _, _, _ = _step(env, actions)
 
         assert _ptr(obs1) == obs0_ptr
         assert np.shares_memory(obs1, obs0)
@@ -1552,7 +1626,6 @@ def test_retro_vec_env_unsafe_view_aliases_observations(tmp_path):
 
 
 def test_retro_vec_env_forwards_per_env_reset_seeds():
-    pytest.importorskip("stable_baselines3")
     from stable_retro.vec_env import RetroVecEnv
 
     class FakeNative:
@@ -1570,7 +1643,7 @@ def test_retro_vec_env_forwards_per_env_reset_seeds():
     env._seeds = [11, None, 37]
     env._options = [{}, {}, {}]
 
-    obs = env.reset()
+    obs = env.reset()[0]
 
     assert obs.shape == (3, 2, 2, 1)
     assert env.native.reset_seeds == [[11, None, 37]]
@@ -1578,17 +1651,15 @@ def test_retro_vec_env_forwards_per_env_reset_seeds():
 
 
 def test_retro_vec_env_frame_stack_order(tmp_path):
-    pytest.importorskip("stable_baselines3")
-
     env = _make_test_retro_vec_env(tmp_path, info_filter="terminal")
     try:
-        obs = env.reset()
+        obs = env.reset()[0]
         actions = np.zeros((env.num_envs, env.num_buttons), dtype=np.uint8)
         saw_new_frame = False
 
         for _ in range(8):
             prev = obs.copy()
-            obs, _, _, _ = env.step(actions)
+            obs, _, _, _ = _step(env, actions)
 
             assert np.array_equal(obs[..., :-1], prev[..., 1:])
             saw_new_frame = saw_new_frame or not np.array_equal(
@@ -1629,11 +1700,11 @@ def _native_test_rom_trace(tmp_path, obs_copy, num_threads, seed, actions):
     )
     try:
         env.seed(seed)
-        obs = env.reset()
+        obs = env.reset()[0]
         trace = [(_sha(obs), None, None, None)]
         total_reward = 0.0
         for action in actions:
-            obs, rewards, dones, infos = env.step(action)
+            obs, rewards, dones, infos = _step(env, action)
             total_reward += float(np.sum(rewards))
             trace.append(
                 (
@@ -1656,8 +1727,6 @@ def test_retro_vec_env_seed_determinism_ci_rom(
     obs_copy,
     num_threads,
 ):
-    pytest.importorskip("stable_baselines3")
-
     actions = np.random.default_rng(20260616).integers(
         0,
         2,
@@ -1713,13 +1782,13 @@ def _native_render_skip_trace(tmp_path, *, disable_render_skip, maxpool_last_two
     )
     try:
         env.seed(20260616)
-        obs = env.reset()
+        obs = env.reset()[0]
         trace = [(_sha(obs), None, None, None)]
         actions = np.zeros((env.num_envs, env.num_buttons), dtype=np.uint8)
         terminal_count = 0
         for _ in range(12):
-            obs, rewards, dones, infos = env.step(actions)
-            terminal_count += sum("terminal_observation" in info for info in infos)
+            obs, rewards, dones, infos = _step(env, actions)
+            terminal_count += sum("final_obs" in info for info in infos)
             trace.append(
                 (
                     _sha(obs),
@@ -1740,8 +1809,6 @@ def test_retro_vec_env_nes_render_skip_matches_full_render(
     tmp_path,
     maxpool_last_two,
 ):
-    pytest.importorskip("stable_baselines3")
-
     baseline = _native_render_skip_trace(
         tmp_path,
         disable_render_skip=True,
@@ -1763,7 +1830,7 @@ def _as_hwc_observation(obs, obs_layout):
     return obs
 
 
-def _as_hwc_terminal_observation(obs, obs_layout):
+def _as_hwc_final_obs(obs, obs_layout):
     obs = np.asarray(obs)
     if obs_layout == "chw":
         return np.transpose(obs, (1, 2, 0))
@@ -1775,9 +1842,9 @@ def _normalize_infos_as_hwc(infos, obs_layout):
     for info in infos:
         normalized_info = {}
         for key, value in info.items():
-            if key == "terminal_observation":
-                normalized_info["terminal_observation_sha"] = _sha(
-                    _as_hwc_terminal_observation(value, obs_layout),
+            if key == "final_obs":
+                normalized_info["final_obs_sha"] = _sha(
+                    _as_hwc_final_obs(value, obs_layout),
                 )
                 continue
             if key == "reset_info":
@@ -1815,12 +1882,12 @@ def _native_layout_trace(tmp_path, obs_layout, actions):
     )
     try:
         env.seed(20260617)
-        obs = env.reset()
+        obs = env.reset()[0]
         trace = [(_sha(_as_hwc_observation(obs, obs_layout)), None, None, None)]
         terminal_count = 0
         for action in actions:
-            obs, rewards, dones, infos = env.step(action)
-            terminal_count += sum("terminal_observation" in info for info in infos)
+            obs, rewards, dones, infos = _step(env, action)
+            terminal_count += sum("final_obs" in info for info in infos)
             trace.append(
                 (
                     _sha(_as_hwc_observation(obs, obs_layout)),
@@ -1836,8 +1903,6 @@ def _native_layout_trace(tmp_path, obs_layout, actions):
 
 
 def test_retro_vec_env_chw_matches_hwc_trace(tmp_path):
-    pytest.importorskip("stable_baselines3")
-
     actions = np.random.default_rng(20260617).integers(
         0,
         2,
@@ -1852,7 +1917,6 @@ def test_retro_vec_env_chw_matches_hwc_trace(tmp_path):
 
 
 def test_retro_vec_env_mario_infos_if_rom_present():
-    pytest.importorskip("stable_baselines3")
     import stable_retro as retro
     from stable_retro.vec_env import RetroVecEnv
 
@@ -1902,22 +1966,21 @@ def test_retro_vec_env_mario_infos_if_rom_present():
         env.reset()
         terminal_env.reset()
         action = np.zeros((1, env.num_buttons), dtype=np.uint8)
-        _, rewards, dones, infos = env.step(action)
-        _, terminal_rewards, terminal_dones, terminal_infos = terminal_env.step(action)
+        _, rewards, dones, infos = _step(env, action)
+        _, terminal_rewards, terminal_dones, terminal_infos = _step(terminal_env, action)
 
         assert rewards.tolist() == terminal_rewards.tolist()
         assert dones.tolist() == terminal_dones.tolist()
         assert terminal_infos == [{}]
         assert len(infos) == 1
         assert expected_keys.issubset(infos[0])
-        assert all(isinstance(infos[0][key], int) for key in expected_keys)
+        assert all(isinstance(infos[0][key], (int, np.integer)) for key in expected_keys)
     finally:
         env.close()
         terminal_env.close()
 
 
 def test_retro_vec_env_mario_life_decrease_terminates_if_rom_present():
-    pytest.importorskip("stable_baselines3")
     import stable_retro as retro
     from stable_retro.vec_env import RetroVecEnv
 
@@ -1947,7 +2010,7 @@ def test_retro_vec_env_mario_life_decrease_terminates_if_rom_present():
         # first-life-loss terminal transition.
         action[0, 7] = 1
         for _ in range(180):
-            _, _, dones, infos = env.step(action)
+            _, _, dones, infos = _step(env, action)
             if not bool(dones[0]):
                 continue
 
@@ -1958,7 +2021,7 @@ def test_retro_vec_env_mario_life_decrease_terminates_if_rom_present():
             assert payload["keys"] == ["lives"]
             assert payload["variables"] == ["lives"]
             assert payload["next"][0] < payload["prev"][0]
-            assert "terminal_observation" in infos[0]
+            assert "final_obs" in infos[0]
             return
 
         pytest.fail("Mario did not lose a life within the test step budget")
@@ -1967,7 +2030,6 @@ def test_retro_vec_env_mario_life_decrease_terminates_if_rom_present():
 
 
 def test_stable_retro_hf_mario_level1_policy_triggers_level_change_if_available():
-    pytest.importorskip("stable_baselines3")
     if not hasattr(np, "_core"):
         pytest.skip("HF SB3 checkpoint requires NumPy 2-compatible pickle paths")
 
@@ -2054,8 +2116,6 @@ def test_stable_retro_hf_mario_policy_playback_command_parses():
 
 
 def test_retro_vec_env_mario_all_info_keys_match_default():
-    pytest.importorskip("stable_baselines3")
-
     mario_keys = [
         "coins",
         "levelHi",
@@ -2119,11 +2179,11 @@ def _mario_native_trace(obs_copy, num_threads, seed, actions, **env_kwargs):
     )
     try:
         env.seed(seed)
-        obs = env.reset()
+        obs = env.reset()[0]
         trace = [(_sha(obs), None, None, None)]
         for action in actions:
             assert action.shape == (num_envs, env.num_buttons)
-            obs, rewards, dones, infos = env.step(action)
+            obs, rewards, dones, infos = _step(env, action)
             trace.append(
                 (
                     _sha(obs),
@@ -2142,8 +2202,8 @@ def _normalize_infos(infos):
     for info in infos:
         normalized_info = {}
         for key, value in info.items():
-            if key == "terminal_observation":
-                normalized_info["terminal_observation_sha"] = _sha(value)
+            if key == "final_obs":
+                normalized_info["final_obs_sha"] = _sha(value)
                 continue
             if key == "reset_info":
                 continue
@@ -2196,8 +2256,6 @@ def test_retro_vec_env_mario_sticky_extremes_match_effective_actions(
     num_envs,
     frame_skip,
 ):
-    pytest.importorskip("stable_baselines3")
-
     rng = np.random.default_rng(20260619 + num_envs + frame_skip)
     actions = rng.integers(0, 2, size=(40, num_envs, 9), dtype=np.uint8)
     actions[0] = 0
@@ -2243,8 +2301,6 @@ def test_retro_vec_env_mario_seed_trace_determinism(
     obs_copy,
     num_threads,
 ):
-    pytest.importorskip("stable_baselines3")
-
     actions = np.random.default_rng(999).integers(
         0,
         2,
@@ -2288,8 +2344,6 @@ def test_retro_vec_env_mario_seed_matrix(
     noop_reset_max,
     sticky_action_prob,
 ):
-    pytest.importorskip("stable_baselines3")
-
     actions = np.random.default_rng(12345).integers(
         0,
         2,
@@ -2319,8 +2373,6 @@ def test_retro_vec_env_mario_seed_matrix(
 
 @pytest.mark.parametrize("obs_copy", ["copy", "safe_view"])
 def test_retro_vec_env_mario_noop_seed_divergence(obs_copy):
-    pytest.importorskip("stable_baselines3")
-
     actions = np.random.default_rng(777).integers(
         0,
         2,

@@ -12,6 +12,7 @@ import numpy as np
 
 from stable_retro.testing.hf_policy import (
     MARIO_SIMPLE_ACTIONS,
+    _single_vector_info,
     load_sb3_policy,
     make_mario_level1_policy_env,
     resolve_hf_policy_path,
@@ -84,7 +85,7 @@ def run(args: argparse.Namespace) -> int:
     try:
         for episode in range(args.episodes):
             env.seed(args.seed + episode)
-            obs = env.reset()
+            obs, _infos = env.reset()
             for step in range(1, args.max_steps + 1):
                 started_at = time.monotonic()
                 if viewer is not None:
@@ -100,10 +101,11 @@ def run(args: argparse.Namespace) -> int:
                 masks = MARIO_SIMPLE_ACTIONS[
                     np.asarray(action, dtype=np.int64).reshape(-1)
                 ]
-                obs, rewards, dones, infos = env.step(masks)
+                obs, rewards, terminations, truncations, infos = env.step(masks)
 
-                if bool(dones[0]):
-                    payload = infos[0].get("done_on_info", {})
+                if bool(terminations[0] or truncations[0]):
+                    info = _single_vector_info(infos, 0)
+                    payload = info.get("done_on_info", {})
                     if args.event in payload:
                         print(
                             f"{args.event} episode={episode} step={step} "

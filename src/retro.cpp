@@ -1815,11 +1815,12 @@ public:
 				py::array_t<uint8_t> terminal(observationShapeContainer());
 				std::memcpy(terminal.mutable_data(), m_terminalObservations[i].data(), m_stackedObsSize);
 				info["terminal_observation"] = terminal;
+				info["terminal_info"] = terminalInfoDict(outputs[i]);
 				py::dict resetInfo = py::dict();
-				addStartStateInfo(resetInfo, outputs[i].resetStartStateLabel);
-				info["reset_info"] = resetInfo;
-				info["TimeLimit.truncated"] = false;
-			}
+					addStartStateInfo(resetInfo, outputs[i].resetStartStateLabel);
+					info["reset_info"] = resetInfo;
+					info["TimeLimit.truncated"] = false;
+				}
 			if (!outputs[i].firedDoneOnInfoRules.empty()) {
 				py::dict doneOnInfo = py::dict();
 				for (const DoneOnInfoFiredRule& fired : outputs[i].firedDoneOnInfoRules) {
@@ -2138,6 +2139,7 @@ private:
 		std::string startStateLabel;
 		std::string resetStartStateLabel;
 		std::vector<uint8_t> terminalObservation;
+		std::unordered_map<std::string, int64_t> terminalInfo;
 	};
 
 	py::dict lookupInfo(const Slot& slot) const {
@@ -2149,6 +2151,29 @@ private:
 			data[py::str(item.first)] = slot.data.m_data.lookupValue(item.second);
 		}
 		return data;
+	}
+
+	std::unordered_map<std::string, int64_t> captureInfo(const Slot& slot) const {
+		if (m_infoKeys.empty()) {
+			return slot.data.m_data.lookupAll();
+		}
+		std::unordered_map<std::string, int64_t> data;
+		data.reserve(m_infoVariables.size());
+		for (const auto& item : m_infoVariables) {
+			data[item.first] = slot.data.m_data.lookupValue(item.second);
+		}
+		return data;
+	}
+
+	py::dict terminalInfoDict(const StepOutput& output) const {
+		py::dict info = py::dict();
+		for (const auto& item : output.terminalInfo) {
+			info[py::str(item.first)] = item.second;
+		}
+		if (m_reportInitialState) {
+			addStartStateInfo(info, output.startStateLabel);
+		}
+		return info;
 	}
 
 	void clearKeys(Slot& slot) {
@@ -2538,18 +2563,20 @@ private:
 					);
 					pushFrame(slot, slot.singleObs);
 					output.reward = clipReward(totalReward);
-					output.done = done;
-					if (m_reportInitialState && (m_fullInfo || done)) {
-						output.startStateLabel = slot.currentStartStateLabel;
-					}
-					if (done && captureTerminalObservation) {
-						output.terminalObservation.resize(m_stackedObsSize);
-						writeStackedObservation(slot, output.terminalObservation.data());
-						resetSlot(slot, dst);
-						output.resetStartStateLabel = slot.currentStartStateLabel;
-					} else if (done) {
-						resetSlot(slot, dst);
-						output.resetStartStateLabel = slot.currentStartStateLabel;
+						output.done = done;
+						if (m_reportInitialState && (m_fullInfo || done)) {
+							output.startStateLabel = slot.currentStartStateLabel;
+						}
+						if (done && captureTerminalObservation) {
+							output.terminalObservation.resize(m_stackedObsSize);
+							writeStackedObservation(slot, output.terminalObservation.data());
+							output.terminalInfo = captureInfo(slot);
+							resetSlot(slot, dst);
+							output.resetStartStateLabel = slot.currentStartStateLabel;
+						} else if (done) {
+							output.terminalInfo = captureInfo(slot);
+							resetSlot(slot, dst);
+							output.resetStartStateLabel = slot.currentStartStateLabel;
 					} else {
 						writeStackedObservation(slot, dst);
 					}
@@ -2607,18 +2634,20 @@ private:
 		}
 		pushFrame(slot, slot.singleObs);
 		output.reward = clipReward(totalReward);
-		output.done = done;
-		if (m_reportInitialState && (m_fullInfo || done)) {
-			output.startStateLabel = slot.currentStartStateLabel;
-		}
-		if (done && captureTerminalObservation) {
-			output.terminalObservation.resize(m_stackedObsSize);
-			writeStackedObservation(slot, output.terminalObservation.data());
-			resetSlot(slot, dst);
-			output.resetStartStateLabel = slot.currentStartStateLabel;
-		} else if (done) {
-			resetSlot(slot, dst);
-			output.resetStartStateLabel = slot.currentStartStateLabel;
+			output.done = done;
+			if (m_reportInitialState && (m_fullInfo || done)) {
+				output.startStateLabel = slot.currentStartStateLabel;
+			}
+			if (done && captureTerminalObservation) {
+				output.terminalObservation.resize(m_stackedObsSize);
+				writeStackedObservation(slot, output.terminalObservation.data());
+				output.terminalInfo = captureInfo(slot);
+				resetSlot(slot, dst);
+				output.resetStartStateLabel = slot.currentStartStateLabel;
+			} else if (done) {
+				output.terminalInfo = captureInfo(slot);
+				resetSlot(slot, dst);
+				output.resetStartStateLabel = slot.currentStartStateLabel;
 		} else {
 			writeStackedObservation(slot, dst);
 		}

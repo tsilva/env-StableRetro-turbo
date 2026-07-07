@@ -1,4 +1,4 @@
-"""RetroVecEnv for stable-retro rollouts."""
+"""Gymnasium vector environments for stable-retro rollouts."""
 
 from __future__ import annotations
 
@@ -6,23 +6,20 @@ import json
 import math
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 import numpy as np
 import gymnasium as gym
+from gymnasium.vector import AutoresetMode, VectorEnv
+from gymnasium.vector.utils import batch_space
 import stable_retro.data as retro_data
 from stable_retro.enums import Actions, Observations, State
-
-try:
-    from stable_baselines3.common.vec_env import VecEnv
-except ImportError:  # pragma: no cover - import remains cheap without SB3.
-    VecEnv = object
 
 _SERIALIZED_UNSET = object()
 
 
-class RetroVecEnv(VecEnv):
-    """SB3-compatible vector env for stable-retro rollouts.
+class RetroVecEnv(VectorEnv):
+    """Gymnasium vector env for stable-retro rollouts.
 
     This is the supported high-throughput path. C++ owns the emulator pool,
     frame skip, preprocessing, frame stacking, autoreset, reward/done
@@ -44,9 +41,11 @@ class RetroVecEnv(VecEnv):
     one-element lists for single-variable rules.
 
     obs_copy="safe_view" returns double-buffered observation views so the
-    previous observation survives the next step for SB3 rollout collection.
+    previous observation survives the next step for rollout collection.
     obs_copy="unsafe_view" restores single-buffer aliasing for benchmarks only.
     """
+
+    metadata = {"autoreset_mode": AutoresetMode.SAME_STEP}
 
     def __init__(
         self,
@@ -81,17 +80,13 @@ class RetroVecEnv(VecEnv):
         info_filter="all",
         done_on=None,
     ):
-        if VecEnv is object:
-            raise ImportError(
-                "RetroVecEnv requires stable-baselines3 to be installed",
-            )
         import stable_retro as retro
         from stable_retro import _retro
 
-        self.waiting = False
         self.closed = False
-        self._actions = None
         self._observations = None
+        self._seeds = [None for _ in range(int(num_envs))]
+        self._options = [None for _ in range(int(num_envs))]
         self._game = game
         self._inttype = inttype
         self._rom_path = rom_path
@@ -184,10 +179,15 @@ class RetroVecEnv(VecEnv):
             crop = template._effective_crop(0, height, width)
             crop_mask = template._native_mask_crop()
             initial_state = template.initial_state if template.initial_state else None
-            self.action_space = template.action_space
-            self.observation_space = self._observation_space_for_layout(
+            self.single_action_space = template.action_space
+            self.single_observation_space = self._observation_space_for_layout(
                 template.observation_space,
                 obs_layout,
+            )
+            self.action_space = batch_space(self.single_action_space, int(num_envs))
+            self.observation_space = batch_space(
+                self.single_observation_space,
+                int(num_envs),
             )
             self.num_buttons = template.num_buttons
             self.button_combos = [
@@ -257,7 +257,7 @@ class RetroVecEnv(VecEnv):
             crop_mask,
             obs_crop_fill,
         )
-        super().__init__(int(num_envs), self.observation_space, self.action_space)
+        self.num_envs = int(num_envs)
         self.initial_state_names = tuple(self.native.initial_state_names)
         self._active_state_indices = self.native.active_state_indices()
         self._active_state_indices.setflags(write=False)
@@ -316,7 +316,7 @@ class RetroVecEnv(VecEnv):
 
         The returned array is owned by this env and mutates in place
         after ``reset()`` and after per-lane automatic resets inside
-        ``step_wait()``. Copy it when a stable snapshot is needed.
+        ``step()``. Copy it when a stable snapshot is needed.
         Lanes without a serialized initial state report ``-1``.
         """
         return self._active_state_indices
@@ -925,40 +925,96 @@ class RetroVecEnv(VecEnv):
                 masks[env_idx, key] = (action_bits >> key) & 1
         return masks
 
-    def reset(self):
-        seeds = None
-        if self._seeds:
-            seeds = [
-                None if value is None else int(value)
-                for value in self._seeds
-            ]
-            if all(value is None for value in seeds):
-                seeds = None
+    def _reset_seeds(self):
+        self._seeds = [None for _ in range(self.num_envs)]
+
+    def _reset_options(self):
+        self._options = [None for _ in range(self.num_envs)]
+
+    def seed(self, seed: int | None = None):
+        """Set per-lane reset seeds for the next ``reset()`` call."""
+        if seed is None:
+            self._seeds = [None for _ in range(self.num_envs)]
+        else:
+            base = int(seed)
+            self._seeds = [base + i for i in range(self.num_envs)]
+        return list(self._seeds)
+
+    def _normalize_reset_seed(self, seed):
+        if seed is not None:
+            if isinstance(seed, Sequence) and not isinstance(
+                seed,
+                (str, bytes, bytearray),
+            ):
+                seeds = [None if value is None else int(value) for value in seed]
+                if len(seeds) != self.num_envs:
+                    raise ValueError("seed sequence length must match num_envs")
+                return seeds
+            base = int(seed)
+            return [base + i for i in range(self.num_envs)]
+        if not self._seeds:
+            return None
+        seeds = [None if value is None else int(value) for value in self._seeds]
+        if all(value is None for value in seeds):
+            return None
+        return seeds
+
+    def _list_infos_to_dict(self, infos):
+        vector_infos = {}
+        for env_num, info in enumerate(infos):
+            if info:
+                vector_infos = self._add_info(vector_infos, dict(info), env_num)
+        return vector_infos
+
+    def _step_infos_to_dict(self, infos):
+        vector_infos = {}
+        for env_num, raw_info in enumerate(infos):
+            info = dict(raw_info)
+            terminal_observation = info.pop("terminal_observation", None)
+            reset_info = info.pop("reset_info", None)
+            terminal_info = info.pop("terminal_info", None)
+            info.pop("TimeLimit.truncated", None)
+
+            if terminal_observation is not None:
+                final_info = dict(terminal_info or info)
+                done_on_info = info.get("done_on_info")
+                if done_on_info is not None:
+                    final_info["done_on_info"] = done_on_info
+                if reset_info:
+                    info.update(dict(reset_info))
+                info["final_obs"] = terminal_observation
+                info["final_info"] = final_info
+
+            if info:
+                vector_infos = self._add_info(vector_infos, info, env_num)
+        return vector_infos
+
+    def reset(self, *, seed: int | Sequence[int | None] | None = None, options=None):
+        super().reset(seed=None if isinstance(seed, Sequence) else seed)
+        seeds = self._normalize_reset_seed(seed)
         obs, infos = self.native.reset(seeds)
         self._observations = np.asarray(obs, dtype=np.uint8)
-        self.reset_infos = list(infos)
         self._reset_seeds()
         self._reset_options()
-        return self._obs()
+        return self._obs(), self._list_infos_to_dict(infos)
 
-    def step_async(self, actions):
-        self._actions = self._actions_to_masks(actions)
-        self.waiting = True
-
-    def step_wait(self):
-        obs, rewards, dones, infos = self.native.step(self._actions)
-        self._actions = None
-        self.waiting = False
+    def step(self, actions):
+        masks = self._actions_to_masks(actions)
+        obs, rewards, dones, infos = self.native.step(masks)
         self._observations = np.asarray(obs, dtype=np.uint8)
+        terminations = np.array(dones, dtype=bool, copy=True)
+        truncations = np.zeros(self.num_envs, dtype=bool)
         return (
             self._obs(),
             np.array(rewards, dtype=np.float32, copy=True),
-            np.array(dones, dtype=bool, copy=True),
-            list(infos),
+            terminations,
+            truncations,
+            self._step_infos_to_dict(infos),
         )
 
     def close(self):
-        if self.viewer is not None:
+        viewer = getattr(self, "viewer", None)
+        if viewer is not None:
             self.viewer.close()
             self.viewer = None
         self.closed = True
@@ -979,27 +1035,6 @@ class RetroVecEnv(VecEnv):
             self.viewer.imshow(img)
             return self.viewer.isopen
         raise ValueError(f"unsupported render mode: {mode}")
-
-    def get_attr(self, attr_name: str, indices=None) -> list[Any]:
-        return [getattr(self, attr_name) for _ in self._get_indices(indices)]
-
-    def set_attr(self, attr_name: str, value: Any, indices=None) -> None:
-        setattr(self, attr_name, value)
-
-    def env_method(
-        self,
-        method_name: str,
-        *method_args,
-        indices=None,
-        **method_kwargs,
-    ) -> list[Any]:
-        method = getattr(self, method_name)
-        return [
-            method(*method_args, **method_kwargs) for _ in self._get_indices(indices)
-        ]
-
-    def env_is_wrapped(self, wrapper_class, indices=None) -> list[bool]:
-        return [False for _ in self._get_indices(indices)]
 
 
 __all__ = ["RetroVecEnv"]
