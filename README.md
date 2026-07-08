@@ -255,9 +255,9 @@ Modal runs: full env benchmark
   first-life-loss terminal transitions.
 - `active_state_indices()` returns a read-only `int32` NumPy view for
   task-conditioned training; copy it when you need a stable snapshot.
-- `set_state(...)` accepts the same string, sequence, or weighted mapping forms
-  as constructor `state=` and updates the policy used by future resets/autoresets
-  without interrupting active lanes.
+- `set_state_policy(...)` accepts the same string, sequence, or weighted mapping
+  forms as constructor `state=` and updates the policy used by future
+  resets/autoresets without interrupting active lanes.
 - Third-party emulator cores carry their own licenses; see [`LICENSES.md`](LICENSES.md).
 
 ## Architecture

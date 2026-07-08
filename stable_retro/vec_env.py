@@ -28,8 +28,8 @@ class RetroVecEnv(VectorEnv):
     ``state`` accepts a single state name, a sequence of one state per env slot,
     or a mapping of state names to non-negative sampling weights. Mapping weights
     are normalized and sampled independently for each env on every episode reset.
-    Use ``set_state()`` with the same shapes to update the reset policy used by
-    future resets and autoresets.
+    Use ``set_state_policy()`` with the same shapes to update the reset policy
+    used by future resets and autoresets.
 
     Native info-transition termination is opt-in and game/config-specific.
     Pass done_on={"name": ("key", "decrease")} to terminate and autoreset
@@ -261,8 +261,9 @@ class RetroVecEnv(VectorEnv):
         self.initial_state_names = tuple(self.native.initial_state_names)
         self._active_state_indices = self.native.active_state_indices()
         self._active_state_indices.setflags(write=False)
+        self._active_state_names = [None for _ in range(self.num_envs)]
 
-    def set_state(self, state):
+    def set_state_policy(self, state):
         """Update the reset policy used at future episode boundaries.
 
         Accepts the same shapes as the constructor ``state`` argument: a single
@@ -295,9 +296,9 @@ class RetroVecEnv(VectorEnv):
     def set_state_sampling_weights(self, weights):
         """Compatibility alias for updating a weighted state reset policy."""
         if isinstance(weights, Mapping):
-            self.set_state(weights)
+            self.set_state_policy(weights)
             return
-        self.set_state(
+        self.set_state_policy(
             dict(zip(self.native.initial_state_policy_names(), weights, strict=True)),
         )
 
@@ -323,11 +324,19 @@ class RetroVecEnv(VectorEnv):
 
     def active_states(self):
         """Return active initial-state names for each lane."""
+        return tuple(self._active_state_names)
+
+    def _refresh_active_state_names(self, lanes=None):
+        if not hasattr(self, "initial_state_names"):
+            return
+        if not hasattr(self, "_active_state_names"):
+            self._active_state_names = [None for _ in range(self.num_envs)]
         names = self.initial_state_names
-        return tuple(
-            None if int(index) < 0 else names[int(index)]
-            for index in self._active_state_indices
-        )
+        if lanes is None:
+            lanes = range(self.num_envs)
+        for lane in lanes:
+            index = int(self._active_state_indices[lane])
+            self._active_state_names[lane] = None if index < 0 else names[index]
 
     @staticmethod
     def _normalize_state_sampling_weights(weights, state_names):
@@ -994,6 +1003,7 @@ class RetroVecEnv(VectorEnv):
         seeds = self._normalize_reset_seed(seed)
         obs, infos = self.native.reset(seeds)
         self._observations = np.asarray(obs, dtype=np.uint8)
+        self._refresh_active_state_names()
         self._reset_seeds()
         self._reset_options()
         return self._obs(), self._list_infos_to_dict(infos)
@@ -1003,6 +1013,8 @@ class RetroVecEnv(VectorEnv):
         obs, rewards, dones, infos = self.native.step(masks)
         self._observations = np.asarray(obs, dtype=np.uint8)
         terminations = np.array(dones, dtype=bool, copy=True)
+        if np.any(terminations):
+            self._refresh_active_state_names(np.flatnonzero(terminations))
         truncations = np.zeros(self.num_envs, dtype=bool)
         return (
             self._obs(),

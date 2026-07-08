@@ -1380,7 +1380,7 @@ def test_retro_vec_env_weighted_states_sample_on_reset_if_rom_present():
         env.close()
 
 
-def test_retro_vec_env_set_state_updates_reset_policy_if_rom_present():
+def test_retro_vec_env_set_state_policy_updates_reset_policy_if_rom_present():
     from stable_retro.vec_env import RetroVecEnv
 
     rom_path = _mario_rom_path_or_skip()
@@ -1399,11 +1399,13 @@ def test_retro_vec_env_set_state_updates_reset_policy_if_rom_present():
         info_filter="terminal",
     )
     try:
+        assert hasattr(env, "set_state_policy")
+        assert not hasattr(env, "set_state")
         assert env.initial_state_names == tuple(states)
         env.reset()
         assert set(env.active_states()).issubset(states)
 
-        env.set_state(
+        env.set_state_policy(
             {"Level1-1": 0.0, "Level1-2": 1.0, "Level1-3": 0.0},
         )
         assert env.state_sampling_weights() == {
@@ -1419,33 +1421,46 @@ def test_retro_vec_env_set_state_updates_reset_policy_if_rom_present():
             env.active_state_indices(),
             np.ones(env.num_envs, dtype=np.int32),
         )
+        assert env.initial_state_names == tuple(states)
         assert env.active_states() == ("Level1-2",) * env.num_envs
         assert [info["start_state"] for info in reset_infos] == [
             "Level1-2",
         ] * env.num_envs
 
-        env.set_state("Level1-3")
+        env.set_state_policy("Level1-3")
+        assert env.active_states() == ("Level1-2",) * env.num_envs
         env.reset()
         np.testing.assert_array_equal(
             env.active_state_indices(),
-            np.full(env.num_envs, 2, dtype=np.int32),
+            np.zeros(env.num_envs, dtype=np.int32),
         )
+        assert env.initial_state_names == ("Level1-3",)
         assert env.active_states() == ("Level1-3",) * env.num_envs
 
         fixed_states = ["Level1-1", "Level1-2"] * 4
-        env.set_state(fixed_states)
+        env.set_state_policy(fixed_states)
         env.reset()
+        np.testing.assert_array_equal(
+            env.active_state_indices(),
+            np.array([0, 1] * 4, dtype=np.int32),
+        )
+        assert env.initial_state_names == ("Level1-1", "Level1-2")
         assert env.active_states() == tuple(fixed_states)
 
-        env.set_state(["Level1-3"] * env.num_envs)
+        env.set_state_policy(["Level1-3"] * env.num_envs)
         assert env.active_states() == tuple(fixed_states)
         env.reset()
+        np.testing.assert_array_equal(
+            env.active_state_indices(),
+            np.zeros(env.num_envs, dtype=np.int32),
+        )
+        assert env.initial_state_names == ("Level1-3",)
         assert env.active_states() == ("Level1-3",) * env.num_envs
     finally:
         env.close()
 
 
-def test_retro_vec_env_set_state_applies_on_autoreset_if_rom_present(
+def test_retro_vec_env_set_state_policy_applies_on_autoreset_if_rom_present(
     tmp_path,
 ):
     from stable_retro.vec_env import RetroVecEnv
@@ -1471,7 +1486,7 @@ def test_retro_vec_env_set_state_applies_on_autoreset_if_rom_present(
         env.reset()
         assert env.active_states() == ("Level1-1", "Level1-1")
 
-        env.set_state({"Level1-2": 1.0})
+        env.set_state_policy({"Level1-2": 1.0})
         assert env.active_states() == ("Level1-1", "Level1-1")
 
         actions = np.zeros((env.num_envs, env.num_buttons), dtype=np.uint8)
@@ -1491,6 +1506,7 @@ def test_retro_vec_env_set_state_applies_on_autoreset_if_rom_present(
         active_states = env.active_states()
         for lane in done_lanes:
             assert active_states[lane] == "Level1-2"
+            assert env.active_state_indices()[lane] == 0
             assert infos[lane]["start_state"] == "Level1-2"
     finally:
         env.close()

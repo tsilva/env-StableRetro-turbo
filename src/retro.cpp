@@ -1541,6 +1541,7 @@ public:
 
 	void parseInitialStates(py::object initialStateObj, py::object labelsObj, py::object weightsObj, size_t numEnvs) {
 		m_initialStates.clear();
+		m_initialStateNames.clear();
 		m_initialStateCumulative.clear();
 		m_initialStateMode = InitialStateMode::None;
 		m_reportInitialState = false;
