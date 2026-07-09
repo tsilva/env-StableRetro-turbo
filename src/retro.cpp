@@ -1448,7 +1448,9 @@ public:
 		m_slots.reserve(numEnvs);
 		for (size_t i = 0; i < numEnvs; ++i) {
 			auto slot = std::make_unique<Slot>(romPath, dataPath, scenarioPath, constructionInitialState, i);
-			if (m_grayscale && m_algorithm == "area") {
+			// Stella's exported indexed frames are useful for direct rendering tests,
+			// but the generic indexed preprocessing path is slower than XRGB for Atari.
+			if (m_grayscale && m_algorithm == "area" && slot->emulator->m_re.core() != "Atari2600") {
 				slot->usesIndexedVideo = slot->emulator->m_re.setIndexedVideoEnabled(true);
 			}
 			if (i == 0) {

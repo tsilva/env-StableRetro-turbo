@@ -7,11 +7,12 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-07-02T23:00:00Z"
+exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
+exclude-newer-span = "P7D"
 
 [options.exclude-newer-package]
-supermariobrosnes-turbo = "2026-07-09T23:59:59Z"
-stable-retro-turbo = "2026-07-09T23:59:59Z"
+supermariobrosnes-turbo = "2026-07-09T12:00:27Z"
+stable-retro-turbo = "2026-07-09T12:00:27Z"
 
 [manifest]
 constraints = [

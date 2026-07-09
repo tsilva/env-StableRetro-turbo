@@ -3,8 +3,10 @@
 #include <sched.h>
 #endif
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #ifdef _MSC_VER
 #define snprintf _snprintf
@@ -45,6 +47,47 @@ static retro_environment_t environ_cb;
 static retro_audio_sample_t audio_cb;
 static retro_audio_sample_batch_t audio_batch_cb;
 static struct retro_system_av_info g_av_info;
+static bool stable_retro_indexed_video = false;
+static bool stable_retro_indexed_valid = false;
+static const uint8_t* stable_retro_indexed_data = NULL;
+static uint16_t stable_retro_indexed_palette[256];
+static unsigned stable_retro_indexed_width = 0;
+static unsigned stable_retro_indexed_height = 0;
+static size_t stable_retro_indexed_pitch = 0;
+
+static bool stable_retro_audio_enabled(void)
+{
+   static int enabled = -1;
+   if (enabled != -1)
+      return enabled;
+   const char *value = getenv("STABLE_RETRO_DISABLE_AUDIO");
+   enabled = !value || !*value || !strcmp(value, "0") ||
+      !strcmp(value, "false") || !strcmp(value, "False") ||
+      !strcmp(value, "FALSE");
+   return enabled;
+}
+
+static uint16_t stable_retro_xrgb8888_to_rgb565(uint32_t pixel)
+{
+   const uint8_t r = (pixel >> 16) & 0xff;
+   const uint8_t g = (pixel >> 8) & 0xff;
+   const uint8_t b = pixel & 0xff;
+   return (uint16_t)(((r & 0xf8) << 8) | ((g & 0xfc) << 3) | (b >> 3));
+}
+
+static void stable_retro_publish_indexed_video(const TIA& tia, const uint32_t* palette)
+{
+   for (int i = 0; i < 256; ++i)
+      stable_retro_indexed_palette[i] = stable_retro_xrgb8888_to_rgb565(palette[i]);
+
+   stable_retro_indexed_data = tia.currentFrameBuffer();
+   stable_retro_indexed_width = tia.width();
+   stable_retro_indexed_height = tia.height();
+   stable_retro_indexed_pitch = tia.width();
+   stable_retro_indexed_valid = stable_retro_indexed_data &&
+      stable_retro_indexed_width && stable_retro_indexed_height &&
+      stable_retro_indexed_pitch;
+}
 
 static void update_input()
 {
@@ -318,12 +361,14 @@ void retro_reset(void)
    console->system().reset();
 }
 
-void retro_run(void)
+static void stable_retro_run_internal(bool skip_render)
 {
     static int16_t *sampleBuffer[2048];
     static uint32_t frameBuffer[256*160];
     //Get the number of samples in a frame
     static uint32_t tiaSamplesPerFrame = (uint32_t)(31400.0f/console->getFramerate());
+   stable_retro_indexed_valid = false;
+   stable_retro_indexed_data = NULL;
 
    //INPUT
    update_input();
@@ -338,16 +383,66 @@ void retro_run(void)
    videoHeight = tia.height();
 
    const uint32_t *palette = console->getPalette(0);
-   //Copy the frame from stella to libretro
-   for (int i = 0; i < videoHeight * videoWidth; ++i)
-      frameBuffer[i] = palette[tia.currentFrameBuffer()[i]];
 
-   video_cb(frameBuffer, videoWidth, videoHeight, videoWidth << 2);
+   if (!skip_render) {
+      if (stable_retro_indexed_video) {
+         stable_retro_publish_indexed_video(tia, palette);
+      } else {
+         //Copy the frame from stella to libretro
+         for (int i = 0; i < videoHeight * videoWidth; ++i)
+            frameBuffer[i] = palette[tia.currentFrameBuffer()[i]];
+
+         video_cb(frameBuffer, videoWidth, videoHeight, videoWidth << 2);
+      }
+   }
 
    //AUDIO
    //Process one frame of audio from stella
-   SoundSDL *sound = (SoundSDL*)&osystem.sound();
-   sound->processFragment((int16_t*)sampleBuffer, tiaSamplesPerFrame);
+   if (stable_retro_audio_enabled()) {
+      SoundSDL *sound = (SoundSDL*)&osystem.sound();
+      sound->processFragment((int16_t*)sampleBuffer, tiaSamplesPerFrame);
 
-   audio_batch_cb((int16_t*)sampleBuffer, tiaSamplesPerFrame);
+      audio_batch_cb((int16_t*)sampleBuffer, tiaSamplesPerFrame);
+   }
+}
+
+void retro_run(void)
+{
+   stable_retro_run_internal(false);
+}
+
+extern "C" RETRO_API void stable_retro_run_skip_render(void)
+{
+   stable_retro_run_internal(true);
+}
+
+extern "C" RETRO_API void stable_retro_set_indexed_video(bool enabled)
+{
+   stable_retro_indexed_video = enabled;
+   if (!enabled) {
+      stable_retro_indexed_valid = false;
+      stable_retro_indexed_data = NULL;
+   }
+}
+
+extern "C" RETRO_API bool stable_retro_get_indexed_video(
+   const uint8_t **data,
+   const uint16_t **palette,
+   unsigned *width,
+   unsigned *height,
+   size_t *pitch,
+   bool *raw_palette,
+   int *deemp)
+{
+   if (!stable_retro_indexed_video || !stable_retro_indexed_valid ||
+         !stable_retro_indexed_data)
+      return false;
+   *data = stable_retro_indexed_data;
+   *palette = stable_retro_indexed_palette;
+   *width = stable_retro_indexed_width;
+   *height = stable_retro_indexed_height;
+   *pitch = stable_retro_indexed_pitch;
+   *raw_palette = false;
+   *deemp = 0;
+   return true;
 }

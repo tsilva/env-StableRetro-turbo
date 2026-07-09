@@ -121,6 +121,31 @@ TEST_P(EmulatorTest, Output) {
 	EXPECT_THAT(e.getAudioData(), NotNull());
 }
 
+TEST_F(EmulatorTest, StellaStableRetroFastPathHooks) {
+	if (!hasCoreInfo("stella")) {
+		GTEST_SKIP() << "stella core is not built";
+	}
+
+	Emulator e;
+	ASSERT_TRUE(e.loadRom("roms/automaton.a26"));
+	ASSERT_TRUE(e.setIndexedVideoEnabled(true));
+
+	e.run();
+	IndexedVideoFrame frame;
+	ASSERT_TRUE(e.getIndexedVideoFrame(frame));
+	EXPECT_THAT(frame.data, NotNull());
+	EXPECT_THAT(frame.palette, NotNull());
+	EXPECT_GT(frame.width, 0u);
+	EXPECT_GT(frame.height, 0u);
+	EXPECT_GT(frame.pitch, 0u);
+	EXPECT_FALSE(frame.rawPalette);
+	EXPECT_EQ(frame.deemp, 0);
+
+	EXPECT_TRUE(e.runSkipRender());
+	IndexedVideoFrame skipped;
+	EXPECT_FALSE(e.getIndexedVideoFrame(skipped));
+}
+
 TEST_P(EmulatorTest, States) {
 	const auto& param = GetParam();
 	Emulator e;
