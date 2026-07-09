@@ -48,6 +48,7 @@ class BenchmarkProfile:
     maxpool_last_two: bool = True
     num_envs: int = 32
     num_threads: int | None = 16
+    obs_layout: str = "hwc"
     description: str = ""
 
 
@@ -93,6 +94,7 @@ def _load_profiles(path: Path) -> dict[str, BenchmarkProfile]:
                     if item.get("num_threads") is None
                     else int(item.get("num_threads"))
                 ),
+                obs_layout=str(item.get("obs_layout", "hwc")).lower(),
                 description=str(item.get("description", "")),
             )
         except KeyError as e:
@@ -101,6 +103,10 @@ def _load_profiles(path: Path) -> dict[str, BenchmarkProfile]:
             ) from e
         if profile.name in out:
             raise SystemExit(f"Duplicate benchmark profile name: {profile.name}")
+        if profile.obs_layout not in {"hwc", "chw"}:
+            raise SystemExit(
+                f"Invalid obs_layout for profile {profile.name!r}: {profile.obs_layout!r}",
+            )
         out[profile.name] = profile
     return out
 
@@ -690,7 +696,7 @@ def main(argv=None) -> int:
         default=None,
         help="Comma-separated info keys to emit, or 'all' to pass all keys from data.json.",
     )
-    parser.add_argument("--obs-layout", choices=("hwc", "chw"), default="hwc")
+    parser.add_argument("--obs-layout", choices=("hwc", "chw"), default=None)
     parser.add_argument(
         "--vec-transpose-image",
         action="store_true",
@@ -808,6 +814,7 @@ def main(argv=None) -> int:
         else args.resize_algorithm
     )
     maxpool_last_two = profile.maxpool_last_two and not args.no_maxpool_last_two
+    obs_layout = profile.obs_layout if args.obs_layout is None else args.obs_layout
     done_on = None
     if args.done_on is not None:
         done_on = [item.strip() for item in args.done_on.split(",")]
@@ -832,7 +839,7 @@ def main(argv=None) -> int:
         "frame_stack": frame_stack,
         "maxpool_last_two": maxpool_last_two,
         "info_filter": args.info_filter,
-        "obs_layout": args.obs_layout,
+        "obs_layout": obs_layout,
     }
     if done_on is not None:
         env_kwargs["done_on"] = done_on
@@ -841,7 +848,7 @@ def main(argv=None) -> int:
             "mode": args.info_filter,
             "keys": info_filter_keys,
         }
-    if args.vec_transpose_image and args.obs_layout != "hwc":
+    if args.vec_transpose_image and obs_layout != "hwc":
         raise SystemExit("--vec-transpose-image requires --obs-layout=hwc")
     backend = _resolve_backend(args.backend)
     if states is not None and backend != "native":
@@ -875,7 +882,7 @@ def main(argv=None) -> int:
         f"maxpool_last_two={maxpool_last_two} done_on={done_on} "
         f"info_filter={args.info_filter} "
         f"info_filter_keys={'default' if info_filter_keys is None else len(info_filter_keys)} "
-        f"obs_layout={args.obs_layout} vec_transpose_image={args.vec_transpose_image} "
+        f"obs_layout={obs_layout} vec_transpose_image={args.vec_transpose_image} "
         f"obs_copy={args.obs_copy} actions={action_names or action_label} "
         f"steps={args.steps} repeats={args.repeats} seconds={args.seconds}",
     )

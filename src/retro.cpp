@@ -1445,12 +1445,18 @@ public:
 		parseInitialStates(initialStateObj, initialStateLabelsObj, initialStateWeightsObj, numEnvs);
 		m_numThreads = std::max(1, std::min<int>(m_numThreads <= 0 ? static_cast<int>(numEnvs) : m_numThreads, static_cast<int>(numEnvs)));
 		const std::string& constructionInitialState = initialStateForConstruction();
+		const bool indexedVideoEnabled = !envFlagEnabled("STABLE_RETRO_DISABLE_INDEXED_VIDEO");
+		const bool atariIndexedVideoEnabled = envFlagEnabled("STABLE_RETRO_ENABLE_ATARI_INDEXED_VIDEO");
 		m_slots.reserve(numEnvs);
 		for (size_t i = 0; i < numEnvs; ++i) {
 			auto slot = std::make_unique<Slot>(romPath, dataPath, scenarioPath, constructionInitialState, i);
-			// Stella's exported indexed frames are useful for direct rendering tests,
-			// but the generic indexed preprocessing path is slower than XRGB for Atari.
-			if (m_grayscale && m_algorithm == "area" && slot->emulator->m_re.core() != "Atari2600") {
+			const bool atariCore = slot->emulator->m_re.core() == "Atari2600";
+			if (
+				indexedVideoEnabled &&
+				m_grayscale &&
+				m_algorithm == "area" &&
+				(!atariCore || atariIndexedVideoEnabled)
+			) {
 				slot->usesIndexedVideo = slot->emulator->m_re.setIndexedVideoEnabled(true);
 			}
 			if (i == 0) {
