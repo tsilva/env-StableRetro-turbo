@@ -93,3 +93,12 @@ def test_public_native_macos_core_set_includes_packaged_arm64_cores():
         assert platform in release_build.PUBLIC_DATA_PLATFORMS.split(",")
     for platform in ("gba", "32x", "saturn", "ds"):
         assert platform in release_build.MACOS_CMAKE_ARGS
+
+
+def test_expected_linux_wheels_match_auditwheel_policy_tag():
+    release_build = _release_build_module()
+
+    names = {path.name for path in release_build.expected_linux_wheels("1.0.1.post11")}
+
+    assert len(names) == len(release_build.PYTHON_TAGS)
+    assert all("manylinux_2_27_x86_64.manylinux_2_28_x86_64" in name for name in names)

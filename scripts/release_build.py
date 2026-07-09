@@ -155,7 +155,7 @@ def expected_linux_wheels(version: str) -> list[Path]:
         expected_wheelhouse(version, "linux")
         / (
             f"stable_retro_turbo-{version}-{tag}-{tag}-"
-            "manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl"
+            "manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
         )
         for tag in PYTHON_TAGS
     ]
