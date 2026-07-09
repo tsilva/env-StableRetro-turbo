@@ -1,6 +1,7 @@
 import gc
 import gzip
 import json
+import math
 import os
 from typing import Literal
 
@@ -100,10 +101,11 @@ class RetroEnv(gym.Env, EzPickle):
             noop_reset_max,
             "noop_reset_max",
         )
-        self._sticky_action_prob = float(sticky_action_prob)
-        if not 0.0 <= self._sticky_action_prob <= 1.0:
-            raise ValueError("sticky_action_prob must be between 0.0 and 1.0")
-        self._reward_clip = reward_clip
+        self._sticky_action_prob = self._normalize_probability(
+            sticky_action_prob,
+            "sticky_action_prob",
+        )
+        self._reward_clip = self._normalize_reward_clip(reward_clip)
         self._frame_stack_buffer = []
         self._last_action = None
         self.img = None
@@ -259,22 +261,36 @@ class RetroEnv(gym.Env, EzPickle):
     def _normalize_obs_resize(obs_resize):
         if obs_resize is None:
             return None
-        if len(obs_resize) != 2:
+        try:
+            values = tuple(obs_resize)
+        except TypeError as exc:
+            raise ValueError("obs_resize must be a (height, width) pair") from exc
+        if len(values) != 2:
             raise ValueError("obs_resize must be a (height, width) pair")
-        height, width = (int(obs_resize[0]), int(obs_resize[1]))
-        if height <= 0 or width <= 0:
-            raise ValueError("obs_resize height and width must be positive")
+        height, width = (
+            RetroEnv._normalize_positive_int(values[0], "obs_resize height"),
+            RetroEnv._normalize_positive_int(values[1], "obs_resize width"),
+        )
         return height, width
 
     @staticmethod
     def _normalize_obs_crop(obs_crop):
         if obs_crop is None:
             return None
-        if len(obs_crop) != 4:
+        try:
+            values = tuple(obs_crop)
+        except TypeError as exc:
+            raise ValueError(
+                "obs_crop must be a (top, bottom, left, right) tuple",
+            ) from exc
+        if len(values) != 4:
             raise ValueError("obs_crop must be a (top, bottom, left, right) tuple")
-        top, bottom, left, right = (int(v) for v in obs_crop)
-        if min(top, bottom, left, right) < 0:
-            raise ValueError("obs_crop values must be non-negative")
+        top, bottom, left, right = (
+            RetroEnv._normalize_nonnegative_int(values[0], "obs_crop top"),
+            RetroEnv._normalize_nonnegative_int(values[1], "obs_crop bottom"),
+            RetroEnv._normalize_nonnegative_int(values[2], "obs_crop left"),
+            RetroEnv._normalize_nonnegative_int(values[3], "obs_crop right"),
+        )
         return top, bottom, left, right
 
     @staticmethod
@@ -286,7 +302,7 @@ class RetroEnv(gym.Env, EzPickle):
 
     @staticmethod
     def _normalize_obs_crop_fill(obs_crop_fill):
-        fill = int(obs_crop_fill)
+        fill = RetroEnv._normalize_int(obs_crop_fill, "obs_crop_fill")
         if fill < 0 or fill > 255:
             raise ValueError("obs_crop_fill must be between 0 and 255")
         return fill
@@ -302,17 +318,61 @@ class RetroEnv(gym.Env, EzPickle):
 
     @staticmethod
     def _normalize_positive_int(value, name):
-        value = int(value)
+        value = RetroEnv._normalize_int(value, name)
         if value <= 0:
             raise ValueError(f"{name} must be positive")
         return value
 
     @staticmethod
     def _normalize_nonnegative_int(value, name):
-        value = int(value)
+        value = RetroEnv._normalize_int(value, name)
         if value < 0:
             raise ValueError(f"{name} must be non-negative")
         return value
+
+    @staticmethod
+    def _normalize_int(value, name):
+        if isinstance(value, bool):
+            raise ValueError(f"{name} must be an integer")
+        if isinstance(value, int):
+            return value
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must be an integer") from exc
+        if not math.isfinite(numeric) or not numeric.is_integer():
+            raise ValueError(f"{name} must be an integer")
+        return int(numeric)
+
+    @staticmethod
+    def _normalize_probability(value, name):
+        try:
+            probability = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must be between 0.0 and 1.0") from exc
+        if not math.isfinite(probability) or not 0.0 <= probability <= 1.0:
+            raise ValueError(f"{name} must be between 0.0 and 1.0")
+        return probability
+
+    @staticmethod
+    def _normalize_reward_clip(reward_clip):
+        if reward_clip is False or reward_clip is True:
+            return reward_clip
+        try:
+            values = tuple(reward_clip)
+        except TypeError as exc:
+            raise ValueError("reward_clip must be a bool or (low, high) pair") from exc
+        if len(values) != 2:
+            raise ValueError("reward_clip must be a bool or (low, high) pair")
+        try:
+            low, high = (float(values[0]), float(values[1]))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("reward_clip bounds must be finite numbers") from exc
+        if not math.isfinite(low) or not math.isfinite(high) or low > high:
+            raise ValueError(
+                "reward_clip bounds must be finite numbers with low <= high",
+            )
+        return low, high
 
     def _stacked_obs_shape(self, shape):
         if self._frame_stack == 1:

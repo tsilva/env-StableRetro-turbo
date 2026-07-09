@@ -60,6 +60,9 @@ def test_retro_vec_env_legacy_aliases_are_removed():
     from stable_retro.vec_env import RetroVecEnv
 
     params = inspect.signature(RetroVecEnv.__init__).parameters
+    assert not any(
+        param.kind is inspect.Parameter.VAR_KEYWORD for param in params.values()
+    )
     for name in (
         "copy_observations",
         "unsafe_zero_copy",
@@ -824,6 +827,10 @@ def test_retro_vec_env_keyword_normalization():
     assert RetroVecEnv._normalize_info_filter(
         {"mode": "terminal", "keys": ("lives", "x_pos")},
     ) == ("terminal", ["lives", "x_pos"])
+    with pytest.raises(ValueError, match="info_filter mode"):
+        RetroVecEnv._normalize_info_filter("debug")
+    with pytest.raises(ValueError, match="unknown info_filter keys"):
+        RetroVecEnv._normalize_info_filter({"mode": "terminal", "extra": True})
     assert RetroVecEnv._normalize_done_on(
         {"life_loss": ("lives", "decrease")},
         label="done_on",
@@ -882,6 +889,7 @@ def test_retro_vec_env_accepts_retro_env_keyword_shape(tmp_path):
         {"frame_maxpool": True},
         {"reset_noops": 0},
         {"action_sticky_prob": 0.0},
+        {"unexpected_param": True},
     ],
 )
 def test_retro_vec_env_rejects_legacy_vector_keyword_shape(
@@ -890,6 +898,55 @@ def test_retro_vec_env_rejects_legacy_vector_keyword_shape(
 ):
     with pytest.raises(TypeError, match="unexpected keyword argument"):
         _make_test_retro_vec_env(tmp_path, **legacy_kwarg)
+
+
+@pytest.mark.parametrize(
+    ("invalid_kwarg", "match"),
+    [
+        ({"num_envs": 0}, "num_envs"),
+        ({"num_threads": 0}, "num_threads"),
+        ({"obs_resize": (8.5, 8)}, "obs_resize height"),
+        ({"obs_crop": (0, 0, -1, 0)}, "obs_crop left"),
+        ({"obs_crop_fill": 256}, "obs_crop_fill"),
+        ({"obs_resize_algorithm": "linear"}, "obs_resize_algorithm"),
+        ({"frame_skip": 0}, "frame_skip"),
+        ({"frame_stack": 1.5}, "frame_stack"),
+        ({"noop_reset_max": -1}, "noop_reset_max"),
+        ({"sticky_action_prob": float("nan")}, "sticky_action_prob"),
+        ({"reward_clip": (1.0, -1.0)}, "reward_clip"),
+        ({"info_filter": "debug"}, "info_filter"),
+    ],
+)
+def test_retro_vec_env_rejects_invalid_keyword_values(
+    tmp_path,
+    invalid_kwarg,
+    match,
+):
+    import stable_retro as retro
+    from stable_retro.vec_env import RetroVecEnv
+
+    root = Path(__file__).resolve().parents[1]
+    rom_path = root / "roms" / "Dr88-FamiconIntro.nes"
+    empty_info = _empty_info_path(tmp_path)
+    constructor_kwargs = {
+        "num_envs": 2,
+        "rom_path": str(rom_path),
+        "info": str(empty_info),
+        "scenario": str(empty_info),
+        "obs_resize": (84, 84),
+        "obs_grayscale": True,
+        "frame_skip": 2,
+        "frame_stack": 4,
+        "num_threads": 2,
+    }
+    constructor_kwargs.update(invalid_kwarg)
+
+    with pytest.raises(ValueError, match=match):
+        RetroVecEnv(
+            "Dr88-FamiconIntro",
+            state=retro.State.NONE,
+            **constructor_kwargs,
+        )
 
 
 def test_retro_vec_env_validates_mixed_state_config():

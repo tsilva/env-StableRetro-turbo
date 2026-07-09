@@ -14,6 +14,7 @@ from gymnasium.vector import AutoresetMode, VectorEnv
 from gymnasium.vector.utils import batch_space
 import stable_retro.data as retro_data
 from stable_retro.enums import Actions, Observations, State
+from stable_retro.retro_env import RetroEnv
 
 _SERIALIZED_UNSET = object()
 
@@ -83,10 +84,31 @@ class RetroVecEnv(VectorEnv):
         import stable_retro as retro
         from stable_retro import _retro
 
+        num_envs = RetroEnv._normalize_positive_int(num_envs, "num_envs")
+        if num_threads is not None:
+            num_threads = RetroEnv._normalize_positive_int(num_threads, "num_threads")
+        obs_resize = RetroEnv._normalize_obs_resize(obs_resize)
+        obs_crop = RetroEnv._normalize_obs_crop(obs_crop)
+        obs_crop_fill = RetroEnv._normalize_obs_crop_fill(obs_crop_fill)
+        obs_resize_algorithm = RetroEnv._normalize_obs_resize_algorithm(
+            obs_resize_algorithm,
+        )
+        frame_skip = RetroEnv._normalize_positive_int(frame_skip, "frame_skip")
+        frame_stack = RetroEnv._normalize_positive_int(frame_stack, "frame_stack")
+        noop_reset_max = RetroEnv._normalize_nonnegative_int(
+            noop_reset_max,
+            "noop_reset_max",
+        )
+        sticky_action_prob = RetroEnv._normalize_probability(
+            sticky_action_prob,
+            "sticky_action_prob",
+        )
+        reward_clip = RetroEnv._normalize_reward_clip(reward_clip)
+
         self.closed = False
         self._observations = None
-        self._seeds = [None for _ in range(int(num_envs))]
-        self._options = [None for _ in range(int(num_envs))]
+        self._seeds = [None for _ in range(num_envs)]
+        self._options = [None for _ in range(num_envs)]
         self._game = game
         self._inttype = inttype
         self._rom_path = rom_path
@@ -94,7 +116,6 @@ class RetroVecEnv(VectorEnv):
         info_filter_mode, info_filter_keys = self._normalize_info_filter(info_filter)
         copy_obs, unsafe_view = self._normalize_obs_copy(obs_copy)
         obs_crop_mode = self._normalize_obs_crop_mode(obs_crop_mode)
-        obs_crop_fill = self._normalize_obs_crop_fill(obs_crop_fill)
 
         env_kwargs = {
             "use_restricted_actions": use_restricted_actions,
@@ -187,7 +208,7 @@ class RetroVecEnv(VectorEnv):
             self.action_space = batch_space(self.single_action_space, int(num_envs))
             self.observation_space = batch_space(
                 self.single_observation_space,
-                int(num_envs),
+                num_envs,
             )
             self.num_buttons = template.num_buttons
             self.button_combos = [
@@ -203,7 +224,7 @@ class RetroVecEnv(VectorEnv):
             self._resolve_initial_state_payload(
                 retro,
                 game,
-                int(num_envs),
+                num_envs,
                 state,
                 inttype,
                 rom_path,
@@ -227,26 +248,26 @@ class RetroVecEnv(VectorEnv):
         if num_threads is None:
             num_threads = num_envs
         self.native = _retro._RetroVecEnv(
-            int(num_envs),
+            num_envs,
             str(resolved_rom_path),
             str(info_path),
             str(scenario_path),
             initial_state,
             int(self.num_buttons),
-            int(env_kwargs.get("frame_skip", 1)),
-            int(env_kwargs.get("frame_stack", 1)),
+            frame_skip,
+            frame_stack,
             crop,
-            env_kwargs.get("obs_resize", None),
-            bool(env_kwargs.get("obs_grayscale", False)),
+            obs_resize,
+            bool(obs_grayscale),
             str(env_kwargs.get("obs_resize_algorithm", "nearest")),
-            bool(env_kwargs.get("maxpool_last_two", False)),
-            int(env_kwargs.get("noop_reset_max", 0)),
-            float(env_kwargs.get("sticky_action_prob", 0.0)),
+            bool(maxpool_last_two),
+            noop_reset_max,
+            sticky_action_prob,
             bool(self._filter_actions),
             bool(reward_clip),
             float(reward_low),
             float(reward_high),
-            int(num_threads),
+            num_threads,
             info_filter_mode,
             unsafe_view,
             obs_layout,
@@ -257,7 +278,7 @@ class RetroVecEnv(VectorEnv):
             crop_mask,
             obs_crop_fill,
         )
-        self.num_envs = int(num_envs)
+        self.num_envs = num_envs
         self.initial_state_names = tuple(self.native.initial_state_names)
         self._active_state_indices = self.native.active_state_indices()
         self._active_state_indices.setflags(write=False)
@@ -414,7 +435,10 @@ class RetroVecEnv(VectorEnv):
         if info_filter is None:
             return "all", None
         if isinstance(info_filter, str):
-            return str(info_filter), None
+            mode = str(info_filter)
+            if mode not in {"terminal", "all", "none"}:
+                raise ValueError("info_filter mode must be terminal, all, or none")
+            return mode, None
         if not isinstance(info_filter, Mapping):
             raise ValueError(
                 "info_filter must be a mode string or a mapping with mode/keys",
@@ -424,6 +448,8 @@ class RetroVecEnv(VectorEnv):
             names = ", ".join(sorted(str(key) for key in unknown))
             raise ValueError(f"unknown info_filter keys: {names}")
         mode = str(info_filter.get("mode", "all"))
+        if mode not in {"terminal", "all", "none"}:
+            raise ValueError("info_filter mode must be terminal, all, or none")
         keys = cls._normalize_info_filter_keys(info_filter.get("keys", None))
         return mode, keys
 

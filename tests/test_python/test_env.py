@@ -1,3 +1,4 @@
+import inspect
 import os
 import pickle
 
@@ -57,6 +58,21 @@ def generate_test_env(request):
 def test_env_create(generate_test_env):
     json_path = os.path.join(os.path.dirname(__file__), "../dummy.json")
     assert generate_test_env(info=json_path, scenario=json_path)
+
+
+def test_env_constructor_rejects_extra_keywords(generate_test_env):
+    json_path = os.path.join(os.path.dirname(__file__), "../dummy.json")
+
+    assert not any(
+        param.kind is inspect.Parameter.VAR_KEYWORD
+        for param in inspect.signature(retro.RetroEnv.__init__).parameters.values()
+    )
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        generate_test_env(
+            info=json_path,
+            scenario=json_path,
+            action_sticky_prob=0.0,
+        )
 
 
 @pytest.mark.parametrize("obs_type", [retro.Observations.IMAGE, retro.Observations.RAM])
@@ -127,6 +143,54 @@ def test_env_rejects_legacy_obs_resize_algorithm_aliases(
             obs_resize=(8, 8),
             obs_resize_algorithm=algorithm,
         )
+
+
+@pytest.mark.parametrize(
+    ("normalizer", "value", "match"),
+    [
+        (retro.RetroEnv._normalize_obs_resize, (8.5, 8), "obs_resize height"),
+        (retro.RetroEnv._normalize_obs_resize, (8, float("inf")), "obs_resize width"),
+        (retro.RetroEnv._normalize_obs_crop, (0, 0, -1, 0), "obs_crop left"),
+        (retro.RetroEnv._normalize_obs_crop_fill, 256, "obs_crop_fill"),
+        (
+            lambda value: retro.RetroEnv._normalize_positive_int(
+                value,
+                "frame_skip",
+            ),
+            0,
+            "frame_skip",
+        ),
+        (
+            lambda value: retro.RetroEnv._normalize_positive_int(
+                value,
+                "frame_skip",
+            ),
+            1.5,
+            "frame_skip",
+        ),
+        (
+            lambda value: retro.RetroEnv._normalize_nonnegative_int(
+                value,
+                "noop_reset_max",
+            ),
+            -1,
+            "noop_reset_max",
+        ),
+        (
+            lambda value: retro.RetroEnv._normalize_probability(
+                value,
+                "sticky_action_prob",
+            ),
+            float("nan"),
+            "sticky_action_prob",
+        ),
+        (retro.RetroEnv._normalize_reward_clip, (1.0, -1.0), "reward_clip"),
+        (retro.RetroEnv._normalize_reward_clip, (float("nan"), 1.0), "reward_clip"),
+    ],
+)
+def test_env_keyword_normalizers_reject_invalid_values(normalizer, value, match):
+    with pytest.raises(ValueError, match=match):
+        normalizer(value)
 
 
 def test_env_temporal_preprocessing(generate_test_env):
