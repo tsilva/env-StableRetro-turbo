@@ -78,3 +78,18 @@ def test_rom_payload_detection_is_path_scoped():
     assert release_build.is_rom_payload(Path("stable_retro/data/stable/Foo/rom.md"))
     assert not release_build.is_rom_payload(Path("stable_retro/data/stable/Foo/rom.sha"))
     assert not release_build.is_rom_payload(Path("docs/rom.nes"))
+
+
+def test_public_native_macos_core_set_includes_packaged_arm64_cores():
+    release_build = _release_build_module()
+
+    assert {
+        "mgba",
+        "picodrive",
+        "mednafen_saturn",
+        "melonds",
+    }.issubset(release_build.PUBLIC_CORES)
+    for platform in ("GbAdvance", "32x", "Saturn", "NintendoDs"):
+        assert platform in release_build.PUBLIC_DATA_PLATFORMS.split(",")
+    for platform in ("gba", "32x", "saturn", "ds"):
+        assert platform in release_build.MACOS_CMAKE_ARGS
