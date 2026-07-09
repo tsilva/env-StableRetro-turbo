@@ -22,14 +22,14 @@ test-command = "python -c \"import stable_retro, stable_retro._retro\""
 [tool.cibuildwheel.macos]
 archs = "arm64"
 before-all = "brew install pkg-config lua@5.4"
-environment = "MACOSX_DEPLOYMENT_TARGET=14.0 ARCHFLAGS='-arch arm64' CMAKE_ARGS='-DCMAKE_BUILD_TYPE=Release -DBUILD_CORES=gb;nes;snes;genesis -DBUILD_TESTS=OFF -DENABLE_CAPNPROTO=OFF -DSTABLE_RETRO_USE_SYSTEM_LIBZIP=OFF' STABLE_RETRO_PUBLIC_CORES='gambatte,fceumm,snes9x,genesis_plus_gx' STABLE_RETRO_PUBLIC_DATA_PLATFORMS='GameBoy,Nes,Snes,Genesis,Sms,SCD'"
+environment = "MACOSX_DEPLOYMENT_TARGET=14.0 ARCHFLAGS='-arch arm64' CMAKE_ARGS='-DCMAKE_BUILD_TYPE=Release -DBUILD_CORES=gb;nes;snes;genesis;atari2600 -DBUILD_TESTS=OFF -DENABLE_CAPNPROTO=OFF -DSTABLE_RETRO_USE_SYSTEM_LIBZIP=OFF' STABLE_RETRO_PUBLIC_CORES='gambatte,fceumm,snes9x,genesis_plus_gx,stella' STABLE_RETRO_PUBLIC_DATA_PLATFORMS='GameBoy,Nes,Snes,Genesis,Sms,SCD,Atari2600'"
 repair-wheel-command = "delocate-wheel --require-archs arm64 -w {dest_dir} -v {wheel} && python scripts/strip_macos_wheel.py {dest_dir}/*.whl"
 
 [tool.cibuildwheel.linux]
 archs = "x86_64"
 before-all = "yum install -y cmake git pkgconf-pkg-config zlib-devel libzip-devel bzip2-devel"
 manylinux-x86_64-image = "manylinux_2_28"
-environment = "CMAKE_ARGS='-DCMAKE_BUILD_TYPE=Release -DBUILD_MANYLINUX=ON -DBUILD_CORES=gb;nes;snes;genesis -DBUILD_TESTS=OFF -DENABLE_CAPNPROTO=OFF -DBUILD_N64=OFF' STABLE_RETRO_PUBLIC_CORES='gambatte,fceumm,snes9x,genesis_plus_gx' STABLE_RETRO_PUBLIC_DATA_PLATFORMS='GameBoy,Nes,Snes,Genesis,Sms,SCD'"
+environment = "CMAKE_ARGS='-DCMAKE_BUILD_TYPE=Release -DBUILD_MANYLINUX=ON -DBUILD_CORES=gb;nes;snes;genesis;atari2600 -DBUILD_TESTS=OFF -DENABLE_CAPNPROTO=OFF -DBUILD_N64=OFF' STABLE_RETRO_PUBLIC_CORES='gambatte,fceumm,snes9x,genesis_plus_gx,stella' STABLE_RETRO_PUBLIC_DATA_PLATFORMS='GameBoy,Nes,Snes,Genesis,Sms,SCD,Atari2600'"
 repair-wheel-command = "auditwheel repair -w {dest_dir} {wheel} && python scripts/strip_linux_wheel.py {dest_dir}/*.whl"
 
 [tool.uv]

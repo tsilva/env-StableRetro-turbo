@@ -2,6 +2,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 import sys
 from enum import Flag
 
@@ -337,7 +338,91 @@ def get_romfile_path(game, inttype=Integrations.DEFAULT):
         if possible_path:
             return possible_path
 
+    ale_rom_path = get_ale_romfile_path(game, inttype)
+    if ale_rom_path:
+        return ale_rom_path
+
     raise FileNotFoundError(f"No romfiles found for game: {game}")
+
+
+def _strip_version_suffix(game):
+    return re.sub(r"-v\d+$", "", game)
+
+
+def _game_platform(game):
+    base = _strip_version_suffix(game)
+    if "-" not in base:
+        return None
+    return base.rsplit("-", 1)[-1]
+
+
+def _game_title(game):
+    base = _strip_version_suffix(game)
+    if "-" not in base:
+        return base
+    return base.rsplit("-", 1)[0]
+
+
+def _normalized_ale_rom_id(value):
+    return re.sub(r"[^a-z0-9]", "", value.lower())
+
+
+def _expected_rom_shas(game, inttype):
+    sha_path = get_file_path(game, "rom.sha", inttype)
+    if not sha_path:
+        return None
+    try:
+        with open(sha_path) as f:
+            return {
+                line.strip().lower()
+                for line in f
+                if line.strip() and not line.strip().startswith("#")
+            }
+    except OSError:
+        return None
+
+
+def _rom_sha1(path):
+    with open(path, "rb") as f:
+        return hashlib.sha1(f.read()).hexdigest()
+
+
+def get_ale_romfile_path(game, inttype=Integrations.DEFAULT):
+    """Return an Atari ROM from an optional ``ale_py`` installation if present."""
+    if _game_platform(game) != "Atari2600":
+        return None
+
+    expected_shas = _expected_rom_shas(game, inttype)
+    if not expected_shas:
+        return None
+
+    try:
+        from ale_py import roms as ale_roms
+    except Exception:
+        return None
+
+    target_id = _normalized_ale_rom_id(_game_title(game))
+    try:
+        rom_ids = ale_roms.get_all_rom_ids()
+    except Exception:
+        rom_ids = []
+
+    for rom_id in rom_ids:
+        if _normalized_ale_rom_id(rom_id) != target_id:
+            continue
+        try:
+            rom_path = ale_roms.get_rom_path(rom_id)
+        except Exception:
+            continue
+        if not rom_path or not os.path.exists(rom_path):
+            continue
+        try:
+            if _rom_sha1(rom_path).lower() in expected_shas:
+                return str(rom_path)
+        except OSError:
+            continue
+
+    return None
 
 
 def get_original_romfile_path(game, inttype=Integrations.DEFAULT):

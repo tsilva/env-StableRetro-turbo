@@ -24,11 +24,11 @@ PYTHON = REPO_ROOT / ".venv314" / "bin" / "python"
 PACKAGE_NAME = "stable-retro-turbo"
 PYTHON_TAGS = ("cp311", "cp312", "cp313", "cp314")
 
-PUBLIC_CORES = ("gambatte", "fceumm", "snes9x", "genesis_plus_gx")
-PUBLIC_DATA_PLATFORMS = "GameBoy,Nes,Snes,Genesis,Sms,SCD"
+PUBLIC_CORES = ("gambatte", "fceumm", "snes9x", "genesis_plus_gx", "stella")
+PUBLIC_DATA_PLATFORMS = "GameBoy,Nes,Snes,Genesis,Sms,SCD,Atari2600"
 MACOS_CMAKE_ARGS = (
     "-DCMAKE_BUILD_TYPE=Release "
-    "-DBUILD_CORES=gb;nes;snes;genesis "
+    "-DBUILD_CORES=gb;nes;snes;genesis;atari2600 "
     "-DBUILD_TESTS=OFF "
     "-DENABLE_CAPNPROTO=OFF "
     "-DSTABLE_RETRO_USE_SYSTEM_LIBZIP=OFF"
@@ -36,7 +36,7 @@ MACOS_CMAKE_ARGS = (
 LINUX_CMAKE_ARGS = (
     "-DCMAKE_BUILD_TYPE=Release "
     "-DBUILD_MANYLINUX=ON "
-    "-DBUILD_CORES=gb;nes;snes;genesis "
+    "-DBUILD_CORES=gb;nes;snes;genesis;atari2600 "
     "-DBUILD_TESTS=OFF "
     "-DENABLE_CAPNPROTO=OFF "
     "-DBUILD_N64=OFF"
@@ -62,8 +62,19 @@ ROM_PAYLOAD_NAMES = {
     "rom.gen",
     "rom.sms",
     "rom.bin",
+    "rom.a26",
 }
-GAME_PAYLOAD_SUFFIXES = (".nes", ".sfc", ".smc", ".gb", ".gbc", ".gen", ".sms", ".bin")
+GAME_PAYLOAD_SUFFIXES = (
+    ".nes",
+    ".sfc",
+    ".smc",
+    ".gb",
+    ".gbc",
+    ".gen",
+    ".sms",
+    ".bin",
+    ".a26",
+)
 VERSION_RE = re.compile(r"^(?P<base>\d+\.\d+\.\d+)(?:\.post(?P<post>\d+))?$")
 
 

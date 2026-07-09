@@ -175,7 +175,7 @@ However, if those URLs no longer work, you can also download these packages from
 For Stable Retro integrations, a few notes about ROMs:
 
 - We have preferred the USA version of ROMs, denoted by one of `(USA)`, `(USA, Europe)`, `(Japan, USA)`, etc
-- If the ROM has a `.bin` extension, rename it to have the correct extension for that system listed in {ref}`supported-roms`
+- If the ROM has a system-specific alternate extension that is not listed in {ref}`supported-roms`, rename it to the listed extension for that system
 - Use the Stable Retro Integration application and select the Integrate option from the File menu to begin working on integrating it
 
 (supported-roms)=
@@ -187,7 +187,7 @@ ROM files contain the game itself. Each system has a unique file extension to de
 - `.md`: Sega Genesis (also known as Mega Drive)
 - `.sfc`: Super Nintendo Entertainment System (also known as Super Famicom)
 - `.nes`: Nintendo Entertainment System (also known as Famicom)
-- `.a26`: Atari 2600
+- `.a26` or `.bin`: Atari 2600
 - `.gb`: Nintendo Game Boy
 - `.gba`: Nintendo Game Boy Advance
 - `.gbc`: Nintendo Game Boy Color
@@ -195,7 +195,7 @@ ROM files contain the game itself. Each system has a unique file extension to de
 - `.pce`: NEC TurboGrafx-16 (also known as PC Engine)
 - `.sms`: Sega Master System
 
-Sometimes ROMs from these systems use different extensions, e.g. `.gen` for Genesis, `.bin` for Atari, etc. Please rename the ROMs to use the aforementioned extensions in these cases.
+Sometimes ROMs from these systems use different extensions, e.g. `.gen` for Genesis. Please rename the ROMs to use the aforementioned extensions in these cases.
 
 ## Integrating a Game
 
@@ -264,7 +264,7 @@ Once you have created an integration, you can put it in a folder called `custom_
 - `.md`: `*-Genesis` (e.g. `AddamsFamily-Genesis`)
 - `.sfc`: `*-Snes` (e.g. `AddamsFamily-Snes`)
 - `.nes`: `*-Nes` (e.g. `AddamsFamily-Nes`)
-- `.a26`: `*-Atari2600` (e.g. `Adventure-Atari2600`)
+- `.a26` or `.bin`: `*-Atari2600` (e.g. `Adventure-Atari2600`)
 - `.gb`: `*-GameBoy` (e.g. `AeroStar-GameBoy`)
 - `.gba`: `*-GbAdvance` (e.g. `MarioKart-GbAdvance`)
 - `.gbc`: `*-GbColor` (e.g. `PokemonPinball-GbColor`)

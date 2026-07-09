@@ -1,7 +1,7 @@
 {
     "Atari2600": {
         "lib": "stella",
-        "ext": ["a26"],
+        "ext": ["a26", "bin"],
         "rambase": 128,
         "keybinds": ["Z", null, "TAB", "ENTER", "UP", "DOWN", "LEFT", "RIGHT"],
         "buttons": ["BUTTON", null, "SELECT", "RESET", "UP", "DOWN", "LEFT", "RIGHT"],

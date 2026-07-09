@@ -178,7 +178,7 @@ set(CORES)
 set(COREINFO)
 set(CORE_TARGETS)
 set(BUILD_CORES
-    "gb;nes;snes;genesis"
+    "gb;nes;snes;genesis;atari2600"
     CACHE
       STRING
       "Semicolon-separated platform/core names to build. Empty builds the default full set."

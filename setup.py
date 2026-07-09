@@ -18,7 +18,7 @@ PUBLIC_CORE_NAMES = tuple(
     core.strip()
     for core in os.environ.get(
         "STABLE_RETRO_PUBLIC_CORES",
-        "gambatte,fceumm,snes9x,genesis_plus_gx",
+        "gambatte,fceumm,snes9x,genesis_plus_gx,stella",
     ).split(",")
     if core.strip()
 )
