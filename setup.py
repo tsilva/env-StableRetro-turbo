@@ -14,6 +14,28 @@ VERSION_PATH = Path(__file__).resolve().parent / "stable_retro" / "VERSION.txt"
 SCRIPT_DIR = Path(__file__).resolve().parent
 README = (SCRIPT_DIR / "README.md").read_text(encoding="utf-8")
 
+
+def is_macos_rosetta_process():
+    if sys.platform != "darwin":
+        return False
+    try:
+        result = subprocess.run(
+            ["sysctl", "-in", "sysctl.proc_translated"],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+    except OSError:
+        return False
+    return result.stdout.strip() == "1"
+
+
+if is_macos_rosetta_process():
+    raise RuntimeError(
+        "stable-retro-turbo does not support Rosetta builds. "
+        "Use a native arm64 Python on Apple Silicon.",
+    )
+
 PUBLIC_CORE_NAMES = tuple(
     core.strip()
     for core in os.environ.get(
@@ -22,8 +44,6 @@ PUBLIC_CORE_NAMES = tuple(
     ).split(",")
     if core.strip()
 )
-ROSETTA_HELPER_NAME = "rosetta_snes_helper"
-ROSETTA_CORE_NAME = "snes9x_libretro.dylib"
 PUBLIC_DATA_PLATFORMS = frozenset(
     platform.strip()
     for platform in os.environ.get("STABLE_RETRO_PUBLIC_DATA_PLATFORMS", "").split(",")
@@ -89,9 +109,6 @@ def stable_retro_package_data():
     for core in PUBLIC_CORE_NAMES:
         files.append(f"cores/{core}.json")
         files.append(f"cores/{core}_libretro{core_suffix}")
-    if should_build_rosetta_snes():
-        files.append(f"helpers/{ROSETTA_HELPER_NAME}")
-        files.append(f"cores_rosetta/{ROSETTA_CORE_NAME}")
     return files
 
 
@@ -124,37 +141,17 @@ def copy_public_core_assets(destination: Path):
                 shutil.copy2(asset, target)
 
 
-def should_build_rosetta_snes():
+def should_build_native_snes():
     return (
         sys.platform == "darwin"
         and platform.machine() == "arm64"
-        and os.environ.get("STABLE_RETRO_BUILD_ROSETTA_SNES", "1") != "0"
+        and "snes9x" in PUBLIC_CORE_NAMES
     )
 
 
 def macos_min_flag(default: str):
     min_version = os.environ.get("MACOSX_DEPLOYMENT_TARGET", default)
     return f"-mmacosx-version-min={min_version}"
-
-
-def build_rosetta_snes_core(destination: Path, jobs: str):
-    source_dir = SCRIPT_DIR / "cores" / "snes" / "libretro"
-    destination.mkdir(parents=True, exist_ok=True)
-    min_flag = macos_min_flag("11.0")
-    subprocess.check_call(["make", "-C", str(source_dir), "clean"])
-    subprocess.check_call(
-        [
-            "make",
-            "-C",
-            str(source_dir),
-            "platform=osx",
-            "CC=clang -arch x86_64",
-            "CXX=clang++ -arch x86_64",
-            f"fpic=-fPIC {min_flag}",
-            jobs,
-        ],
-    )
-    shutil.copy2(source_dir / ROSETTA_CORE_NAME, destination / ROSETTA_CORE_NAME)
 
 
 def build_native_snes_core(destination: Path, jobs: str):
@@ -178,33 +175,6 @@ def build_native_snes_core(destination: Path, jobs: str):
         source_dir / "snes9x_libretro.dylib",
         destination / "snes9x_libretro.dylib",
     )
-
-
-def build_rosetta_snes_helper(destination: Path):
-    destination.mkdir(parents=True, exist_ok=True)
-    helper_path = destination / ROSETTA_HELPER_NAME
-    compile_cmd = [
-        "clang++",
-        "-arch",
-        "x86_64",
-        "-std=c++17",
-        "-O2",
-        "-I",
-        str(SCRIPT_DIR / "src"),
-        "-I",
-        str(SCRIPT_DIR / "third-party"),
-        "-I",
-        str(SCRIPT_DIR / "third-party" / "gtest" / "googletest" / "include"),
-        "-o",
-        str(helper_path),
-        str(SCRIPT_DIR / "tools" / "rosetta_snes_helper.cpp"),
-        str(SCRIPT_DIR / "src" / "emulator.cpp"),
-        str(SCRIPT_DIR / "src" / "imageops.cpp"),
-        str(SCRIPT_DIR / "src" / "memory.cpp"),
-        str(SCRIPT_DIR / "src" / "utils.cpp"),
-        "-lz",
-    ]
-    subprocess.check_call(compile_cmd)
 
 
 class CMakeBuild(build_ext):
@@ -273,14 +243,11 @@ class CMakeBuild(build_ext):
         subprocess.check_call(["make", jobs, "all"])
         if package_dir is not None:
             copy_public_core_assets(package_dir / "cores")
-            if should_build_rosetta_snes():
+            if should_build_native_snes():
                 build_native_snes_core(package_dir / "cores", jobs)
-                build_rosetta_snes_core(package_dir / "cores_rosetta", jobs)
-                build_rosetta_snes_helper(package_dir / "helpers")
-        elif should_build_rosetta_snes():
-            build_native_snes_core(SCRIPT_DIR / "stable_retro" / "cores", jobs)
-            build_rosetta_snes_core(SCRIPT_DIR / "stable_retro" / "cores_rosetta", jobs)
-            build_rosetta_snes_helper(SCRIPT_DIR / "stable_retro" / "helpers")
+        else:
+            if should_build_native_snes():
+                build_native_snes_core(SCRIPT_DIR / "stable_retro" / "cores", jobs)
 
 
 setup(

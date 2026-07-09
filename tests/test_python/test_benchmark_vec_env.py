@@ -99,6 +99,8 @@ def test_regular_preprocess_wrapper_matches_profile_shape_and_skip():
         obs_crop=(1, 1, 1, 1),
         obs_grayscale=True,
         obs_resize_algorithm="area",
+        obs_crop_mode="remove",
+        obs_crop_fill=0,
         frame_skip=2,
         frame_stack=3,
         maxpool_last_two=True,
@@ -119,3 +121,108 @@ def test_regular_preprocess_wrapper_matches_profile_shape_and_skip():
     assert info == {"step": 2}
     assert obs.shape == (2, 2, 3)
     assert np.all(obs[:, :, -1] == 20)
+
+
+def test_regular_preprocess_wrapper_supports_mask_crop():
+    bench = _load_benchmark_module()
+    env = DummyImageEnv()
+
+    wrapped = bench.BenchmarkRetroPreprocessWrapper(
+        env,
+        obs_resize=None,
+        obs_crop=(1, 1, 1, 1),
+        obs_grayscale=False,
+        obs_resize_algorithm="area",
+        obs_crop_mode="mask",
+        obs_crop_fill=123,
+        frame_skip=1,
+        frame_stack=1,
+        maxpool_last_two=False,
+    )
+
+    image = np.arange(4 * 4 * 3, dtype=np.uint8).reshape(4, 4, 3)
+    cropped = wrapped._apply_obs_crop(image)
+    assert cropped.shape == image.shape
+    assert np.all(cropped[0, :, :] == 123)
+    assert np.all(cropped[-1, :, :] == 123)
+    assert np.all(cropped[:, 0, :] == 123)
+    assert np.all(cropped[:, -1, :] == 123)
+    np.testing.assert_array_equal(cropped[1:3, 1:3, :], image[1:3, 1:3, :])
+
+
+def test_benchmark_round_robins_short_state_list():
+    bench = _load_benchmark_module()
+
+    assert bench._expand_round_robin_states(["Level1-1", "Level1-2"], 5) == [
+        "Level1-1",
+        "Level1-2",
+        "Level1-1",
+        "Level1-2",
+        "Level1-1",
+    ]
+
+
+def test_named_mario_action_sequence_is_deterministic():
+    bench = _load_benchmark_module()
+
+    actions = bench._parse_actions("noop,right,right_b,right_a")
+    templates = bench._action_templates(actions, num_envs=2)
+    sequence = bench._sample_action_sequence(templates, count=4, seed=0)
+
+    assert sequence[0].shape == (2, 9)
+    assert {tuple(batch[0]) for batch in sequence}.issubset(
+        {bench.MARIO_SIMPLE_ACTIONS[name] for name in actions}
+    )
+    sequence_again = bench._sample_action_sequence(templates, count=4, seed=0)
+    for left, right in zip(sequence, sequence_again, strict=True):
+        np.testing.assert_array_equal(left, right)
+
+
+def test_dry_run_prints_supermario_canonical_overrides(monkeypatch, capsys):
+    bench = _load_benchmark_module()
+    monkeypatch.setattr(bench, "_resolve_backend", lambda requested: "native")
+
+    assert (
+        bench.main(
+            [
+                "--profile",
+                "supermario-level1-1",
+                "--backend",
+                "auto",
+                "--steps",
+                "5",
+                "--repeats",
+                "3",
+                "--warmup-steps",
+                "2",
+                "--num-envs",
+                "4",
+                "--num-threads",
+                "4",
+                "--states",
+                "Level1-1,Level1-2",
+                "--actions",
+                "noop,right",
+                "--action-seed",
+                "0",
+                "--done-on",
+                "life_loss,level_change",
+                "--obs-layout",
+                "chw",
+                "--obs-crop-mode",
+                "mask",
+                "--no-maxpool-last-two",
+                "--dry-run",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+    assert "envs=4 threads=4" in output
+    assert "state=Level1-1,Level1-2,Level1-1,Level1-2 slot-assigned" in output
+    assert "crop_mode=mask" in output
+    assert "maxpool_last_two=False" in output
+    assert "done_on=['life_loss', 'level_change']" in output
+    assert "obs_layout=chw" in output
+    assert "actions=('noop', 'right')" in output
+    assert "steps=5 repeats=3" in output

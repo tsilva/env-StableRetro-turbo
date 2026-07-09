@@ -12,6 +12,16 @@ from pathlib import Path
 import gymnasium as gym
 import numpy as np
 
+MARIO_SIMPLE_ACTIONS = {
+    "noop": (0, 0, 0, 0, 0, 0, 0, 0, 0),
+    "right": (0, 0, 0, 0, 0, 0, 0, 1, 0),
+    "right_b": (1, 0, 0, 0, 0, 0, 0, 1, 0),
+    "right_a": (0, 0, 0, 0, 0, 0, 0, 1, 1),
+    "right_a_b": (1, 0, 0, 0, 0, 0, 0, 1, 1),
+    "a": (0, 0, 0, 0, 0, 0, 0, 0, 1),
+    "left": (0, 0, 0, 0, 0, 0, 1, 0, 0),
+}
+
 
 @dataclass
 class Result:
@@ -183,6 +193,8 @@ class BenchmarkRetroPreprocessWrapper(gym.Wrapper):
         obs_crop,
         obs_grayscale,
         obs_resize_algorithm,
+        obs_crop_mode,
+        obs_crop_fill,
         frame_skip,
         frame_stack,
         maxpool_last_two,
@@ -193,6 +205,12 @@ class BenchmarkRetroPreprocessWrapper(gym.Wrapper):
         self._obs_resize = obs_resize
         self._obs_crop = obs_crop
         self._obs_grayscale = bool(obs_grayscale)
+        self._obs_crop_mode = str(obs_crop_mode).lower()
+        self._obs_crop_fill = int(obs_crop_fill)
+        if self._obs_crop_mode not in {"remove", "mask"}:
+            raise ValueError("obs_crop_mode must be 'remove' or 'mask'")
+        if not 0 <= self._obs_crop_fill <= 255:
+            raise ValueError("obs_crop_fill must be between 0 and 255")
         self._obs_resize_algorithm = str(obs_resize_algorithm).lower()
         if self._obs_resize_algorithm not in {"nearest", "bilinear", "area"}:
             raise ValueError(
@@ -257,6 +275,17 @@ class BenchmarkRetroPreprocessWrapper(gym.Wrapper):
         x2 = width - right if right else width
         if top >= y2 or left >= x2:
             raise ValueError("obs_crop removes the entire observation")
+        if self._obs_crop_mode == "mask":
+            masked = image.copy()
+            if top:
+                masked[:top, :] = self._obs_crop_fill
+            if bottom:
+                masked[y2:, :] = self._obs_crop_fill
+            if left:
+                masked[:, :left] = self._obs_crop_fill
+            if right:
+                masked[:, x2:] = self._obs_crop_fill
+            return masked
         return image[top:y2, left:x2]
 
     def _apply_obs_grayscale(self, image):
@@ -370,6 +399,49 @@ def _sample_actions(env, fixed_actions=None):
     return np.asarray([action_space.sample() for _ in range(env.num_envs)])
 
 
+def _parse_actions(value):
+    if value is None:
+        return None
+    actions = [item.strip() for item in str(value).split(",")]
+    if not actions or not all(actions):
+        raise SystemExit("--actions must be a comma-separated list without empty entries")
+    unknown = sorted(set(actions) - set(MARIO_SIMPLE_ACTIONS))
+    if unknown:
+        available = ", ".join(sorted(MARIO_SIMPLE_ACTIONS))
+        raise SystemExit(
+            f"Unknown benchmark action(s): {', '.join(unknown)}. "
+            f"Available actions: {available}",
+        )
+    return tuple(actions)
+
+
+def _action_templates(action_names, num_envs):
+    return tuple(
+        np.repeat(
+            np.asarray(MARIO_SIMPLE_ACTIONS[name], dtype=np.uint8)[None, :],
+            num_envs,
+            axis=0,
+        )
+        for name in action_names
+    )
+
+
+def _sample_action_sequence(templates, count, seed):
+    if count <= 0:
+        return ()
+    if len(templates) == 1:
+        return tuple(templates[0] for _ in range(count))
+    rng = np.random.default_rng(seed)
+    indices = rng.integers(0, len(templates), size=count)
+    return tuple(templates[int(index)] for index in indices)
+
+
+def _expand_round_robin_states(states, num_envs):
+    if states is None or len(states) >= num_envs:
+        return states
+    return [states[index % len(states)] for index in range(num_envs)]
+
+
 def _run_vec(name, env, seconds, warmup_steps, fixed_actions=None) -> Result:
     env.reset()
     for _ in range(warmup_steps):
@@ -385,6 +457,29 @@ def _run_vec(name, env, seconds, warmup_steps, fixed_actions=None) -> Result:
     elapsed = time.perf_counter() - start
     env.close()
     return Result(name=name, steps=steps, seconds=elapsed)
+
+
+def _run_vec_steps(name, env, steps, repeats, warmup_steps, action_names, action_seed):
+    if steps <= 0:
+        raise SystemExit("--steps must be positive")
+    if repeats <= 0:
+        raise SystemExit("--repeats must be positive")
+    templates = _action_templates(action_names, env.num_envs)
+    warmup_actions = _sample_action_sequence(templates, warmup_steps, action_seed + 1)
+    measured_actions = _sample_action_sequence(templates, steps, action_seed)
+    env.reset()
+    for action in warmup_actions:
+        env.step(action)
+
+    results = []
+    for _ in range(repeats):
+        start = time.perf_counter()
+        for action in measured_actions:
+            env.step(action)
+        elapsed = time.perf_counter() - start
+        results.append(Result(name=name, steps=steps * env.num_envs, seconds=elapsed))
+    env.close()
+    return results
 
 
 def _build_native_vec(
@@ -433,6 +528,8 @@ def _make_regular_retro_env(game, state, info, scenario, env_kwargs):
         "obs_crop": env_kwargs["obs_crop"],
         "obs_grayscale": env_kwargs["obs_grayscale"],
         "obs_resize_algorithm": env_kwargs["obs_resize_algorithm"],
+        "obs_crop_mode": env_kwargs["obs_crop_mode"],
+        "obs_crop_fill": env_kwargs["obs_crop_fill"],
         "frame_skip": env_kwargs["frame_skip"],
         "frame_stack": env_kwargs["frame_stack"],
         "maxpool_last_two": env_kwargs["maxpool_last_two"],
@@ -566,6 +663,13 @@ def main(argv=None) -> int:
         help="Multiprocessing start method for --backend=subproc.",
     )
     parser.add_argument("--seconds", type=float, default=10.0)
+    parser.add_argument(
+        "--steps",
+        type=int,
+        default=None,
+        help="Run a fixed number of vector steps per repeat instead of a seconds loop.",
+    )
+    parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--warmup-steps", type=int, default=16)
     parser.add_argument("--resize", default=None)
     parser.add_argument("--grayscale", action="store_true", default=None)
@@ -573,6 +677,8 @@ def main(argv=None) -> int:
     parser.add_argument("--frame-skip", type=int, default=None)
     parser.add_argument("--frame-stack", type=int, default=None)
     parser.add_argument("--obs-crop", default=None)
+    parser.add_argument("--obs-crop-mode", choices=("remove", "mask"), default="remove")
+    parser.add_argument("--obs-crop-fill", type=int, default=0)
     parser.add_argument("--resize-algorithm", default=None)
     parser.add_argument(
         "--info-filter",
@@ -592,6 +698,17 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--no-maxpool-last-two", action="store_true")
     parser.add_argument("--fixed-actions", action="store_true")
+    parser.add_argument(
+        "--actions",
+        default=None,
+        help="Comma-separated named Mario actions for fixed-step mode.",
+    )
+    parser.add_argument("--action-seed", type=int, default=0)
+    parser.add_argument(
+        "--done-on",
+        default=None,
+        help="Comma-separated scenario events that terminate/autoreset lanes.",
+    )
     parser.add_argument(
         "--obs-copy",
         choices=("copy", "safe_view", "unsafe_view"),
@@ -643,6 +760,11 @@ def main(argv=None) -> int:
                 ]
             except ValueError as e:
                 raise SystemExit("--state-probs must be comma-separated numbers") from e
+        else:
+            states = _expand_round_robin_states(
+                states,
+                profile.num_envs if args.num_envs is None else args.num_envs,
+            )
         state = None
     else:
         state_value = profile.state if args.state is None else args.state
@@ -686,6 +808,11 @@ def main(argv=None) -> int:
         else args.resize_algorithm
     )
     maxpool_last_two = profile.maxpool_last_two and not args.no_maxpool_last_two
+    done_on = None
+    if args.done_on is not None:
+        done_on = [item.strip() for item in args.done_on.split(",")]
+        if not all(done_on):
+            raise SystemExit("--done-on must be a comma-separated list without empty entries")
     info_filter_keys = _parse_info_filter_keys(
         args.info_filter_keys,
         game=game,
@@ -698,6 +825,8 @@ def main(argv=None) -> int:
         "obs_resize": (resize_h, resize_w),
         "obs_grayscale": grayscale,
         "obs_crop": obs_crop,
+        "obs_crop_mode": args.obs_crop_mode,
+        "obs_crop_fill": args.obs_crop_fill,
         "obs_resize_algorithm": resize_algorithm,
         "frame_skip": frame_skip,
         "frame_stack": frame_stack,
@@ -705,6 +834,8 @@ def main(argv=None) -> int:
         "info_filter": args.info_filter,
         "obs_layout": args.obs_layout,
     }
+    if done_on is not None:
+        env_kwargs["done_on"] = done_on
     if info_filter_keys is not None:
         env_kwargs["info_filter"] = {
             "mode": args.info_filter,
@@ -715,6 +846,11 @@ def main(argv=None) -> int:
     backend = _resolve_backend(args.backend)
     if states is not None and backend != "native":
         raise SystemExit("--states requires --backend=native")
+    if done_on is not None and backend != "native":
+        raise SystemExit("--done-on requires --backend=native")
+    action_names = _parse_actions(args.actions)
+    if args.steps is not None and action_names is None:
+        raise SystemExit("--steps requires --actions for deterministic fixed-step mode")
 
     if states is not None:
         state_label = ",".join(states)
@@ -734,11 +870,14 @@ def main(argv=None) -> int:
         f"profile={args.profile} backend={backend} game={game} state={state_label} "
         f"envs={num_envs} {parallel_label} "
         f"resize={resize} grayscale={grayscale} crop={obs_crop} "
-        f"resize_algorithm={resize_algorithm} frame_skip={frame_skip} "
-        f"frame_stack={frame_stack} info_filter={args.info_filter} "
+        f"crop_mode={args.obs_crop_mode} resize_algorithm={resize_algorithm} "
+        f"frame_skip={frame_skip} frame_stack={frame_stack} "
+        f"maxpool_last_two={maxpool_last_two} done_on={done_on} "
+        f"info_filter={args.info_filter} "
         f"info_filter_keys={'default' if info_filter_keys is None else len(info_filter_keys)} "
         f"obs_layout={args.obs_layout} vec_transpose_image={args.vec_transpose_image} "
-        f"obs_copy={args.obs_copy} actions={action_label}",
+        f"obs_copy={args.obs_copy} actions={action_names or action_label} "
+        f"steps={args.steps} repeats={args.repeats} seconds={args.seconds}",
     )
     if args.dry_run:
         return 0
@@ -785,26 +924,47 @@ def main(argv=None) -> int:
             from stable_baselines3.common.vec_env import VecTransposeImage
 
             env = VecTransposeImage(env)
-        fixed_actions = None
-        if args.fixed_actions:
-            fixed_actions = _sample_actions(env)
-        result = _run_vec(
-            result_name,
-            env,
-            args.seconds,
-            args.warmup_steps,
-            fixed_actions=fixed_actions,
-        )
+        if args.steps is None:
+            fixed_actions = None
+            if args.fixed_actions:
+                fixed_actions = _sample_actions(env)
+            result = _run_vec(
+                result_name,
+                env,
+                args.seconds,
+                args.warmup_steps,
+                fixed_actions=fixed_actions,
+            )
+            results = [result]
+        else:
+            results = _run_vec_steps(
+                result_name,
+                env,
+                args.steps,
+                args.repeats,
+                args.warmup_steps,
+                action_names,
+                args.action_seed,
+            )
     finally:
         if old_disable_audio is None:
             os.environ.pop("STABLE_RETRO_DISABLE_AUDIO", None)
         else:
             os.environ["STABLE_RETRO_DISABLE_AUDIO"] = old_disable_audio
 
-    print(
-        f"{result.name}: {result.steps_per_second:.1f} steps/s "
-        f"({result.steps} steps in {result.seconds:.2f}s)",
-    )
+    for index, result in enumerate(results, start=1):
+        print(
+            f"run={index} {result.name}: {result.steps_per_second:.1f} steps/s "
+            f"({result.steps} steps in {result.seconds:.2f}s)",
+        )
+    if len(results) > 1:
+        values = [result.steps_per_second for result in results]
+        stdev = float(np.std(values, ddof=1)) if len(values) > 1 else 0.0
+        print(
+            f"summary={results[0].name} steps_per_sec_mean={float(np.mean(values)):.1f} "
+            f"steps_per_sec_stdev={stdev:.1f} "
+            f"best_steps_per_sec={float(np.max(values)):.1f}",
+        )
     return 0
 
 

@@ -1,5 +1,32 @@
 import os
+import subprocess
 import sys
+
+
+def _is_macos_rosetta_process():
+    if sys.platform != "darwin":
+        return False
+    try:
+        result = subprocess.run(
+            ["sysctl", "-in", "sysctl.proc_translated"],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+    except OSError:
+        return False
+    return result.stdout.strip() == "1"
+
+
+def _reject_rosetta_process():
+    if _is_macos_rosetta_process():
+        raise RuntimeError(
+            "stable-retro-turbo does not support running under Rosetta. "
+            "Use a native arm64 Python and native arm64 libretro cores.",
+        )
+
+
+_reject_rosetta_process()
 
 import stable_retro.data
 from stable_retro._retro import Movie
@@ -7,7 +34,6 @@ from stable_retro._retro import RetroEmulator as NativeRetroEmulator
 from stable_retro._retro import core_path
 from stable_retro.enums import Actions, Observations, State
 from stable_retro.retro_env import RetroEnv
-from stable_retro.rosetta_snes import RosettaSnesEmulator, should_use_rosetta_snes
 
 ROOT_DIR = os.path.abspath(os.path.dirname(__file__))
 core_path(os.path.join(os.path.dirname(__file__), "cores"))
@@ -43,13 +69,7 @@ def __getattr__(name):
     raise AttributeError(name)
 
 
-class RetroEmulator:
-    load_core_info = staticmethod(NativeRetroEmulator.load_core_info)
-
-    def __new__(cls, rom_path):
-        if should_use_rosetta_snes(rom_path):
-            return RosettaSnesEmulator(rom_path)
-        return NativeRetroEmulator(rom_path)
+RetroEmulator = NativeRetroEmulator
 
 
 def get_core_path(corename):
