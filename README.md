@@ -183,6 +183,8 @@ expecting this package to emit SB3-only `terminal_observation`, `reset_infos`, o
 uv run python scripts/benchmark_vec_env.py --list-profiles                         # show saved benchmark profiles
 uv run python scripts/benchmark_vec_env.py --profile supermario-level1-1 --dry-run # print resolved env benchmark config
 uv run python scripts/benchmark_vec_env.py --profile supermario-level1-1           # run native/classic rollout benchmark
+make benchmark-local BENCHMARK_ARGS=--dry-run GAME=MegaMan PLATFORM=Nes STATE=Level1
+make benchmark GAME=SuperMarioBros PLATFORM=Nes STATE=Level1-1
 uv run pytest tests/test_python/test_vec_env.py                                    # run focused RetroVecEnv tests
 uv run --with build python -m build                                                # build source and wheel artifacts
 ```
@@ -199,6 +201,13 @@ two-frame max-pool, `32` envs, and `16` native threads.
 Use real saved states for user-facing throughput numbers. `State.NONE` is
 reserved for explicit direct-ROM hot-path diagnostics and requires
 `--allow-state-none`.
+
+`make benchmark` refreshes the local extension through `setup.py build_ext --inplace`
+only when native/build inputs changed, then runs the same benchmark entrypoint
+as `benchmark-local`. Set `GAME` and `PLATFORM` to compose a Stable Retro id
+such as `MegaMan-Nes-v0`, or pass a full id through `GAME` and omit `PLATFORM`.
+Set `STATE`, `BENCHMARK_PROFILE`, `BENCHMARK_SECONDS`, and `BENCHMARK_ARGS` to
+override the profile defaults.
 
 ### Reference Modal Results
 

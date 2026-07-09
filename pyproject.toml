@@ -40,6 +40,8 @@ constraint-dependencies = [
 ]
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["third-party", "cores"]
 markers = [
   "retro_oracle: tests that compare against optional stable-retro oracle packages",
 ]

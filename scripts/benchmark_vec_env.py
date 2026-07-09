@@ -109,6 +109,30 @@ def _parse_state(value, retro, *, allow_state_none: bool):
     return normalized
 
 
+def _resolve_game(profile_game: str, game_override: str | None, platform: str | None) -> str:
+    game = profile_game if game_override is None else game_override.strip()
+    if not game:
+        raise SystemExit("--game must not be empty")
+    if platform is None:
+        return game
+
+    platform = platform.strip()
+    if not platform:
+        raise SystemExit("--platform must not be empty")
+    if game_override is None:
+        raise SystemExit("--platform requires --game")
+
+    platform_suffix = f"-{platform}-v0"
+    if game.endswith("-v0"):
+        if not game.endswith(platform_suffix):
+            raise SystemExit(
+                f"--game {game!r} does not match --platform {platform!r}; "
+                f"pass the short game name or omit --platform",
+            )
+        return game
+    return f"{game}{platform_suffix}"
+
+
 def _parse_info_filter_keys(value, *, game, info, retro):
     if value is None:
         return None
@@ -443,8 +467,6 @@ def _build_regular_vec(
         raise SystemExit("--info-filter-keys is only supported with --backend=native")
     if env_kwargs.get("obs_layout", "hwc") != "hwc":
         raise SystemExit("--obs-layout=chw requires --backend=native")
-    from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
-
     env_fns = [
         (
             lambda game=game, state=state, info=info, scenario=scenario: (
@@ -454,8 +476,12 @@ def _build_regular_vec(
         for _ in range(num_envs)
     ]
     if backend == "dummy":
+        from stable_baselines3.common.vec_env import DummyVecEnv
+
         return DummyVecEnv(env_fns)
     if backend == "subproc":
+        from stable_baselines3.common.vec_env import SubprocVecEnv
+
         return SubprocVecEnv(env_fns, start_method=start_method)
     if backend == "async":
         from gymnasium.vector import AsyncVectorEnv
@@ -467,6 +493,15 @@ def _build_regular_vec(
 def _native_vec_available():
     try:
         from stable_retro.vec_env import RetroVecEnv  # noqa: F401
+        from stable_retro import _retro
+    except ImportError:
+        return False
+    return hasattr(_retro, "_RetroVecEnv")
+
+
+def _sb3_vec_available():
+    try:
+        from stable_baselines3.common.vec_env import SubprocVecEnv  # noqa: F401
     except ImportError:
         return False
     return True
@@ -477,7 +512,9 @@ def _resolve_backend(requested):
         return requested
     if _native_vec_available():
         return "native"
-    return "subproc"
+    if _sb3_vec_available():
+        return "subproc"
+    return "async"
 
 
 def main(argv=None) -> int:
@@ -486,6 +523,14 @@ def main(argv=None) -> int:
     parser.add_argument("--profile", default="supermario-level1-1")
     parser.add_argument("--list-profiles", action="store_true")
     parser.add_argument("--game", default=None)
+    parser.add_argument(
+        "--platform",
+        default=None,
+        help=(
+            "Stable Retro platform suffix to combine with a short --game name, "
+            "for example --game MegaMan --platform Nes -> MegaMan-Nes-v0.",
+        ),
+    )
     parser.add_argument("--state", default=None)
     parser.add_argument(
         "--states",
@@ -602,7 +647,7 @@ def main(argv=None) -> int:
     else:
         state_value = profile.state if args.state is None else args.state
         state = _parse_state(state_value, retro, allow_state_none=args.allow_state_none)
-    game = profile.game if args.game is None else args.game
+    game = _resolve_game(profile.game, args.game, args.platform)
     if args.rom_path is not None:
         rom_path = str(Path(args.rom_path).resolve())
         if state is retro.State.NONE and not args.allow_state_none:

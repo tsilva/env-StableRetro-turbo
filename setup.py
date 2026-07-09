@@ -212,8 +212,9 @@ class CMakeBuild(build_ext):
         suffix = super().get_ext_filename("")
         pyext_suffix = f"-DPYEXT_SUFFIX={suffix}"
         package_dir = None
-        pylib_dir = ""
-        if not self.inplace:
+        if self.inplace:
+            pylib_dir = f"-DPYLIB_DIRECTORY={SCRIPT_DIR}"
+        else:
             ext_path = Path(self.get_ext_fullpath("stable_retro._retro"))
             package_dir = ext_path.parent
             pylib_dir = f"-DPYLIB_DIRECTORY={package_dir.parent}"

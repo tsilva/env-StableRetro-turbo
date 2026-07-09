@@ -23,7 +23,7 @@ jobs:
 
       - name: Install pip package and build tests
         run: |
-          cmake -DCMAKE_DISABLE_FIND_PACKAGE_CapnProto=TRUE .
+          cmake .
           make -j2
           make -j2 -f tests/Makefile
 

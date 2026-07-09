@@ -43,11 +43,50 @@ def test_auto_backend_falls_back_to_subproc_when_native_missing(monkeypatch):
     bench = _load_benchmark_module()
 
     monkeypatch.setattr(bench, "_native_vec_available", lambda: False)
+    monkeypatch.setattr(bench, "_sb3_vec_available", lambda: True)
     assert bench._resolve_backend("auto") == "subproc"
     assert bench._resolve_backend("native") == "native"
 
+    monkeypatch.setattr(bench, "_sb3_vec_available", lambda: False)
+    assert bench._resolve_backend("auto") == "async"
+
     monkeypatch.setattr(bench, "_native_vec_available", lambda: True)
     assert bench._resolve_backend("auto") == "native"
+
+
+def test_resolve_game_accepts_short_game_and_platform():
+    bench = _load_benchmark_module()
+
+    assert (
+        bench._resolve_game("SuperMarioBros-Nes-v0", "MegaMan", "Nes")
+        == "MegaMan-Nes-v0"
+    )
+    assert (
+        bench._resolve_game("SuperMarioBros-Nes-v0", "MegaMan-Nes-v0", "Nes")
+        == "MegaMan-Nes-v0"
+    )
+    assert (
+        bench._resolve_game("SuperMarioBros-Nes-v0", None, None)
+        == "SuperMarioBros-Nes-v0"
+    )
+
+
+def test_resolve_game_rejects_platform_without_matching_game():
+    bench = _load_benchmark_module()
+
+    try:
+        bench._resolve_game("SuperMarioBros-Nes-v0", None, "Nes")
+    except SystemExit as exc:
+        assert "--platform requires --game" in str(exc)
+    else:
+        raise AssertionError("expected --platform without --game to exit")
+
+    try:
+        bench._resolve_game("MegaMan-Nes-v0", "MegaMan-Nes-v0", "Snes")
+    except SystemExit as exc:
+        assert "does not match --platform" in str(exc)
+    else:
+        raise AssertionError("expected mismatched platform to exit")
 
 
 def test_regular_preprocess_wrapper_matches_profile_shape_and_skip():
