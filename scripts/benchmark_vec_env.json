@@ -33,9 +33,9 @@
     },
     {
       "name": "atari-breakout-diagnostic",
-      "description": "Atari Breakout direct-ROM diagnostic profile for ALE-style preprocessing comparisons.",
+      "description": "Atari Breakout saved-state profile for ALE-style preprocessing comparisons.",
       "game": "Breakout-Atari2600-v0",
-      "state": "State.NONE",
+      "state": "Start",
       "resize": "84x84",
       "grayscale": true,
       "frame_skip": 4,
@@ -44,7 +44,7 @@
       "resize_algorithm": "area",
       "maxpool_last_two": true,
       "num_envs": 32,
-      "num_threads": 32,
+      "num_threads": 16,
       "obs_layout": "chw"
     }
   ]

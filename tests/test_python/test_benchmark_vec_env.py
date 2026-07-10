@@ -239,7 +239,6 @@ def test_dry_run_uses_atari_profile_layout(monkeypatch, capsys):
                 "atari-breakout-diagnostic",
                 "--backend",
                 "auto",
-                "--allow-state-none",
                 "--dry-run",
             ]
         )
@@ -247,6 +246,6 @@ def test_dry_run_uses_atari_profile_layout(monkeypatch, capsys):
     )
     output = capsys.readouterr().out
     assert "game=Breakout-Atari2600-v0" in output
-    assert "state=State.NONE" in output
-    assert "envs=32 threads=32" in output
+    assert "state=Start" in output
+    assert "envs=32 threads=16" in output
     assert "obs_layout=chw" in output

@@ -183,6 +183,7 @@ expecting this package to emit SB3-only `terminal_observation`, `reset_infos`, o
 uv run python scripts/benchmark_vec_env.py --list-profiles                         # show saved benchmark profiles
 uv run python scripts/benchmark_vec_env.py --profile supermario-level1-1 --dry-run # print resolved env benchmark config
 uv run python scripts/benchmark_vec_env.py --profile supermario-level1-1           # run native/classic rollout benchmark
+uv run python scripts/benchmark_atari_alepy.py --dry-run                           # compare Atari native vec env with ale-py
 make benchmark-local BENCHMARK_ARGS=--dry-run GAME=MegaMan PLATFORM=Nes STATE=Level1
 make benchmark GAME=SuperMarioBros PLATFORM=Nes STATE=Level1-1
 uv run pytest tests/test_python/test_vec_env.py                                    # run focused RetroVecEnv tests
@@ -200,7 +201,10 @@ two-frame max-pool, `32` envs, and `16` native threads.
 
 Use real saved states for user-facing throughput numbers. `State.NONE` is
 reserved for explicit direct-ROM hot-path diagnostics and requires
-`--allow-state-none`.
+`--allow-state-none`. The Atari/ALE comparison profile uses Breakout `Start`
+instead of `State.NONE`; pass `--include-state-none-reproducer` to
+`scripts/benchmark_atari_alepy.py` only when intentionally reproducing the
+direct-ROM Atari slowdown.
 
 `make benchmark` refreshes the local extension through `setup.py build_ext --inplace`
 only when native/build inputs changed, then runs the same benchmark entrypoint
