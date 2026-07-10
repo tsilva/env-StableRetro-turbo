@@ -369,6 +369,10 @@ struct PyRetroEmulator {
 		return m_re.getFrameRate();
 	}
 
+	double getAspectRatio() {
+		return m_re.getAspectRatio();
+	}
+
 	py::array_t<int16_t> getAudio() {
 		py::array_t<int16_t> arr(py::array::ShapeContainer{ m_re.getAudioSamples(), 2 });
 		int16_t* data = arr.mutable_data();
@@ -2996,6 +3000,7 @@ PYBIND11_MODULE(_retro, m) {
 			py::arg("crop_fill") = 0
 		)
 		.def("get_rotation", &PyRetroEmulator::getRotation)
+		.def("get_aspect_ratio", &PyRetroEmulator::getAspectRatio)
 		.def("get_screen_rate", &PyRetroEmulator::getScreenRate)
 		.def("get_audio", &PyRetroEmulator::getAudio)
 		.def("get_audio_rate", &PyRetroEmulator::getAudioRate)

@@ -113,6 +113,7 @@ TEST_P(EmulatorTest, Output) {
 	EXPECT_GT(e.getImageWidth(), 0);
 	EXPECT_GT(e.getImagePitch(), 0);
 	EXPECT_GT(e.getImageDepth(), 0);
+	EXPECT_GT(e.getAspectRatio(), 0.0);
 	EXPECT_THAT(e.getImageData(), NotNull());
 
 	e.run();

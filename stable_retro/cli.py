@@ -122,11 +122,17 @@ def resolve_target(target: str) -> list[tuple[str, str]]:
     )
 
 
-def run_game(game: str, state: str) -> None:
+def run_game(game: str, state: str, *, show_obs: bool = False) -> None:
     """Open the repository's interactive player for a single game."""
     from stable_retro.examples.interactive import RetroInteractive
 
-    RetroInteractive(game=game, state=state, scenario=None, record=False).run()
+    RetroInteractive(
+        game=game,
+        state=state,
+        scenario=None,
+        record=False,
+        show_obs=show_obs,
+    ).run()
 
 
 def _print_runnable_platforms() -> None:
@@ -153,6 +159,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="show runnable platforms and their selected games",
     )
+    play.add_argument(
+        "--show-obs",
+        action="store_true",
+        help="also show the PPO-style preprocessed observation in a second window",
+    )
     return parser
 
 
@@ -178,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
     for platform, game in targets:
         print(f"Launching {platform}: {game}", flush=True)
         try:
-            run_game(game, args.state)
+            run_game(game, args.state, show_obs=args.show_obs)
         except (FileNotFoundError, KeyError, ValueError) as error:
             if len(targets) == 1:
                 parser.error(str(error))

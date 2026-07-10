@@ -1,4 +1,5 @@
 #include <cassert>
+#include <cmath>
 #include <cstdlib>
 #ifndef _WIN32
 #include <dlfcn.h>
@@ -538,6 +539,19 @@ bool Emulator::getIndexedVideoFrame(IndexedVideoFrame& frame) {
 		&frame.rawPalette,
 		&frame.deemp
 	) && frame.data && frame.palette && frame.width && frame.height && frame.pitch;
+}
+
+double Emulator::getAspectRatio() const {
+	double ratio = m_avInfo.geometry.aspect_ratio;
+	if (!std::isfinite(ratio) || ratio <= 0.0) {
+		const unsigned width = m_avInfo.geometry.base_width;
+		const unsigned height = m_avInfo.geometry.base_height;
+		ratio = height ? static_cast<double>(width) / static_cast<double>(height) : 1.0;
+	}
+	if ((m_rotation & 1) != 0) {
+		ratio = 1.0 / ratio;
+	}
+	return ratio;
 }
 
 void Emulator::fixScreenSize(const string& romName) {

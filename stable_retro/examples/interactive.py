@@ -7,6 +7,7 @@ An adapter object is defined for each environment to map keyboard commands to ac
 import abc
 import argparse
 import ctypes
+import math
 import time
 
 import numpy as np
@@ -17,13 +18,136 @@ from pyglet.window import key as keycodes
 import stable_retro as retro
 
 
+def _environment_aspect_ratio(env, image_width, image_height):
+    emulator = getattr(env, "em", None)
+    get_aspect_ratio = getattr(emulator, "get_aspect_ratio", None)
+    if get_aspect_ratio is not None:
+        aspect_ratio = float(get_aspect_ratio())
+        if math.isfinite(aspect_ratio) and aspect_ratio > 0:
+            return aspect_ratio
+    return image_width / image_height
+
+
+def _window_dimensions(
+    image_width,
+    image_height,
+    aspect_ratio,
+    screen_width,
+    screen_height,
+):
+    """Choose the largest pixel-aligned window that fits on the display."""
+    if not math.isfinite(aspect_ratio) or aspect_ratio <= 0:
+        aspect_ratio = image_width / image_height
+
+    base_width = float(image_width)
+    base_height = base_width / aspect_ratio
+    max_width = screen_width * 0.9
+    max_height = screen_height * 0.9
+    scale = min(max_width / base_width, max_height / base_height)
+    if scale >= 1:
+        scale = math.floor(scale)
+
+    width = max(1, round(base_width * scale))
+    height = max(1, round(width / aspect_ratio))
+    return width, height
+
+
+def _observation_to_rgb(observation):
+    """Turn an HWC image observation into an RGB image without altering pixels.
+
+    Frame-stacked grayscale observations are tiled left-to-right so every frame
+    given to the policy remains visible.
+    """
+    observation = np.asarray(observation, dtype=np.uint8)
+    if observation.ndim != 3:
+        raise ValueError("observation viewer requires an HWC image observation")
+    if observation.shape[2] == 3:
+        return observation
+    if observation.shape[2] == 1:
+        return np.repeat(observation, 3, axis=2)
+
+    frames = [
+        np.repeat(observation[..., channel : channel + 1], 3, axis=2)
+        for channel in range(observation.shape[2])
+    ]
+    return np.concatenate(frames, axis=1)
+
+
+class _ImageWindow:
+    """A small nearest-neighbour pyglet image window."""
+
+    def __init__(self, image, title, on_close):
+        image_height, image_width = image.shape[:2]
+        display = pyglet.canvas.get_display()
+        screen = display.get_default_screen()
+        width, height = _window_dimensions(
+            image_width,
+            image_height,
+            image_width / image_height,
+            screen.width / 2,
+            screen.height * 0.9,
+        )
+        self.window = pyglet.window.Window(width=width, height=height, caption=title)
+        self.window.on_close = on_close
+        self.image = image
+
+        gl.glEnable(gl.GL_TEXTURE_2D)
+        self.texture_id = gl.GLuint(0)
+        gl.glGenTextures(1, ctypes.byref(self.texture_id))
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture_id)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
+        gl.glTexImage2D(
+            gl.GL_TEXTURE_2D,
+            0,
+            gl.GL_RGBA8,
+            image_width,
+            image_height,
+            0,
+            gl.GL_RGB,
+            gl.GL_UNSIGNED_BYTE,
+            None,
+        )
+
+    def set_image(self, image):
+        self.image = image
+
+    def draw(self):
+        self.window.switch_to()
+        self.window.dispatch_events()
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture_id)
+        video_buffer = ctypes.cast(self.image.tobytes(), ctypes.POINTER(ctypes.c_short))
+        gl.glTexSubImage2D(
+            gl.GL_TEXTURE_2D,
+            0,
+            0,
+            0,
+            self.image.shape[1],
+            self.image.shape[0],
+            gl.GL_RGB,
+            gl.GL_UNSIGNED_BYTE,
+            video_buffer,
+        )
+        w, h = self.window.width, self.window.height
+        pyglet.graphics.draw(
+            4,
+            pyglet.gl.GL_QUADS,
+            ("v2f", [0, 0, w, 0, w, h, 0, h]),
+            ("t2f", [0, 1, 1, 1, 1, 0, 0, 0]),
+        )
+        self.window.flip()
+
+
 class Interactive(abc.ABC):
     """
     Base class for making gym environments interactive for human use
     """
 
-    def __init__(self, env, sync=True, tps=60, aspect_ratio=None):
-        obs = env.reset()
+    def __init__(self, env, sync=True, tps=60, aspect_ratio=None, show_obs=False):
+        obs, _info = env.reset()
+        self._observation = obs
         self._image = self.get_image(obs, env)
         assert (
             len(self._image.shape) == 3 and self._image.shape[2] == 3
@@ -31,22 +155,22 @@ class Interactive(abc.ABC):
         image_height, image_width = self._image.shape[:2]
 
         if aspect_ratio is None:
-            aspect_ratio = image_width / image_height
+            aspect_ratio = _environment_aspect_ratio(
+                env,
+                image_width,
+                image_height,
+            )
 
-        # guess a screen size that doesn't distort the image too much but also is not tiny or huge
+        # Pick a large pixel-aligned size without distorting the core's display ratio.
         display = pyglet.canvas.get_display()
         screen = display.get_default_screen()
-        max_win_width = screen.width * 0.9
-        max_win_height = screen.height * 0.9
-        win_width = image_width
-        win_height = int(win_width / aspect_ratio)
-
-        while win_width > max_win_width or win_height > max_win_height:
-            win_width //= 2
-            win_height //= 2
-        while win_width < max_win_width / 2 and win_height < max_win_height / 2:
-            win_width *= 2
-            win_height *= 2
+        win_width, win_height = _window_dimensions(
+            image_width,
+            image_height,
+            aspect_ratio,
+            screen.width,
+            screen.height,
+        )
 
         win = pyglet.window.Window(width=win_width, height=win_height)
 
@@ -91,6 +215,17 @@ class Interactive(abc.ABC):
         self._current_time = 0
         self._sim_time = 0
         self._max_sim_frames_per_update = 4
+        self._observation_window = None
+        if show_obs:
+            self._observation_window = _ImageWindow(
+                self.get_observation_image(obs, reset=True),
+                "Preprocessed observation",
+                self._on_close,
+            )
+
+    def get_observation_image(self, obs, reset=False):
+        """Return the RGB visualization for an environment observation."""
+        return _observation_to_rgb(obs)
 
     def _update(self, dt):
         # cap the number of frames rendered so we don't just spend forever trying to catch up on frames
@@ -137,7 +272,12 @@ class Interactive(abc.ABC):
             if not self._sync or act is not None:
                 obs, rew, terminated, truncated, _info = self._env.step(act)
                 done = terminated or truncated
+                self._observation = obs
                 self._image = self.get_image(obs, self._env)
+                if self._observation_window is not None:
+                    observation_image = self.get_observation_image(obs)
+                    if observation_image is not None:
+                        self._observation_window.set_image(observation_image)
                 self._episode_returns += rew
                 self._steps += 1
                 self._episode_steps += 1
@@ -155,7 +295,13 @@ class Interactive(abc.ABC):
                     print(mess)
 
                 if done:
-                    self._env.reset()
+                    obs, _info = self._env.reset()
+                    self._observation = obs
+                    self._image = self.get_image(obs, self._env)
+                    if self._observation_window is not None:
+                        self._observation_window.set_image(
+                            self.get_observation_image(obs, reset=True),
+                        )
                     self._episode_steps = 0
                     self._episode_returns = 0
                     self._prev_episode_returns = 0
@@ -239,6 +385,8 @@ class Interactive(abc.ABC):
             prev_frame_time = now
             self._draw()
             self._win.flip()
+            if self._observation_window is not None and not self._closed:
+                self._observation_window.draw()
 
 
 class RetroInteractive(Interactive):
@@ -246,19 +394,49 @@ class RetroInteractive(Interactive):
     Interactive setup for retro games
     """
 
-    def __init__(self, game, state, scenario, record):
+    def __init__(self, game, state, scenario, record, show_obs=False):
+        self._observation_sample_interval = 4
+        self._observation_frame_stack = 4
+        self._observation_sample_steps = 0
+        self._observation_frames = []
+        env_kwargs = {}
+        if show_obs:
+            env_kwargs = {
+                "obs_resize": (84, 84),
+                "obs_crop": (32, 0, 0, 0),
+                "obs_grayscale": True,
+                "obs_resize_algorithm": "area",
+            }
         env = retro.make(
             game=game,
             state=state,
             scenario=scenario,
             record=record,
             render_mode="rgb_array",
+            **env_kwargs,
         )
         self._buttons = env.buttons
-        super().__init__(env=env, sync=False, tps=60, aspect_ratio=4 / 3)
+        super().__init__(env=env, sync=False, tps=60, show_obs=show_obs)
 
     def get_image(self, _obs, env):
         return env.render()
+
+    def get_observation_image(self, obs, reset=False):
+        """Sample a four-frame policy observation without slowing RGB display."""
+        frame = np.asarray(obs, dtype=np.uint8)
+        if reset:
+            self._observation_sample_steps = 0
+            self._observation_frames = [
+                frame.copy() for _ in range(self._observation_frame_stack)
+            ]
+        else:
+            self._observation_sample_steps += 1
+            if self._observation_sample_steps % self._observation_sample_interval:
+                return None
+            self._observation_frames.append(frame.copy())
+            del self._observation_frames[: -self._observation_frame_stack]
+        stacked = np.concatenate(self._observation_frames, axis=2)
+        return _observation_to_rgb(stacked)
 
     def keys_to_act(self, keys):
         inputs = {

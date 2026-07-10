@@ -786,9 +786,9 @@ class RetroEnv(gym.Env, EzPickle):
         """Render the current frame in human mode or return an RGB array."""
         mode = self.render_mode
 
-        img = self.img
-        if img is None:
-            img = self.get_screen(apply_rotation=True)
+        # Observations may be cropped, resized, grayscale, or frame-stacked.
+        # Rendering remains a view of the emulator's raw RGB display.
+        img = self.get_raw_screen(apply_rotation=True)
         if mode == "rgb_array":
             return img
         elif mode == "human":
@@ -828,12 +828,8 @@ class RetroEnv(gym.Env, EzPickle):
             blocks.append(arr)
         return np.concatenate(blocks)
 
-    def get_screen(self, player=0, apply_rotation=False):
-        """Return the current screen, optionally cropped and rotation-corrected."""
-        if apply_rotation:
-            native = self._native_processed_screen(player)
-            if native is not None:
-                return native
+    def get_raw_screen(self, player=0, apply_rotation=False):
+        """Return the RGB display before observation preprocessing."""
         img = self.em.get_screen()
         x, y, w, h = self.data.crop_info(player)
         if not w or x + w > img.shape[1]:
@@ -850,6 +846,15 @@ class RetroEnv(gym.Env, EzPickle):
             result = img[y:h, x:w]
         if apply_rotation:
             result = self._apply_rotation(result)
+        return result
+
+    def get_screen(self, player=0, apply_rotation=False):
+        """Return the current preprocessed observation screen."""
+        if apply_rotation:
+            native = self._native_processed_screen(player)
+            if native is not None:
+                return native
+        result = self.get_raw_screen(player=player, apply_rotation=apply_rotation)
         result = self._apply_obs_crop(result)
         result = self._apply_obs_grayscale(result)
         result = self._resize_obs(result)

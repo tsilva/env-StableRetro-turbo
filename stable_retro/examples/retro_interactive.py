@@ -17,7 +17,7 @@ class RetroInteractive(Interactive):
             render_mode="rgb_array",
         )
         self._buttons = env.buttons
-        super().__init__(env=env, sync=False, tps=60, aspect_ratio=4 / 3)
+        super().__init__(env=env, sync=False, tps=60)
 
     def get_image(self, _obs, env):
         return env.render()

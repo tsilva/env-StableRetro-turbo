@@ -62,6 +62,7 @@ public:
 	bool setIndexedVideoEnabled(bool enabled);
 	bool getIndexedVideoFrame(IndexedVideoFrame& frame);
 	int getRotation() const { return m_rotation; }
+	double getAspectRatio() const;
 	bool isHWRenderEnabled() const;
 	double getFrameRate() { return m_avInfo.timing.fps; }
 	int getAudioSamples() { return m_audioData.size() / 2; }

@@ -120,6 +120,12 @@ def test_env_image_preprocessing(algorithm, generate_test_env):
     assert obs in env.observation_space
     assert isinstance(info, dict)
 
+    rendered = env.render()
+    assert rendered.dtype == np.uint8
+    assert rendered.ndim == 3
+    assert rendered.shape[2] == 3
+    assert rendered.shape[:2] != obs.shape[:2]
+
     obs, rew, terminated, truncated, info = env.step(env.action_space.sample())
     assert obs in env.observation_space
     assert isinstance(rew, float)

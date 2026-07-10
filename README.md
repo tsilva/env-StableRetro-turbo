@@ -68,6 +68,17 @@ stable-retro-turbo play SuperMarioBros-Nes-v0
 stable-retro-turbo play all
 ```
 
+To see the raw RGB game and the exact PPO-style preprocessed observation at
+the same time, add `--show-obs`:
+
+```bash
+stable-retro-turbo play SuperMarioBros-Nes-v0 --show-obs
+```
+
+The second window tiles the four grayscale 84x84 frames that make up the
+observation, after the standard top crop and area resize. It samples every
+fourth frame while the RGB game continues rendering at its normal 60 FPS.
+
 `all` opens one game per platform, sequentially. Use
 `stable-retro-turbo play --list` to see the current ROM-backed platform choices.
 
