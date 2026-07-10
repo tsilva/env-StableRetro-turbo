@@ -39,6 +39,11 @@ static inline T _hypot(T x, T y) {
 #include <unordered_set>
 #include <vector>
 
+#if defined(__ARM_NEON) && defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#include <arm_neon.h>
+#define STABLE_RETRO_ARM_NEON 1
+#endif
+
 namespace py = pybind11;
 
 using std::string;
@@ -743,7 +748,7 @@ public:
 		std::unique_lock<std::mutex> lock(m_mutex);
 		m_task = std::move(task);
 		m_total = count;
-		m_next = 0;
+		m_next.store(0, std::memory_order_relaxed);
 		m_remainingWorkers = m_threads.size();
 		const uint64_t generation = ++m_generation;
 		m_work.notify_all();
@@ -764,15 +769,16 @@ private:
 			}
 			seenGeneration = m_generation;
 			auto* task = &m_task;
+			const size_t total = m_total;
+			lock.unlock();
 			while (true) {
-				const size_t index = m_next++;
-				if (index >= m_total) {
+				const size_t index = m_next.fetch_add(1, std::memory_order_relaxed);
+				if (index >= total) {
 					break;
 				}
-				lock.unlock();
 				(*task)(index);
-				lock.lock();
 			}
+			lock.lock();
 			if (--m_remainingWorkers == 0) {
 				m_doneGeneration = seenGeneration;
 				m_done.notify_one();
@@ -786,7 +792,7 @@ private:
 	std::condition_variable m_done;
 	std::function<void(size_t)> m_task;
 	size_t m_total = 0;
-	size_t m_next = 0;
+	std::atomic<size_t> m_next{0};
 	size_t m_remainingWorkers = 0;
 	uint64_t m_generation = 0;
 	uint64_t m_doneGeneration = 0;
@@ -1133,6 +1139,98 @@ static inline uint8_t xrgb8888MaxGray(uint32_t xrgb, uint32_t maxXrgb) {
 	return static_cast<uint8_t>((r * 77 + g * 150 + b * 29 + 128) >> 8);
 }
 
+static void xrgb8888GrayscaleRow(
+	const uint8_t* raw,
+	const uint8_t* maxRaw,
+	long width,
+	uint8_t* dst
+) {
+	long x = 0;
+#ifdef STABLE_RETRO_ARM_NEON
+	for (; x + 16 <= width; x += 16) {
+		uint8x16x4_t pixels = vld4q_u8(raw + static_cast<size_t>(x) * 4);
+		if (maxRaw) {
+			const uint8x16x4_t previous = vld4q_u8(maxRaw + static_cast<size_t>(x) * 4);
+			pixels.val[0] = vmaxq_u8(pixels.val[0], previous.val[0]);
+			pixels.val[1] = vmaxq_u8(pixels.val[1], previous.val[1]);
+			pixels.val[2] = vmaxq_u8(pixels.val[2], previous.val[2]);
+		}
+
+		uint16x8_t low = vmulq_n_u16(vmovl_u8(vget_low_u8(pixels.val[2])), 77);
+		low = vmlaq_n_u16(low, vmovl_u8(vget_low_u8(pixels.val[1])), 150);
+		low = vmlaq_n_u16(low, vmovl_u8(vget_low_u8(pixels.val[0])), 29);
+		low = vaddq_u16(low, vdupq_n_u16(128));
+
+		uint16x8_t high = vmulq_n_u16(vmovl_u8(vget_high_u8(pixels.val[2])), 77);
+		high = vmlaq_n_u16(high, vmovl_u8(vget_high_u8(pixels.val[1])), 150);
+		high = vmlaq_n_u16(high, vmovl_u8(vget_high_u8(pixels.val[0])), 29);
+		high = vaddq_u16(high, vdupq_n_u16(128));
+
+		vst1q_u8(
+			dst + x,
+			vcombine_u8(vshrn_n_u16(low, 8), vshrn_n_u16(high, 8))
+		);
+	}
+#endif
+	for (; x < width; ++x) {
+		uint32_t xrgb;
+		std::memcpy(&xrgb, raw + static_cast<size_t>(x) * 4, sizeof(xrgb));
+		if (maxRaw) {
+			uint32_t maxXrgb;
+			std::memcpy(&maxXrgb, maxRaw + static_cast<size_t>(x) * 4, sizeof(maxXrgb));
+			dst[x] = xrgb8888MaxGray(xrgb, maxXrgb);
+		} else {
+			dst[x] = xrgb8888Gray(xrgb);
+		}
+	}
+}
+
+static void processXrgb8888GrayscaleAreaPlanToBuffer(
+	const uint8_t* raw,
+	const uint8_t* maxRaw,
+	long rawW,
+	long rawH,
+	size_t pitch,
+	const AreaResizePlan& plan,
+	std::vector<uint8_t>& scratch,
+	uint8_t* dst
+) {
+	const bool direct =
+		plan.dstH == rawH && plan.dstW == rawW &&
+		plan.bins.size() == static_cast<size_t>(rawH) * static_cast<size_t>(rawW) &&
+		!plan.bins.empty() && plan.bins.front().y0 == 0 && plan.bins.front().x0 == 0 &&
+		plan.bins.back().y1 == rawH && plan.bins.back().x1 == rawW;
+	uint8_t* gray = dst;
+	if (!direct) {
+		scratch.resize(static_cast<size_t>(rawH) * static_cast<size_t>(rawW));
+		gray = scratch.data();
+	}
+
+	for (long y = 0; y < rawH; ++y) {
+		xrgb8888GrayscaleRow(
+			raw + static_cast<size_t>(y) * pitch,
+			maxRaw ? maxRaw + static_cast<size_t>(y) * pitch : nullptr,
+			rawW,
+			gray + static_cast<size_t>(y) * static_cast<size_t>(rawW)
+		);
+	}
+	if (direct) {
+		return;
+	}
+
+	for (size_t i = 0; i < plan.bins.size(); ++i) {
+		const AreaResizeBin& bin = plan.bins[i];
+		uint32_t sum = 0;
+		for (long sy = bin.y0; sy < bin.y1; ++sy) {
+			const uint8_t* row = gray + static_cast<size_t>(sy) * static_cast<size_t>(rawW);
+			for (long sx = bin.x0; sx < bin.x1; ++sx) {
+				sum += row[sx];
+			}
+		}
+		dst[i] = static_cast<uint8_t>(sum / bin.count);
+	}
+}
+
 AreaResizePlan buildAreaResizePlan(long rawW, long rawH, const NativeCrop& crop, const NativeResize& resize) {
 	if (crop.top + crop.bottom >= rawH || crop.left + crop.right >= rawW) {
 		throw std::runtime_error("crop removes the entire observation");
@@ -1173,7 +1271,10 @@ void processNativeGrayscaleAreaPlanToBuffer(
 	const uint8_t* maxRaw,
 	size_t pitch,
 	int depth,
+	long rawW,
+	long rawH,
 	const AreaResizePlan& plan,
+	std::vector<uint8_t>& scratch,
 	uint8_t* dst
 ) {
 	if (depth == 16) {
@@ -1200,6 +1301,18 @@ void processNativeGrayscaleAreaPlanToBuffer(
 		return;
 	}
 	if (depth == 32) {
+#ifdef STABLE_RETRO_ARM_NEON
+		processXrgb8888GrayscaleAreaPlanToBuffer(
+			raw,
+			maxRaw,
+			rawW,
+			rawH,
+			pitch,
+			plan,
+			scratch,
+			dst
+		);
+#else
 		for (size_t i = 0; i < plan.bins.size(); ++i) {
 			const AreaResizeBin& bin = plan.bins[i];
 			uint32_t sum = 0;
@@ -1220,6 +1333,7 @@ void processNativeGrayscaleAreaPlanToBuffer(
 			}
 			dst[i] = static_cast<uint8_t>(sum / bin.count);
 		}
+#endif
 		return;
 	}
 	throw std::runtime_error("Unsupported image depth from core");
@@ -2201,10 +2315,12 @@ private:
 		size_t index = 0;
 		PyGameData data;
 		std::vector<uint8_t> frameStack;
+		size_t frameStackIndex = 0;
 		std::vector<uint8_t> singleObs;
 		std::vector<uint8_t> rgb;
 		std::vector<uint8_t> prevRaw;
 		std::vector<uint8_t> currRaw;
+		std::vector<uint8_t> grayscaleScratch;
 		std::vector<uint8_t> prevIndexed;
 		IndexedPaletteCache indexedPaletteCache;
 		std::vector<uint8_t> action;
@@ -2307,7 +2423,10 @@ private:
 					nullptr,
 					static_cast<size_t>(slot.emulator->m_re.getImagePitch()),
 					slot.emulator->m_re.getImageDepth(),
+					slot.emulator->m_re.getImageWidth(),
+					slot.emulator->m_re.getImageHeight(),
 					m_grayscaleAreaPlan,
+					slot.grayscaleScratch,
 					slot.singleObs.data()
 				);
 				return;
@@ -2344,6 +2463,7 @@ private:
 	}
 
 	void resetFrameStack(Slot& slot, const std::vector<uint8_t>& singleObs) {
+		slot.frameStackIndex = 0;
 		if (m_channelsFirst) {
 			const size_t frameSize = m_singleObsSize;
 			for (int frame = 0; frame < m_frameStack; ++frame) {
@@ -2369,17 +2489,11 @@ private:
 	void pushFrame(Slot& slot, const std::vector<uint8_t>& singleObs) {
 		if (m_channelsFirst) {
 			const size_t frameSize = m_singleObsSize;
-			if (m_frameStack > 1) {
-				std::memmove(
-					slot.frameStack.data(),
-					slot.frameStack.data() + frameSize,
-					static_cast<size_t>(m_frameStack - 1) * frameSize
-				);
-			}
 			writeSingleObservationChannelsFirst(
 				singleObs,
-				slot.frameStack.data() + static_cast<size_t>(m_frameStack - 1) * frameSize
+				slot.frameStack.data() + slot.frameStackIndex * frameSize
 			);
+			slot.frameStackIndex = (slot.frameStackIndex + 1) % static_cast<size_t>(m_frameStack);
 			return;
 		}
 		if (m_frameStack == 1) {
@@ -2398,6 +2512,22 @@ private:
 	}
 
 	void writeStackedObservation(const Slot& slot, uint8_t* dst) const {
+		if (m_channelsFirst && slot.frameStackIndex != 0) {
+			const size_t frameSize = m_singleObsSize;
+			const size_t tailFrames = static_cast<size_t>(m_frameStack) - slot.frameStackIndex;
+			const size_t tailSize = tailFrames * frameSize;
+			std::memcpy(
+				dst,
+				slot.frameStack.data() + slot.frameStackIndex * frameSize,
+				tailSize
+			);
+			std::memcpy(
+				dst + tailSize,
+				slot.frameStack.data(),
+				slot.frameStackIndex * frameSize
+			);
+			return;
+		}
 		std::memcpy(dst, slot.frameStack.data(), m_stackedObsSize);
 	}
 
@@ -2692,7 +2822,10 @@ private:
 						slot.prevRaw.empty() ? nullptr : slot.prevRaw.data(),
 						static_cast<size_t>(slot.emulator->m_re.getImagePitch()),
 						slot.emulator->m_re.getImageDepth(),
+						slot.emulator->m_re.getImageWidth(),
+						slot.emulator->m_re.getImageHeight(),
 						m_grayscaleAreaPlan,
+						slot.grayscaleScratch,
 						slot.singleObs.data()
 					);
 				} else {
