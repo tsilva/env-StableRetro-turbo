@@ -997,9 +997,9 @@ static inline void nativePixelChannels(
 	}
 	uint32_t xrgb;
 	std::memcpy(&xrgb, row + static_cast<size_t>(x) * 4, sizeof(xrgb));
-	r = static_cast<uint8_t>(xrgb);
+	r = static_cast<uint8_t>(xrgb >> 16);
 	g = static_cast<uint8_t>(xrgb >> 8);
-	b = static_cast<uint8_t>(xrgb >> 16);
+	b = static_cast<uint8_t>(xrgb);
 }
 
 static inline uint8_t nativeGray(
@@ -1116,16 +1116,16 @@ static inline uint8_t indexedGray(
 }
 
 static inline uint8_t xrgb8888Gray(uint32_t xrgb) {
-	const uint32_t r = xrgb & 0xFF;
+	const uint32_t r = (xrgb >> 16) & 0xFF;
 	const uint32_t g = (xrgb >> 8) & 0xFF;
-	const uint32_t b = (xrgb >> 16) & 0xFF;
+	const uint32_t b = xrgb & 0xFF;
 	return static_cast<uint8_t>((r * 77 + g * 150 + b * 29 + 128) >> 8);
 }
 
 static inline uint8_t xrgb8888MaxGray(uint32_t xrgb, uint32_t maxXrgb) {
-	const uint32_t r = std::max<uint32_t>(xrgb & 0xFF, maxXrgb & 0xFF);
+	const uint32_t r = std::max<uint32_t>((xrgb >> 16) & 0xFF, (maxXrgb >> 16) & 0xFF);
 	const uint32_t g = std::max<uint32_t>((xrgb >> 8) & 0xFF, (maxXrgb >> 8) & 0xFF);
-	const uint32_t b = std::max<uint32_t>((xrgb >> 16) & 0xFF, (maxXrgb >> 16) & 0xFF);
+	const uint32_t b = std::max<uint32_t>(xrgb & 0xFF, maxXrgb & 0xFF);
 	return static_cast<uint8_t>((r * 77 + g * 150 + b * 29 + 128) >> 8);
 }
 

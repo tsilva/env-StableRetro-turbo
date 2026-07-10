@@ -14,6 +14,9 @@ dynamic = [
   "classifiers",
 ]
 
+[project.scripts]
+stable-retro-turbo = "stable_retro.cli:main"
+
 [tool.cibuildwheel]
 build = "cp{311,312,313,314}-*"
 build-verbosity = 1

@@ -7,7 +7,6 @@ An adapter object is defined for each environment to map keyboard commands to ac
 import abc
 import argparse
 import ctypes
-import sys
 import time
 
 import numpy as np
@@ -77,6 +76,7 @@ class Interactive(abc.ABC):
 
         self._env = env
         self._win = win
+        self._closed = False
 
         # self._render_human = render_human
         self._key_previous_states = {}
@@ -115,7 +115,11 @@ class Interactive(abc.ABC):
                 self._key_previous_states[key_code] = pressed
 
             if keycodes.ESCAPE in keys_pressed:
-                self._on_close()
+                self._win.close()
+                return
+
+            if self._closed:
+                return
 
             # assume that for async environments, we just want to repeat keys for as long as they are held
             inputs = keys_pressed
@@ -187,8 +191,16 @@ class Interactive(abc.ABC):
         )
 
     def _on_close(self):
+        """Release the emulator once and let the outer loop exit cleanly.
+
+        Pyglet dispatches close handlers inside its event loop.  Raising
+        ``SystemExit`` there can be caught while the manual render loop carries
+        on, leaving a closed ``RetroEnv`` to receive one more ``step`` call.
+        """
+        if self._closed:
+            return
+        self._closed = True
         self._env.close()
-        sys.exit(0)
 
     @abc.abstractmethod
     def get_image(self, obs, venv):
@@ -215,11 +227,15 @@ class Interactive(abc.ABC):
         # and also involves inverting your code to run inside the pyglet framework
         # avoid both by using a while loop
         prev_frame_time = time.time()
-        while True:
+        while not self._closed:
             self._win.switch_to()
             self._win.dispatch_events()
+            if self._closed:
+                break
             now = time.time()
             self._update(now - prev_frame_time)
+            if self._closed:
+                break
             prev_frame_time = now
             self._draw()
             self._win.flip()
@@ -262,6 +278,7 @@ class RetroInteractive(Interactive):
             "RIGHT": "RIGHT" in keys,
             "MODE": "TAB" in keys,
             "SELECT": "TAB" in keys,
+            "PAUSE": "ENTER" in keys,
             "RESET": "ENTER" in keys,
             "START": "ENTER" in keys,
         }

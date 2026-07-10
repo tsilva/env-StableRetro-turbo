@@ -51,6 +51,26 @@ uv venv --python 3.14
 uv pip install stable-retro-turbo
 ```
 
+## Quick platform player
+
+For a local editable install, run:
+
+```bash
+uv tool install . -e
+```
+
+Then launch a representative installed game for a platform:
+
+```bash
+stable-retro-turbo play genesis
+stable-retro-turbo play nes
+stable-retro-turbo play SuperMarioBros-Nes-v0
+stable-retro-turbo play all
+```
+
+`all` opens one game per platform, sequentially. Use
+`stable-retro-turbo play --list` to see the current ROM-backed platform choices.
+
 ## Use
 
 ```python

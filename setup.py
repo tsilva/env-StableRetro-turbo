@@ -287,6 +287,11 @@ setup(
         "stable_retro.examples",
         "stable_retro.testing",
     ],
+    entry_points={
+        "console_scripts": [
+            "stable-retro-turbo=stable_retro.cli:main",
+        ],
+    },
     package_data={
         "stable_retro": stable_retro_package_data(),
         **{

@@ -40,6 +40,7 @@ class RetroInteractive(Interactive):
             "RIGHT": "RIGHT" in keys,
             "MODE": "TAB" in keys,
             "SELECT": "TAB" in keys,
+            "PAUSE": "ENTER" in keys,
             "RESET": "ENTER" in keys,
             "START": "ENTER" in keys,
         }

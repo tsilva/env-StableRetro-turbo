@@ -594,9 +594,9 @@ void imageX888To888(const uint32_t* in, uint8_t* out, size_t w, size_t h, size_t
 #endif
 		for (; x < w; ++x) {
 			uint32_t xrgb = in[x];
-			out[0] = xrgb;
+			out[0] = xrgb >> 16;
 			out[1] = xrgb >> 8;
-			out[2] = xrgb >> 16;
+			out[2] = xrgb;
 			out += 3;
 		}
 		in += stride / 4;
