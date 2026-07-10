@@ -433,6 +433,7 @@ def test_retro_vec_env_same_step_final_obs_and_info(tmp_path):
         info_path=done_info,
         obs_resize=(16, 16),
         obs_grayscale=True,
+        frame_skip=4,
         frame_stack=2,
         info_filter="terminal",
     )
@@ -461,6 +462,234 @@ def test_retro_vec_env_same_step_final_obs_and_info(tmp_path):
         assert "terminal_observation" not in infos
         assert "reset_info" not in infos
         assert "TimeLimit.truncated" not in infos
+    finally:
+        env.close()
+
+
+def test_retro_vec_env_disabled_autoreset_keeps_terminal_lane_until_reset(tmp_path):
+    from gymnasium.vector import AutoresetMode
+
+    done_info = _done_on_frame_info_path(tmp_path)
+    manual_env = _make_crop_retro_vec_env(
+        tmp_path,
+        info_path=done_info,
+        obs_resize=(16, 16),
+        obs_grayscale=True,
+        frame_skip=4,
+        frame_stack=2,
+        info_filter="terminal",
+        autoreset_mode=AutoresetMode.DISABLED,
+    )
+    same_step_env = _make_crop_retro_vec_env(
+        tmp_path,
+        info_path=done_info,
+        obs_resize=(16, 16),
+        obs_grayscale=True,
+        frame_skip=4,
+        frame_stack=2,
+        info_filter="terminal",
+    )
+    try:
+        manual_obs, manual_reset_infos = manual_env.reset(seed=[123])
+        same_step_env.reset(seed=[123])
+        assert manual_env.metadata["autoreset_mode"] is AutoresetMode.DISABLED
+        assert "frame_reward_source" in _single_info(manual_reset_infos, 0)
+
+        actions = np.zeros((1, manual_env.num_buttons), dtype=np.uint8)
+        for _ in range(12):
+            manual_result = manual_env.step(actions)
+            same_step_result = same_step_env.step(actions)
+            manual_obs, _, manual_done, _, manual_infos = manual_result
+            same_step_obs, _, same_step_done, _, same_step_infos = same_step_result
+            if bool(manual_done[0]):
+                break
+        else:
+            pytest.fail("Dr88 fixture did not reach the terminal frame")
+
+        assert same_step_done.tolist() == [True]
+        manual_info = _single_info(manual_infos, 0)
+        same_step_info = _single_info(same_step_infos, 0)
+        assert "final_obs" not in manual_info
+        assert "final_info" not in manual_info
+        np.testing.assert_array_equal(manual_obs[0], same_step_info["final_obs"])
+
+        with pytest.raises(RuntimeError, match="pending reset"):
+            manual_env.step(actions)
+
+        reset_obs, reset_infos = manual_env.reset(
+            options={"reset_mask": np.array([True], dtype=np.bool_)},
+        )
+        np.testing.assert_array_equal(reset_obs[0], same_step_obs[0])
+        assert "frame_reward_source" in _single_info(reset_infos, 0)
+        manual_env.step(actions)
+    finally:
+        manual_env.close()
+        same_step_env.close()
+
+
+def test_retro_vec_env_masked_reset_preserves_unselected_lane(tmp_path):
+    from gymnasium.vector import AutoresetMode
+
+    kwargs = {
+        "autoreset_mode": AutoresetMode.DISABLED,
+        "info_filter": "all",
+        "noop_reset_max": 3,
+        "sticky_action_prob": 0.5,
+    }
+    info_path = _time_reward_info_path(tmp_path)
+    env = _make_dr88_retro_vec_env(tmp_path, info_path, **kwargs)
+    baseline_env = _make_dr88_retro_vec_env(tmp_path, info_path, **kwargs)
+    try:
+        obs, _ = env.reset(seed=[101, 202])
+        baseline_obs, _ = baseline_env.reset(seed=[101, 202])
+        np.testing.assert_array_equal(obs, baseline_obs)
+
+        actions = np.zeros((2, env.num_buttons), dtype=np.uint8)
+        actions[0, 0] = 1
+        actions[1, -1] = 1
+        for _ in range(2):
+            obs, rewards, terminated, truncated, infos = env.step(actions)
+            baseline_result = baseline_env.step(actions)
+            np.testing.assert_array_equal(obs, baseline_result[0])
+            np.testing.assert_array_equal(rewards, baseline_result[1])
+            np.testing.assert_array_equal(terminated, baseline_result[2])
+            np.testing.assert_array_equal(truncated, baseline_result[3])
+
+        lane_one_before_reset = obs[1].copy()
+        reset_obs, reset_infos = env.reset(
+            seed=[303, 999],
+            options={"reset_mask": np.array([True, False], dtype=np.bool_)},
+        )
+        np.testing.assert_array_equal(reset_obs[1], lane_one_before_reset)
+        assert "frame_reward_source" in _single_info(reset_infos, 0)
+        assert _single_info(reset_infos, 1) == {}
+
+        for _ in range(3):
+            result = env.step(actions)
+            baseline_result = baseline_env.step(actions)
+            np.testing.assert_array_equal(result[0][1], baseline_result[0][1])
+            assert result[1][1] == baseline_result[1][1]
+            assert result[2][1] == baseline_result[2][1]
+            assert result[3][1] == baseline_result[3][1]
+            assert _single_info(result[4], 1) == _single_info(baseline_result[4], 1)
+    finally:
+        env.close()
+        baseline_env.close()
+
+
+@pytest.mark.parametrize(
+    ("options", "error", "message"),
+    [
+        ({"reset_mask": [True, False]}, TypeError, "NumPy array"),
+        (
+            {"reset_mask": np.array([True], dtype=np.bool_)},
+            ValueError,
+            "shape",
+        ),
+        (
+            {"reset_mask": np.array([1, 0], dtype=np.uint8)},
+            TypeError,
+            "dtype",
+        ),
+        (
+            {"reset_mask": np.array([False, False], dtype=np.bool_)},
+            ValueError,
+            "at least one lane",
+        ),
+    ],
+)
+def test_retro_vec_env_reset_mask_validation(tmp_path, options, error, message):
+    env = _make_test_retro_vec_env(tmp_path)
+    try:
+        with pytest.raises(error, match=message):
+            env.reset(options=options)
+    finally:
+        env.close()
+
+
+def test_retro_vec_env_rejects_next_step_autoreset(tmp_path):
+    from gymnasium.vector import AutoresetMode
+
+    with pytest.raises(ValueError, match="SAME_STEP or AutoresetMode.DISABLED"):
+        _make_test_retro_vec_env(
+            tmp_path,
+            autoreset_mode=AutoresetMode.NEXT_STEP,
+        )
+
+
+def test_retro_vec_env_explicit_start_indices_and_per_lane_seeds():
+    from gymnasium.vector import AutoresetMode
+
+    rom_path = _mario_rom_path_or_skip()
+    kwargs = {
+        "state": {"Level1-1": 0.5, "Level1-2": 0.5},
+        "autoreset_mode": AutoresetMode.DISABLED,
+        "info_filter": "all",
+        "noop_reset_max": 3,
+        "sticky_action_prob": 0.5,
+    }
+    env = _make_mario_retro_vec_env(2, rom_path, **kwargs)
+    twin = _make_mario_retro_vec_env(2, rom_path, **kwargs)
+    mask = np.array([True, False], dtype=np.bool_)
+    try:
+        obs, _ = env.reset(seed=123)
+        twin_obs, _ = twin.reset(seed=[123, 124])
+        np.testing.assert_array_equal(obs, twin_obs)
+
+        lane_one_before = obs[1].copy()
+        reset_obs, reset_infos = env.reset(
+            seed=[777, 999],
+            options={
+                "reset_mask": mask,
+                "start_indices": np.array([1, 999], dtype=np.int32),
+            },
+        )
+        assert env.active_states()[0] == "Level1-2"
+        np.testing.assert_array_equal(reset_obs[1], lane_one_before)
+        assert _single_info(reset_infos, 0)["start_state"] == "Level1-2"
+        assert _single_info(reset_infos, 1) == {}
+
+        sampled_obs, _ = env.reset(
+            seed=[888, None],
+            options={
+                "reset_mask": mask,
+                "start_indices": np.array([-1, -1], dtype=np.int32),
+            },
+        )
+        assert env.active_states()[0] in {"Level1-1", "Level1-2"}
+        np.testing.assert_array_equal(sampled_obs[1], lane_one_before)
+    finally:
+        env.close()
+        twin.close()
+
+
+def test_retro_vec_env_manual_reset_validates_before_mutation(tmp_path):
+    env = _make_test_retro_vec_env(tmp_path)
+    try:
+        obs, _ = env.reset(seed=[11, 22])
+        before = obs.copy()
+        invalid_mask = np.array([True, False], dtype=np.bool_)
+
+        with pytest.raises(ValueError, match="seed sequence length"):
+            env.reset(seed=[123], options={"reset_mask": invalid_mask})
+        with pytest.raises(TypeError, match="start_indices.*dtype"):
+            env.reset(
+                options={
+                    "reset_mask": invalid_mask,
+                    "start_indices": np.array([0, -1], dtype=np.int64),
+                },
+            )
+        with pytest.raises(RuntimeError, match="valid initial-state catalog ind"):
+            env.reset(
+                options={
+                    "reset_mask": invalid_mask,
+                    "start_indices": np.array([0, -1], dtype=np.int32),
+                },
+            )
+        with pytest.raises(ValueError, match="unsupported reset option"):
+            env.reset(options={"reset_mask": invalid_mask, "unknown": True})
+
+        np.testing.assert_array_equal(env._observations, before)
     finally:
         env.close()
 
@@ -1703,10 +1932,12 @@ def test_retro_vec_env_forwards_per_env_reset_seeds():
 
     class FakeNative:
         def __init__(self):
-            self.reset_seeds = []
+            self.reset_calls = []
 
-        def reset(self, seed):
-            self.reset_seeds.append(seed)
+        def reset(self, seed, reset_mask, start_indices):
+            self.reset_calls.append(
+                (seed, reset_mask.copy(), start_indices.copy()),
+            )
             return np.zeros((3, 2, 2, 1), dtype=np.uint8), [{}, {}, {}]
 
     env = RetroVecEnv.__new__(RetroVecEnv)
@@ -1719,7 +1950,11 @@ def test_retro_vec_env_forwards_per_env_reset_seeds():
     obs = env.reset()[0]
 
     assert obs.shape == (3, 2, 2, 1)
-    assert env.native.reset_seeds == [[11, None, 37]]
+    assert len(env.native.reset_calls) == 1
+    seeds, reset_mask, start_indices = env.native.reset_calls[0]
+    assert seeds == [11, None, 37]
+    np.testing.assert_array_equal(reset_mask, np.ones(3, dtype=np.bool_))
+    np.testing.assert_array_equal(start_indices, np.full(3, -1, dtype=np.int32))
     assert env._seeds == [None, None, None]
 
 
@@ -2550,3 +2785,172 @@ def test_retro_vec_env_mario_noop_seed_divergence(obs_copy):
 
     _assert_native_traces_equal(seed_123_first, seed_123_second)
     assert not _native_traces_equal(seed_123_first, seed_456)
+
+
+def test_retro_vec_env_autoreset_mode_is_instance_local_and_rejects_next_step(
+    tmp_path,
+):
+    from gymnasium.vector import AutoresetMode
+
+    disabled = _make_test_retro_vec_env(
+        tmp_path,
+        autoreset_mode=AutoresetMode.DISABLED,
+    )
+    same_step = _make_test_retro_vec_env(tmp_path)
+    try:
+        assert disabled.autoreset_mode is AutoresetMode.DISABLED
+        assert disabled.metadata["autoreset_mode"] is AutoresetMode.DISABLED
+        assert same_step.autoreset_mode is AutoresetMode.SAME_STEP
+        assert same_step.metadata["autoreset_mode"] is AutoresetMode.SAME_STEP
+        assert type(disabled).metadata["autoreset_mode"] is AutoresetMode.SAME_STEP
+    finally:
+        disabled.close()
+        same_step.close()
+
+    with pytest.raises(ValueError, match="autoreset_mode"):
+        _make_test_retro_vec_env(
+            tmp_path,
+            autoreset_mode=AutoresetMode.NEXT_STEP,
+        )
+
+
+def test_retro_vec_env_disabled_terminal_lifecycle_and_masked_reset():
+    from gymnasium.vector import AutoresetMode
+
+    rom_path = _mario_rom_path_or_skip()
+    env = _make_mario_retro_vec_env(
+        2,
+        rom_path,
+        state=["Level1-1", "Level1-1"],
+        info_filter="all",
+        done_on={"x_progress": [["xscrollHi", "xscrollLo"], "change"]},
+        autoreset_mode=AutoresetMode.DISABLED,
+        obs_copy="safe_view",
+    )
+    actions = np.zeros((2, env.num_buttons), dtype=np.uint8)
+    actions[0, 7] = 1
+    try:
+        env.reset(seed=[123, 456])
+        for _ in range(80):
+            obs, _rewards, terminated, truncated, infos = env.step(actions)
+            if terminated[0]:
+                break
+        else:
+            pytest.fail("x scroll did not change enough to terminate lane 0")
+
+        assert terminated.tolist() == [True, False]
+        assert not np.any(truncated)
+        assert "final_obs" not in infos
+        assert "final_info" not in infos
+        assert bool(infos["_xscrollHi"][0])
+        terminal_obs = obs.copy()
+        retained_obs = obs
+
+        with pytest.raises(RuntimeError, match="pending reset"):
+            env.step(actions)
+
+        reset_mask = np.array([True, False], dtype=np.bool_)
+        options = {"reset_mask": reset_mask}
+        reset_obs, reset_infos = env.reset(options=options)
+        assert options["reset_mask"] is reset_mask
+        np.testing.assert_array_equal(retained_obs, terminal_obs)
+        np.testing.assert_array_equal(reset_obs[1], terminal_obs[1])
+        assert bool(reset_infos["_xscrollHi"][0])
+        assert not bool(reset_infos["_xscrollHi"][1])
+        env.step(np.zeros_like(actions))
+    finally:
+        env.close()
+
+
+def test_retro_vec_env_masked_reset_preserves_unselected_lane_trajectory():
+    from gymnasium.vector import AutoresetMode
+
+    rom_path = _mario_rom_path_or_skip()
+    kwargs = dict(
+        state={"Level1-1": 1.0, "Level1-2": 1.0},
+        info_filter="all",
+        autoreset_mode=AutoresetMode.DISABLED,
+        noop_reset_max=3,
+        sticky_action_prob=0.5,
+        obs_copy="safe_view",
+    )
+    env = _make_mario_retro_vec_env(4, rom_path, **kwargs)
+    control = _make_mario_retro_vec_env(4, rom_path, **kwargs)
+    actions = np.zeros((4, env.num_buttons), dtype=np.uint8)
+    actions[:, 7] = 1
+    try:
+        first = env.reset(seed=20260710)[0]
+        control_first = control.reset(seed=20260710)[0]
+        np.testing.assert_array_equal(first, control_first)
+        env.step(actions)
+        control.step(actions)
+
+        mask = np.array([False, True, False, True], dtype=np.bool_)
+        before = env._observations.copy()
+        reset_obs, reset_infos = env.reset(
+            seed=[999, 1000, 1001, 1002],
+            options={"reset_mask": mask},
+        )
+        np.testing.assert_array_equal(reset_obs[~mask], before[~mask])
+        for key in ("x_pos", "state", "start_state"):
+            if key in reset_infos:
+                assert np.asarray(reset_infos[f"_{key}"])[~mask].tolist() == [False, False]
+
+        env_step = env.step(actions)
+        control_step = control.step(actions)
+        np.testing.assert_array_equal(env_step[0][~mask], control_step[0][~mask])
+        np.testing.assert_array_equal(env_step[1][~mask], control_step[1][~mask])
+        np.testing.assert_array_equal(env.active_state_indices()[~mask], control.active_state_indices()[~mask])
+    finally:
+        env.close()
+        control.close()
+
+
+def test_retro_vec_env_explicit_start_indices_and_validation_are_atomic():
+    from gymnasium.vector import AutoresetMode
+
+    rom_path = _mario_rom_path_or_skip()
+    env = _make_mario_retro_vec_env(
+        3,
+        rom_path,
+        state={"Level1-1": 1.0, "Level1-2": 1.0},
+        info_filter="all",
+        autoreset_mode=AutoresetMode.DISABLED,
+    )
+    try:
+        obs, _ = env.reset(seed=7)
+        before = obs.copy()
+        before_states = env.active_states()
+        mask = np.array([True, False, True], dtype=np.bool_)
+        starts = np.array([1, 999, 0], dtype=np.int32)
+        _, infos = env.reset(options={"reset_mask": mask, "start_indices": starts})
+        assert env.active_states() == ("Level1-2", before_states[1], "Level1-1")
+        assert _single_info(infos, 0)["start_state"] == "Level1-2"
+        assert _single_info(infos, 2)["start_state"] == "Level1-1"
+
+        snapshot = env._observations.copy()
+        active = env.active_state_indices().copy()
+        with pytest.raises((RuntimeError, ValueError), match="start_indices"):
+            env.reset(
+                options={
+                    "reset_mask": np.array([True, False, False], dtype=np.bool_),
+                    "start_indices": np.array([9, -1, -1], dtype=np.int32),
+                }
+            )
+        np.testing.assert_array_equal(env._observations, snapshot)
+        np.testing.assert_array_equal(env.active_state_indices(), active)
+
+        invalid_masks = [
+            [True, False, False],
+            np.array([True, False], dtype=np.bool_),
+            np.array([1, 0, 0], dtype=np.int8),
+            np.zeros(3, dtype=np.bool_),
+        ]
+        for invalid in invalid_masks:
+            with pytest.raises((TypeError, ValueError), match="reset_mask"):
+                env.reset(options={"reset_mask": invalid})
+        with pytest.raises(ValueError, match="seed sequence"):
+            env.reset(seed=[1, 2])
+        np.testing.assert_array_equal(before.shape, snapshot.shape)
+    finally:
+        env.close()

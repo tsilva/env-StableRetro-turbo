@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+* add Gymnasium-compatible native vector lifecycle controls
+  * keep `AutoresetMode.SAME_STEP` as the default and add `DISABLED` manual mode
+  * add native masked lane reset through `options["reset_mask"]`
+  * accept scalar or per-lane reset seeds without advancing unselected RNGs
+  * add explicit catalog selection through `options["start_indices"]`
+  * return terminal transitions directly in disabled mode and reject stepping
+    lanes that remain pending reset
 * add scenario-defined custom info events for native `done_on` terminals
   * events may use compact rules or verbose multi-trigger definitions
   * `SuperMarioBros-Nes-v0` now declares `life_loss` and `level_change` in

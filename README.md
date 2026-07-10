@@ -163,7 +163,7 @@ the full-canvas path for later fine-tuning on unmasked observations.
 Gymnasium vector API directly. It does not subclass SB3 `VecEnv`, and
 `stable-baselines3` is not a runtime dependency for the native vector path.
 
-The native env uses Gymnasium same-step autoreset semantics:
+The native env defaults to Gymnasium same-step autoreset semantics:
 
 ```python
 obs, infos = env.reset(seed=seed)
@@ -176,6 +176,51 @@ reset observation. The final episode observation and info are exposed through
 downstream responsibility; for example, use an adapter in `rlab` rather than
 expecting this package to emit SB3-only `terminal_observation`, `reset_infos`, or
 `TimeLimit.truncated` fields.
+
+For runtimes that own episode boundaries, select manual autoreset and reset only
+finished lanes:
+
+```python
+import stable_retro
+from gymnasium.vector import AutoresetMode
+
+env = stable_retro.RetroVecEnv(
+    "SuperMarioBros-Nes-v0",
+    num_envs=16,
+    autoreset_mode=AutoresetMode.DISABLED,
+)
+obs, infos = env.reset(seed=list(range(16)))
+obs, rewards, terminations, truncations, infos = env.step(actions)
+done = terminations | truncations
+if done.any():
+    obs, reset_infos = env.reset(options={"reset_mask": done})
+```
+
+In disabled mode, terminal observations and infos are returned directly from
+`step()`. A terminated lane cannot be stepped again until it is selected by a
+masked reset. Unselected lanes retain their emulator state, RNG stream,
+observation/frame stack, and sticky-action history. Reset infos are columnar and
+only mark selected lanes as present.
+
+`reset_mask` must be a NumPy `bool` array with shape `(num_envs,)` and at least
+one selected lane. A scalar reset seed expands to `seed + lane_index`; a seed
+sequence must contain exactly one integer or `None` per lane. During a masked
+reset, unselected seed entries are ignored. For environments constructed with a
+start-state catalog, `start_indices` is an `int32` array of the same shape:
+
+```python
+mask = np.array([False, True, False, True], dtype=np.bool_)
+starts = np.array([-1, 1, -1, 0], dtype=np.int32)
+obs, reset_infos = env.reset(
+    seed=[None, 101, None, 303],
+    options={"reset_mask": mask, "start_indices": starts},
+)
+```
+
+Nonnegative values select that catalog entry atomically; `-1` keeps the
+configured fixed/per-lane/weighted policy. Values and seeds for unselected lanes
+are ignored. `active_state_indices()` and `active_states()` change only for
+selected lanes.
 
 ## Commands
 

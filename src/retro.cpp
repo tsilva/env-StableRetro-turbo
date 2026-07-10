@@ -1374,7 +1374,8 @@ public:
 		py::object initialStateLabelsObj = py::none(),
 		py::object initialStateWeightsObj = py::none(),
 		py::object maskCropObj = py::none(),
-		int cropFill = 0
+		int cropFill = 0,
+		bool autoresetSameStep = true
 	)
 		: m_numButtons(numButtons)
 		, m_frameSkip(frameSkip)
@@ -1395,6 +1396,7 @@ public:
 		, m_fullInfo(infoFilterMode == "all")
 		, m_noInfo(infoFilterMode == "none")
 		, m_unsafeZeroCopy(unsafeView)
+		, m_autoresetSameStep(autoresetSameStep)
 		, m_numThreads(numThreads) {
 		if (numEnvs == 0) {
 			throw std::runtime_error("num_envs must be positive");
@@ -1626,22 +1628,68 @@ public:
 		return m_initialStates.front().state;
 	}
 
-	py::tuple reset(py::object seedObj = py::none()) {
+	py::tuple reset(
+		py::object seedObj = py::none(),
+		py::object resetMaskObj = py::none(),
+		py::object startIndicesObj = py::none()
+	) {
+		std::vector<uint8_t> resetMask(m_slots.size(), 1);
+		if (!resetMaskObj.is_none()) {
+			py::array resetMaskArray = py::cast<py::array>(resetMaskObj);
+			if (!py::isinstance<py::array_t<bool>>(resetMaskArray) || resetMaskArray.ndim() != 1 || static_cast<size_t>(resetMaskArray.shape(0)) != m_slots.size()) {
+				throw std::runtime_error("reset_mask must be a one-dimensional bool array with num_envs entries");
+			}
+			auto values = resetMaskArray.cast<py::array_t<bool>>().unchecked<1>();
+			bool any = false;
+			for (size_t i = 0; i < m_slots.size(); ++i) {
+				resetMask[i] = values(static_cast<py::ssize_t>(i)) ? 1 : 0;
+				any = any || resetMask[i] != 0;
+			}
+			if (!any) {
+				throw std::runtime_error("reset_mask must select at least one lane");
+			}
+		}
+
+		std::vector<int32_t> startIndices(m_slots.size(), -1);
+		if (!startIndicesObj.is_none()) {
+			py::array startArray = py::cast<py::array>(startIndicesObj);
+			if (!py::isinstance<py::array_t<int32_t>>(startArray) || startArray.ndim() != 1 || static_cast<size_t>(startArray.shape(0)) != m_slots.size()) {
+				throw std::runtime_error("start_indices must be a one-dimensional int32 array with num_envs entries");
+			}
+			auto values = startArray.cast<py::array_t<int32_t>>().unchecked<1>();
+			for (size_t i = 0; i < m_slots.size(); ++i) {
+				if (!resetMask[i]) {
+					continue;
+				}
+				const int32_t value = values(static_cast<py::ssize_t>(i));
+				if (value < -1 || (value >= 0 && static_cast<size_t>(value) >= m_initialStates.size())) {
+					throw std::runtime_error("selected start_indices entries must be -1 or valid initial-state catalog indices");
+				}
+				startIndices[i] = value;
+			}
+		}
+
+		std::vector<uint32_t> seedValues(m_slots.size(), 0);
+		std::vector<uint8_t> hasSeed(m_slots.size(), 0);
 		if (!seedObj.is_none()) {
 			if (PyLong_Check(seedObj.ptr())) {
 				const uint64_t seed = seedObj.cast<uint64_t>();
 				for (size_t i = 0; i < m_slots.size(); ++i) {
-					m_slots[i]->rng.seed(static_cast<uint32_t>(seed + i));
+					if (resetMask[i]) {
+						seedValues[i] = static_cast<uint32_t>(seed + i);
+						hasSeed[i] = 1;
+					}
 				}
 			} else {
-				py::sequence seeds = py::reinterpret_borrow<py::sequence>(seedObj);
-				if (static_cast<size_t>(seeds.size()) != m_slots.size()) {
+				py::sequence seedSequence = py::reinterpret_borrow<py::sequence>(seedObj);
+				if (static_cast<size_t>(seedSequence.size()) != m_slots.size()) {
 					throw std::runtime_error("seed sequence length must match num_envs");
 				}
 				for (size_t i = 0; i < m_slots.size(); ++i) {
-					py::object seed = seeds[static_cast<py::ssize_t>(i)];
-					if (!seed.is_none()) {
-						m_slots[i]->rng.seed(seed.cast<uint32_t>());
+					py::object seed = seedSequence[static_cast<py::ssize_t>(i)];
+					if (resetMask[i] && !seed.is_none()) {
+						seedValues[i] = seed.cast<uint32_t>();
+						hasSeed[i] = 1;
 					}
 				}
 			}
@@ -1653,7 +1701,12 @@ public:
 			py::gil_scoped_release release;
 			batchThreadPool(m_numThreads).parallelFor(m_slots.size(), [&](size_t index) {
 				try {
-					resetSlot(*m_slots[index], obsData + index * m_stackedObsSize);
+					if (resetMask[index]) {
+						if (hasSeed[index]) m_slots[index]->rng.seed(seedValues[index]);
+						resetSlot(*m_slots[index], obsData + index * m_stackedObsSize, startIndices[index]);
+					} else {
+						writeStackedObservation(*m_slots[index], obsData + index * m_stackedObsSize);
+					}
 				} catch (const std::exception& exc) {
 					m_errors[index] = exc.what();
 				} catch (...) {
@@ -1662,7 +1715,10 @@ public:
 			});
 		}
 		throwFirstError(m_errors);
-		return py::make_tuple(obsArray, resetInfos());
+		m_anyPendingReset = std::any_of(m_slots.begin(), m_slots.end(), [](const auto& slot) {
+			return slot->pendingReset;
+		});
+		return py::make_tuple(obsArray, resetInfos(resetMask));
 	}
 
 	py::array_t<int32_t> activeStateIndices() {
@@ -1747,27 +1803,35 @@ public:
 	}
 
 	void addStartStateInfo(py::dict& info, const std::string& label) const {
-		if (!m_reportInitialState) {
+		if (label.empty()) {
 			return;
 		}
 		info["start_state"] = label;
 		info["state"] = label;
 	}
 
-	py::list resetInfos() const {
-		if (!m_reportInitialState) {
+	py::list resetInfos(const std::vector<uint8_t>& resetMask) const {
+		if ((m_autoresetSameStep || m_noInfo) && !m_reportInitialState) {
 			return m_emptyInfos;
 		}
 		py::list infos;
-		for (const auto& slot : m_slots) {
+		for (size_t i = 0; i < m_slots.size(); ++i) {
 			py::dict info = py::dict();
-			addStartStateInfo(info, slot->currentStartStateLabel);
+			if (resetMask[i]) {
+				if (!m_autoresetSameStep && !m_noInfo) {
+					info = lookupInfo(*m_slots[i]);
+				}
+				addStartStateInfo(info, m_slots[i]->currentStartStateLabel);
+			}
 			infos.append(info);
 		}
 		return infos;
 	}
 
 	py::tuple step(py::array_t<uint8_t> masks) {
+		if (!m_autoresetSameStep && m_anyPendingReset) {
+			throw std::runtime_error("cannot step while a terminated lane is pending reset; call reset(options={'reset_mask': ...}) first");
+		}
 		auto mask = masks.unchecked<2>();
 		if (static_cast<size_t>(mask.shape(0)) != m_slots.size()) {
 			throw std::runtime_error("actions first dimension must match num_envs");
@@ -1789,7 +1853,13 @@ public:
 					for (int key = 0; key < m_numButtons; ++key) {
 						action[static_cast<size_t>(key)] = mask(static_cast<py::ssize_t>(index), key) ? 1 : 0;
 					}
-					stepSlot(*m_slots[index], action, obsData + index * m_stackedObsSize, output, !m_noInfo);
+					stepSlot(
+						*m_slots[index],
+						action,
+						obsData + index * m_stackedObsSize,
+						output,
+						!m_noInfo && m_autoresetSameStep
+					);
 					outputs[index] = std::move(output);
 				} catch (const std::exception& exc) {
 					m_errors[index] = exc.what();
@@ -1806,6 +1876,7 @@ public:
 			doneData[i] = outputs[i].done;
 			if (outputs[i].done) {
 				m_terminalObservations[i] = std::move(outputs[i].terminalObservation);
+				if (!m_autoresetSameStep) m_anyPendingReset = true;
 			}
 		}
 		if (m_noInfo) {
@@ -1814,10 +1885,10 @@ public:
 		py::list infos;
 		for (size_t i = 0; i < m_slots.size(); ++i) {
 			py::dict info = py::dict();
-			if (m_fullInfo || !m_terminalObservations[i].empty()) {
+			if (m_fullInfo || outputs[i].done) {
 				info = lookupInfo(*m_slots[i]);
 			}
-			if (m_reportInitialState && (m_fullInfo || !m_terminalObservations[i].empty())) {
+			if (m_reportInitialState && (m_fullInfo || outputs[i].done)) {
 				addStartStateInfo(info, outputs[i].startStateLabel);
 			}
 			if (!m_terminalObservations[i].empty()) {
@@ -2135,6 +2206,7 @@ private:
 		std::vector<uint8_t> action;
 		std::vector<uint8_t> lastMask;
 		bool hasLastMask = false;
+		bool pendingReset = false;
 		bool usesIndexedVideo = false;
 		std::vector<std::vector<int64_t>> doneOnInfoBaselines;
 		std::string currentStartStateLabel;
@@ -2369,8 +2441,10 @@ private:
 		return -1;
 	}
 
-	void resetSlot(Slot& slot, uint8_t* dst) {
-		const int32_t initialStateIndex = initialStateIndexForReset(slot);
+	void resetSlot(Slot& slot, uint8_t* dst, int32_t explicitInitialStateIndex = -1) {
+		const int32_t initialStateIndex = explicitInitialStateIndex >= 0
+			? explicitInitialStateIndex
+			: initialStateIndexForReset(slot);
 		const InitialStateChoice* initialState =
 			initialStateIndex >= 0 ? &m_initialStates[static_cast<size_t>(initialStateIndex)] : nullptr;
 		if (initialState && !initialState->state.empty()) {
@@ -2385,6 +2459,7 @@ private:
 			m_activeInitialStateIndices[slot.index] = -1;
 		}
 		slot.hasLastMask = false;
+		slot.pendingReset = false;
 		std::fill(slot.lastMask.begin(), slot.lastMask.end(), 0);
 		clearKeys(slot);
 		slot.emulator->m_re.run();
@@ -2473,6 +2548,7 @@ private:
 	}
 
 	void stepSlot(Slot& slot, const std::vector<uint8_t>& requestedAction, uint8_t* dst, StepOutput& output, bool captureTerminalObservation) {
+		const bool preserveTerminalFrame = captureTerminalObservation || !m_autoresetSameStep;
 		const std::vector<uint8_t>* action = &requestedAction;
 		if (m_stickyActionProb > 0.0) {
 			bool repeatPreviousAction = false;
@@ -2504,7 +2580,7 @@ private:
 				m_maxpoolLastTwo ? (i >= m_frameSkip - 2) : (i == m_frameSkip - 1);
 			bool skippedRender = false;
 			if (m_renderSkipEnabled && !mayNeedPixels) {
-				if (captureTerminalObservation) {
+				if (preserveTerminalFrame) {
 					const size_t stateSize = slot.emulator->m_re.serializeSize();
 					preSkipState.resize(stateSize);
 					if (!slot.emulator->m_re.serialize(preSkipState.data(), stateSize)) {
@@ -2521,7 +2597,7 @@ private:
 			const bool scenarioDone = slot.data.m_scen.isDone();
 			const bool doneOnInfo = checkDoneOnInfo(slot, output);
 			done = scenarioDone || doneOnInfo;
-			if (done && skippedRender && captureTerminalObservation) {
+			if (done && skippedRender && preserveTerminalFrame) {
 				if (!slot.emulator->m_re.unserialize(preSkipState.data(), preSkipState.size())) {
 					throw std::runtime_error("failed to restore pre-render-skip terminal state");
 				}
@@ -2580,11 +2656,21 @@ private:
 							output.terminalObservation.resize(m_stackedObsSize);
 							writeStackedObservation(slot, output.terminalObservation.data());
 							output.terminalInfo = captureInfo(slot);
-							resetSlot(slot, dst);
+							if (m_autoresetSameStep) {
+								resetSlot(slot, dst);
+							} else {
+								writeStackedObservation(slot, dst);
+								slot.pendingReset = true;
+							}
 							output.resetStartStateLabel = slot.currentStartStateLabel;
 						} else if (done) {
 							output.terminalInfo = captureInfo(slot);
-							resetSlot(slot, dst);
+							if (m_autoresetSameStep) {
+								resetSlot(slot, dst);
+							} else {
+								writeStackedObservation(slot, dst);
+								slot.pendingReset = true;
+							}
 							output.resetStartStateLabel = slot.currentStartStateLabel;
 					} else {
 						writeStackedObservation(slot, dst);
@@ -2651,11 +2737,21 @@ private:
 				output.terminalObservation.resize(m_stackedObsSize);
 				writeStackedObservation(slot, output.terminalObservation.data());
 				output.terminalInfo = captureInfo(slot);
-				resetSlot(slot, dst);
+				if (m_autoresetSameStep) {
+					resetSlot(slot, dst);
+				} else {
+					writeStackedObservation(slot, dst);
+					slot.pendingReset = true;
+				}
 				output.resetStartStateLabel = slot.currentStartStateLabel;
 			} else if (done) {
 				output.terminalInfo = captureInfo(slot);
-				resetSlot(slot, dst);
+				if (m_autoresetSameStep) {
+					resetSlot(slot, dst);
+				} else {
+					writeStackedObservation(slot, dst);
+					slot.pendingReset = true;
+				}
 				output.resetStartStateLabel = slot.currentStartStateLabel;
 		} else {
 			writeStackedObservation(slot, dst);
@@ -2710,6 +2806,8 @@ private:
 	bool m_unsafeZeroCopy = false;
 	bool m_channelsFirst = false;
 	bool m_renderSkipEnabled = false;
+	bool m_autoresetSameStep = true;
+	bool m_anyPendingReset = false;
 	std::vector<DoneOnInfoRule> m_doneOnInfoRules;
 	std::vector<std::string> m_infoKeys;
 	std::vector<std::pair<std::string, Variable>> m_infoVariables;
@@ -2991,7 +3089,8 @@ PYBIND11_MODULE(_retro, m) {
 				py::object,
 				py::object,
 				py::object,
-				int>(),
+				int,
+				bool>(),
 			py::arg("num_envs"),
 			py::arg("rom_path"),
 			py::arg("data_path"),
@@ -3020,9 +3119,16 @@ PYBIND11_MODULE(_retro, m) {
 			py::arg("initial_state_labels") = py::none(),
 			py::arg("initial_state_weights") = py::none(),
 			py::arg("mask_crop") = py::none(),
-			py::arg("crop_fill") = 0
+			py::arg("crop_fill") = 0,
+			py::arg("autoreset_same_step") = true
 		)
-		.def("reset", &PyRetroVecEnv::reset, py::arg("seed") = py::none())
+		.def(
+			"reset",
+			&PyRetroVecEnv::reset,
+			py::arg("seed") = py::none(),
+			py::arg("reset_mask") = py::none(),
+			py::arg("start_indices") = py::none()
+		)
 		.def("step", &PyRetroVecEnv::step)
 		.def("active_state_indices", &PyRetroVecEnv::activeStateIndices)
 		.def("initial_state_policy_names", &PyRetroVecEnv::initialStatePolicyNames)

@@ -23,8 +23,14 @@ class RetroVecEnv(VectorEnv):
     """Gymnasium vector env for stable-retro rollouts.
 
     This is the supported high-throughput path. C++ owns the emulator pool,
-    frame skip, preprocessing, frame stacking, autoreset, reward/done
-    evaluation, and batched observation buffer.
+    frame skip, preprocessing, frame stacking, reward/done evaluation, and
+    batched observation buffer.
+
+    ``autoreset_mode`` defaults to Gymnasium same-step autoreset for backwards
+    compatibility. With ``AutoresetMode.DISABLED``, terminated lanes keep their
+    terminal observation and cannot be stepped again until selected with
+    ``reset(options={"reset_mask": mask})``. Masked reset leaves every
+    unselected lane untouched.
 
     ``state`` accepts a single state name, a sequence of one state per env slot,
     or a mapping of state names to non-negative sampling weights. Mapping weights
@@ -33,9 +39,10 @@ class RetroVecEnv(VectorEnv):
     used by future resets and autoresets.
 
     Native info-transition termination is opt-in and game/config-specific.
-    Pass done_on={"name": ("key", "decrease")} to terminate and autoreset
-    only lanes whose post-reset baseline changes as requested. Supported ops
-    are "change", "increase", and "decrease"; variables may be a string or a
+    Pass done_on={"name": ("key", "decrease")} to terminate only lanes whose
+    post-reset baseline changes as requested. In same-step mode those lanes are
+    autoreset; in disabled mode they remain terminal until explicitly reset.
+    Supported ops are "change", "increase", and "decrease"; variables may be a
     sequence of strings. Named scenario events can also declare multiple
     trigger objects. Fired rules are reported in info["done_on_info"] with
     list-shaped "keys"/"variables", "prev", and "next" values, including
@@ -80,6 +87,7 @@ class RetroVecEnv(VectorEnv):
         reward_clip=False,
         info_filter="all",
         done_on=None,
+        autoreset_mode: AutoresetMode | str = AutoresetMode.SAME_STEP,
     ):
         import stable_retro as retro
         from stable_retro import _retro
@@ -104,8 +112,12 @@ class RetroVecEnv(VectorEnv):
             "sticky_action_prob",
         )
         reward_clip = RetroEnv._normalize_reward_clip(reward_clip)
+        autoreset_mode = self._normalize_autoreset_mode(autoreset_mode)
 
         self.closed = False
+        self.autoreset_mode = autoreset_mode
+        self.metadata = dict(type(self).metadata)
+        self.metadata["autoreset_mode"] = autoreset_mode
         self._observations = None
         self._seeds = [None for _ in range(num_envs)]
         self._options = [None for _ in range(num_envs)]
@@ -277,12 +289,32 @@ class RetroVecEnv(VectorEnv):
             initial_state_weights,
             crop_mask,
             obs_crop_fill,
+            autoreset_mode is AutoresetMode.SAME_STEP,
         )
         self.num_envs = num_envs
         self.initial_state_names = tuple(self.native.initial_state_names)
         self._active_state_indices = self.native.active_state_indices()
         self._active_state_indices.setflags(write=False)
         self._active_state_names = [None for _ in range(self.num_envs)]
+
+    @staticmethod
+    def _normalize_autoreset_mode(value):
+        if isinstance(value, AutoresetMode):
+            mode = value
+        else:
+            try:
+                mode = AutoresetMode(value)
+            except (TypeError, ValueError):
+                name = str(value).split(".")[-1].upper()
+                try:
+                    mode = AutoresetMode[name]
+                except KeyError as exc:
+                    raise ValueError(f"unsupported autoreset_mode: {value!r}") from exc
+        if mode not in (AutoresetMode.SAME_STEP, AutoresetMode.DISABLED):
+            raise ValueError(
+                "autoreset_mode must be AutoresetMode.SAME_STEP or AutoresetMode.DISABLED",
+            )
+        return mode
 
     def set_state_policy(self, state):
         """Update the reset policy used at future episode boundaries.
@@ -1026,10 +1058,36 @@ class RetroVecEnv(VectorEnv):
 
     def reset(self, *, seed: int | Sequence[int | None] | None = None, options=None):
         super().reset(seed=None if isinstance(seed, Sequence) else seed)
+        reset_options = {} if options is None else dict(options)
+        reset_mask = reset_options.pop("reset_mask", None)
+        if reset_mask is None:
+            reset_mask = np.ones(self.num_envs, dtype=np.bool_)
+        elif not isinstance(reset_mask, np.ndarray):
+            raise TypeError("options['reset_mask'] must be a NumPy array")
+        elif reset_mask.shape != (self.num_envs,):
+            raise ValueError(f"options['reset_mask'] must have shape {(self.num_envs,)}")
+        elif reset_mask.dtype != np.bool_:
+            raise TypeError("options['reset_mask'] must have dtype np.bool_")
+        elif not np.any(reset_mask):
+            raise ValueError("options['reset_mask'] must select at least one lane")
+
+        start_indices = reset_options.pop("start_indices", None)
+        if reset_options:
+            names = ", ".join(sorted(reset_options))
+            raise ValueError(f"unsupported reset option(s): {names}")
+        if start_indices is None:
+            start_indices = np.full(self.num_envs, -1, dtype=np.int32)
+        elif not isinstance(start_indices, np.ndarray):
+            raise TypeError("options['start_indices'] must be a NumPy array")
+        elif start_indices.shape != (self.num_envs,):
+            raise ValueError(f"options['start_indices'] must have shape {(self.num_envs,)}")
+        elif start_indices.dtype != np.int32:
+            raise TypeError("options['start_indices'] must have dtype np.int32")
+
         seeds = self._normalize_reset_seed(seed)
-        obs, infos = self.native.reset(seeds)
+        obs, infos = self.native.reset(seeds, reset_mask, start_indices)
         self._observations = np.asarray(obs, dtype=np.uint8)
-        self._refresh_active_state_names()
+        self._refresh_active_state_names(np.flatnonzero(reset_mask))
         self._reset_seeds()
         self._reset_options()
         return self._obs(), self._list_infos_to_dict(infos)
