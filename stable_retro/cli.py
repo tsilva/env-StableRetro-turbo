@@ -11,7 +11,6 @@ import stable_retro as retro
 
 
 PREFERRED_GAMES = {
-    "Atari2600": "Breakout-Atari2600-v0",
     "GameBoy": "GradiusTheInterstellarAssault-GameBoy-v0",
     "Genesis": "Airstriker-Genesis-v0",
     "Nes": "SuperMarioBros-Nes-v0",
@@ -20,8 +19,6 @@ PREFERRED_GAMES = {
 }
 
 PLATFORM_ALIASES = {
-    "atari": "Atari2600",
-    "atari2600": "Atari2600",
     "gb": "GameBoy",
     "gameboy": "GameBoy",
     "genesis": "Genesis",
@@ -58,7 +55,7 @@ def installed_games_by_platform() -> dict[str, list[str]]:
     games_by_platform: dict[str, list[str]] = {}
     for game in retro.data.list_games():
         platform = _platform_for_game(game)
-        if platform is None:
+        if platform is None or platform == "Atari2600":
             continue
         try:
             retro.data.get_romfile_path(game)
@@ -103,6 +100,11 @@ def resolve_target(target: str) -> list[tuple[str, str]]:
     game = games_by_name.get(target.lower())
     if game is not None:
         platform = _platform_for_game(game) or "unknown platform"
+        if platform == "Atari2600":
+            raise ValueError(
+                "Interactive libretro Atari playback has been removed; "
+                "use stable_retro.AtariVecEnv",
+            )
         return [(platform, game)]
 
     platform = platforms_by_alias.get(_normalized(target))

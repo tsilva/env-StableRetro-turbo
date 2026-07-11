@@ -7,11 +7,6 @@
       "game": "BattleBull-GameBoy-v0"
     },
     {
-      "core_lib": "stella",
-      "system": "Atari2600",
-      "game": "AirRaid-Atari2600-v0"
-    },
-    {
       "core_lib": "fceumm",
       "system": "Nes",
       "game": "1942-Nes-v0"

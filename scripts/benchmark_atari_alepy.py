@@ -18,7 +18,7 @@ from stable_retro.atari_vec_env import ale_game_id
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_PROFILE = "atari-breakout-diagnostic"
+DEFAULT_PROFILE = "atari-breakout"
 
 
 def _default_output_path() -> Path:
@@ -47,65 +47,6 @@ def _parse_resize(value: str) -> tuple[int, int]:
     if height <= 0 or width <= 0:
         raise SystemExit(f"Invalid resize value {value!r}; dimensions must be positive")
     return height, width
-
-
-def _stable_state_expr(state: str):
-    import stable_retro as retro
-
-    normalized = str(state).strip().lower()
-    if normalized in {"none", "state.none"}:
-        return retro.State.NONE
-    if normalized in {"default", "state.default"}:
-        return retro.State.DEFAULT
-    return state
-
-
-def _run_stable_child(config: dict[str, Any]) -> dict[str, Any]:
-    import numpy as np
-    import stable_retro as retro
-    from stable_retro.vec_env import RetroVecEnv
-
-    resize = tuple(config["resize"])
-    env = RetroVecEnv(
-        config["game"],
-        state=_stable_state_expr(config["state"]),
-        num_envs=config["num_envs"],
-        num_threads=config["num_threads"],
-        obs_copy=config["obs_copy"],
-        render_mode="rgb_array",
-        obs_resize=resize,
-        obs_grayscale=config["grayscale"],
-        frame_skip=config["frame_skip"],
-        frame_stack=config["frame_stack"],
-        maxpool_last_two=config["maxpool_last_two"],
-        obs_resize_algorithm=config["resize_algorithm"],
-        obs_layout="chw",
-        info_filter="none",
-    )
-    obs, _info = env.reset(seed=0)
-    action = np.zeros(
-        (config["num_envs"], env.single_action_space.n),
-        dtype=np.uint8,
-    )
-    for _ in range(config["warmup_steps"]):
-        env.step(action)
-
-    steps = 0
-    start = time.perf_counter()
-    while time.perf_counter() - start < config["seconds"]:
-        env.step(action)
-        steps += config["num_envs"]
-    elapsed = time.perf_counter() - start
-    return {
-        "steps": steps,
-        "seconds": elapsed,
-        "steps_per_second": steps / elapsed,
-        "obs_shape": list(obs.shape),
-        "action_shape": list(action.shape),
-        "action_dtype": str(action.dtype),
-        "stable_retro_file": retro.__file__,
-        "stable_retro_version": getattr(retro, "__version__", None),
-    }
 
 
 def _run_alepy_child(config: dict[str, Any]) -> dict[str, Any]:
@@ -202,15 +143,13 @@ def _run_child(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument(
         "--child-backend",
-        choices=("stable", "v1", "alepy"),
+        choices=("v1", "alepy"),
         required=True,
     )
     parser.add_argument("--child-config", required=True)
     args = parser.parse_args(argv)
     config = json.loads(args.child_config)
-    if args.child_backend == "stable":
-        payload = _run_stable_child(config)
-    elif args.child_backend == "v1":
+    if args.child_backend == "v1":
         payload = _run_v1_child(config)
     else:
         payload = _run_alepy_child(config)
@@ -273,7 +212,6 @@ def _build_config(args, profile) -> dict[str, Any]:
     ale_game = args.ale_game or _ale_rom_id_from_retro_game(profile.game)
     return {
         "game": profile.game,
-        "state": profile.state if args.state is None else args.state,
         "ale_game": ale_game,
         "resize": list(resize),
         "grayscale": profile.grayscale,
@@ -300,11 +238,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--profiles-json",
-        default=str(Path(__file__).with_name("benchmark_vec_env.json")),
+        default=str(Path(__file__).with_name("benchmark_atari_alepy.json")),
     )
     parser.add_argument("--profile", default=DEFAULT_PROFILE)
     parser.add_argument("--ale-game", default=None)
-    parser.add_argument("--state", default=None)
     parser.add_argument("--resize", default=None)
     parser.add_argument("--frame-skip", type=int, default=None)
     parser.add_argument("--frame-stack", type=int, default=None)
@@ -320,11 +257,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--no-maxpool-last-two", action="store_true")
     parser.add_argument("--stable-indexed-video", action="store_true")
-    parser.add_argument(
-        "--include-state-none-reproducer",
-        action="store_true",
-        help="Also run stable-retro State.NONE as a direct-ROM slowdown reproducer.",
-    )
     parser.add_argument("--child-timeout", type=float, default=90.0)
     parser.add_argument("--output-json", type=Path, default=None)
     parser.add_argument("--dry-run", action="store_true")
@@ -349,7 +281,6 @@ def main(argv: list[str] | None = None) -> int:
     workload = {
         "profile": args.profile,
         "action_policy": "fixed_noop",
-        "stable_retro_state": config["state"],
         "ale_game": config["ale_game"],
         **{
             key: config[key]
@@ -369,11 +300,10 @@ def main(argv: list[str] | None = None) -> int:
         },
     }
     print(
-        "profile={profile} game={game} stable_state={state} ale_game={ale_game} "
+        "profile={profile} game={game} ale_game={ale_game} "
         "envs={num_envs} threads={num_threads} seconds={seconds} repeats={repeats}".format(
             profile=args.profile,
             game=config["game"],
-            state=config["state"],
             ale_game=config["ale_game"],
             num_envs=config["num_envs"],
             num_threads=config["num_threads"],
@@ -387,13 +317,6 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     results = [
-        _run_condition(
-            name="stable_retro",
-            backend="stable",
-            config=config,
-            repeats=args.repeats,
-            timeout=args.child_timeout,
-        ),
         _run_condition(
             name="stable_retro_atari_v1",
             backend="v1",
@@ -409,19 +332,6 @@ def main(argv: list[str] | None = None) -> int:
             timeout=args.child_timeout,
         ),
     ]
-    if args.include_state_none_reproducer:
-        state_none_config = dict(config)
-        state_none_config["state"] = "State.NONE"
-        results.append(
-            _run_condition(
-                name="stable_retro_state_none_reproducer",
-                backend="stable",
-                config=state_none_config,
-                repeats=args.repeats,
-                timeout=args.child_timeout,
-            ),
-        )
-
     artifact = {
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "python": sys.executable,

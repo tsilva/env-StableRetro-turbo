@@ -106,6 +106,11 @@ def make(
     **kwargs,
 ):
     """Create and return a ``RetroEnv`` for the requested game and options."""
+    if stable_retro.data._game_platform(game) == "Atari2600":
+        raise ValueError(
+            "The libretro Atari backend has been removed; use AtariVecEnv "
+            "with state=State.NONE",
+        )
     try:
         stable_retro.data.get_romfile_path(game, inttype)
     except FileNotFoundError:

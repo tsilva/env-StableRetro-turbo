@@ -50,6 +50,11 @@ class RetroEnv(gym.Env, EzPickle):
         reward_clip=False,
     ):
         """Initialize a Retro environment for a specific game/state configuration."""
+        if retro.data._game_platform(game) == "Atari2600":
+            raise ValueError(
+                "The libretro Atari backend has been removed; use AtariVecEnv "
+                "with state=State.NONE",
+            )
         if inttype is retro.data.Integrations.DEFAULT or isinstance(
             inttype,
             retro.data.DefaultIntegrations,

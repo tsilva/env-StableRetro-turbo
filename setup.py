@@ -40,7 +40,7 @@ PUBLIC_CORE_NAMES = tuple(
     core.strip()
     for core in os.environ.get(
         "STABLE_RETRO_PUBLIC_CORES",
-        "gambatte,fceumm,snes9x,genesis_plus_gx,stella,mgba,picodrive,mednafen_saturn,melonds",
+        "gambatte,fceumm,snes9x,genesis_plus_gx,mgba,picodrive,mednafen_saturn,melonds",
     ).split(",")
     if core.strip()
 )
@@ -261,12 +261,13 @@ setup(
     version=VERSION_PATH.read_text(encoding="utf-8").strip(),
     license="MIT",
     install_requires=[
+        "ale-py>=0.12.0",
         "gymnasium>=1.0.0",
         "pyglet>=1.5.27,<2",
         "farama-notifications>=0.0.1",
     ],
     extras_require={
-        "atari": ["ale-py>=0.12.0"],
+        "atari": [],
     },
     python_requires=">=3.11,<3.15",
     classifiers=[

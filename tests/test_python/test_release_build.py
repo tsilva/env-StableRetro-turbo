@@ -93,6 +93,9 @@ def test_public_native_macos_core_set_includes_packaged_arm64_cores():
         assert platform in release_build.PUBLIC_DATA_PLATFORMS.split(",")
     for platform in ("gba", "32x", "saturn", "ds"):
         assert platform in release_build.MACOS_CMAKE_ARGS
+    assert "stella" not in release_build.PUBLIC_CORES
+    assert "Atari2600" not in release_build.PUBLIC_DATA_PLATFORMS.split(",")
+    assert "atari2600" not in release_build.MACOS_CMAKE_ARGS
 
 
 def test_expected_linux_wheels_match_auditwheel_policy_tag():

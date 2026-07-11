@@ -226,26 +226,3 @@ def test_dry_run_prints_supermario_canonical_overrides(monkeypatch, capsys):
     assert "obs_layout=chw" in output
     assert "actions=('noop', 'right')" in output
     assert "steps=5 repeats=3" in output
-
-
-def test_dry_run_uses_atari_profile_layout(monkeypatch, capsys):
-    bench = _load_benchmark_module()
-    monkeypatch.setattr(bench, "_resolve_backend", lambda requested: "native")
-
-    assert (
-        bench.main(
-            [
-                "--profile",
-                "atari-breakout-diagnostic",
-                "--backend",
-                "auto",
-                "--dry-run",
-            ]
-        )
-        == 0
-    )
-    output = capsys.readouterr().out
-    assert "game=Breakout-Atari2600-v0" in output
-    assert "state=Start" in output
-    assert "envs=32 threads=16" in output
-    assert "obs_layout=chw" in output

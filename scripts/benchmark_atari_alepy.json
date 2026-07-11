@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "profiles": [
+    {
+      "name": "atari-breakout",
+      "description": "Atari-v1 Breakout profile for direct ALE comparisons.",
+      "game": "Breakout-Atari2600-v0",
+      "state": "State.NONE",
+      "resize": "84x84",
+      "grayscale": true,
+      "frame_skip": 4,
+      "frame_stack": 4,
+      "obs_crop": null,
+      "resize_algorithm": "area",
+      "maxpool_last_two": true,
+      "num_envs": 32,
+      "num_threads": 16,
+      "obs_layout": "chw"
+    }
+  ]
+}
