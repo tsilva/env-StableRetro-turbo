@@ -15,6 +15,7 @@ retro_set_controller_port_device
 retro_reset
 retro_run
 stable_retro_run_skip_render
+stable_retro_set_audio_enabled
 stable_retro_set_indexed_video
 stable_retro_get_indexed_video
 retro_serialize_size

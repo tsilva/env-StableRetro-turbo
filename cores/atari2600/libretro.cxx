@@ -54,9 +54,12 @@ static uint16_t stable_retro_indexed_palette[256];
 static unsigned stable_retro_indexed_width = 0;
 static unsigned stable_retro_indexed_height = 0;
 static size_t stable_retro_indexed_pitch = 0;
+static int stable_retro_audio_override = -1;
 
 static bool stable_retro_audio_enabled(void)
 {
+   if (stable_retro_audio_override >= 0)
+      return stable_retro_audio_override != 0;
    static int enabled = -1;
    if (enabled != -1)
       return enabled;
@@ -414,6 +417,11 @@ void retro_run(void)
 extern "C" RETRO_API void stable_retro_run_skip_render(void)
 {
    stable_retro_run_internal(true);
+}
+
+extern "C" RETRO_API void stable_retro_set_audio_enabled(bool enabled)
+{
+   stable_retro_audio_override = enabled ? 1 : 0;
 }
 
 extern "C" RETRO_API void stable_retro_set_indexed_video(bool enabled)

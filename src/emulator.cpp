@@ -489,6 +489,7 @@ bool Emulator::loadCore(const string& corePath) {
 	m_retro_set_audio_sample_batch = reinterpret_cast<void (*)(retro_audio_sample_batch_t)>(GETSYM(m_coreHandle, "retro_set_audio_sample_batch"));
 	m_retro_set_input_poll = reinterpret_cast<void (*)(retro_input_poll_t)>(GETSYM(m_coreHandle, "retro_set_input_poll"));
 	m_retro_set_input_state = reinterpret_cast<void (*)(short (*)(unsigned int, unsigned int, unsigned int, unsigned int))>(GETSYM(m_coreHandle, "retro_set_input_state"));
+	m_stable_retro_set_audio_enabled = reinterpret_cast<void (*)(bool)>(GETSYM(m_coreHandle, "stable_retro_set_audio_enabled"));
 	m_stable_retro_set_indexed_video = reinterpret_cast<void (*)(bool)>(GETSYM(m_coreHandle, "stable_retro_set_indexed_video"));
 	m_stable_retro_get_indexed_video = reinterpret_cast<bool (*)(const uint8_t**, const uint16_t**, unsigned*, unsigned*, size_t*, bool*, int*)>(GETSYM(m_coreHandle, "stable_retro_get_indexed_video"));
 
@@ -510,12 +511,25 @@ bool Emulator::loadCore(const string& corePath) {
 	m_retro_set_input_poll(cbInputPoll);
 	m_retro_set_input_state(cbInputState);
 	m_retro_init();
+	if (m_stable_retro_set_audio_enabled) {
+		m_stable_retro_set_audio_enabled(m_audioEnabled);
+	}
 
 		if (m_serializationQuirks & RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE) {
 			m_needsInitFrame = true;
 		}
 
 	return true;
+}
+
+void Emulator::setAudioEnabled(bool enabled) {
+	m_audioEnabled = enabled;
+	if (m_stable_retro_set_audio_enabled) {
+		m_stable_retro_set_audio_enabled(enabled);
+	}
+	if (!enabled) {
+		m_audioData.clear();
+	}
 }
 
 bool Emulator::setIndexedVideoEnabled(bool enabled) {

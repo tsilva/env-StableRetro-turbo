@@ -59,6 +59,7 @@ public:
 	int getImageWidth() { return m_avInfo.geometry.base_width; }
 	int getImagePitch() { return m_imgPitch; }
 	int getImageDepth() { return m_imgDepth; }
+	void setAudioEnabled(bool enabled);
 	bool setIndexedVideoEnabled(bool enabled);
 	bool getIndexedVideoFrame(IndexedVideoFrame& frame);
 	int getRotation() const { return m_rotation; }
@@ -151,6 +152,7 @@ private:
 	void (*m_retro_set_audio_sample_batch)(retro_audio_sample_batch_t) = nullptr;
 	void (*m_retro_set_input_poll)(retro_input_poll_t) = nullptr;
 	void (*m_retro_set_input_state)(retro_input_state_t) = nullptr;
+	void (*m_stable_retro_set_audio_enabled)(bool) = nullptr;
 	void (*m_stable_retro_set_indexed_video)(bool) = nullptr;
 	bool (*m_stable_retro_get_indexed_video)(const uint8_t**, const uint16_t**, unsigned*, unsigned*, size_t*, bool*, int*) = nullptr;
 
