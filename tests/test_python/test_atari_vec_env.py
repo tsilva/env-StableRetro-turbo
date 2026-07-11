@@ -248,6 +248,11 @@ def test_atari_vec_env_masked_seed_forms_use_lane_indices():
             options={"reset_mask": mask},
         )
         np.testing.assert_array_equal(selected_seed_obs, full_seed_obs)
+
+        uint32_seed = int(np.iinfo(np.uint32).max) - 17
+        uint32_obs, _ = first.reset(seed=uint32_seed)
+        folded_obs, _ = second.reset(seed=uint32_seed & np.iinfo(np.int32).max)
+        np.testing.assert_array_equal(uint32_obs, folded_obs)
     finally:
         first.close()
         second.close()

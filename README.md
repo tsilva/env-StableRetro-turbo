@@ -160,7 +160,9 @@ Retro wheel. `ale-py` supplies the legal ROM registry, but its
 selected lanes and returns read-only snapshots for unselected lanes. Scalar
 seeds expand as `seed + lane_index`. Full-length seed sequences ignore
 unselected entries, and selected-length sequences map to selected lanes in
-ascending lane order.
+ascending lane order. Seeds accept the full unsigned 32-bit domain used by
+NumPy `SeedSequence`; because ALE stores a non-negative signed seed, its high
+bit is deterministically folded before native reset.
 
 ## RetroVecEnv Parameters
 

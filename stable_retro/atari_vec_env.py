@@ -149,6 +149,7 @@ class AtariVecEnv(VectorEnv):
         self.batch_size = self.num_envs if int(batch_size) == 0 else int(batch_size)
         if not 0 < self.batch_size <= self.num_envs:
             raise ValueError("batch_size must be zero or between 1 and num_envs")
+        self._closed = False
 
         rom_path = str(roms.get_rom_path(self.ale_game))
         self.ale = _retro._AtariVecEnv(
@@ -189,7 +190,6 @@ class AtariVecEnv(VectorEnv):
             self.batch_size,
         )
         self.action_space = batch_space(self.single_action_space, self.batch_size)
-        self._closed = False
 
     def _reset_indices(self, options: dict[str, Any] | None) -> np.ndarray:
         if options is None or "reset_mask" not in options:
@@ -231,8 +231,13 @@ class AtariVecEnv(VectorEnv):
                 )
             values = [-1 if value is None else int(value) for value in values]
         seeds = np.asarray(values, dtype=np.int64)
-        if np.any(seeds < -1) or np.any(seeds > np.iinfo(np.int32).max):
-            raise ValueError("seed values must be None or integers in [0, 2**31 - 1]")
+        if np.any(seeds < -1) or np.any(seeds > np.iinfo(np.uint32).max):
+            raise ValueError("seed values must be None or integers in [0, 2**32 - 1]")
+        # ALE stores random_seed as a non-negative signed int. Accept the full
+        # uint32 domain used by NumPy SeedSequence and fold only its high bit.
+        # The -1 sentinel remains reserved for an unseeded reset.
+        seeded = seeds >= 0
+        seeds[seeded] &= np.iinfo(np.int32).max
         return seeds.astype(np.int32, copy=False)
 
     def reset(
