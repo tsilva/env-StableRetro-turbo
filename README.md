@@ -121,7 +121,8 @@ env.close()  # Release native emulator resources.
 ### Atari shared-core backend
 
 Atari support is included in the standard install. Stella remains available
-through `RetroEnv` and `RetroVecEnv`; use `AtariVecEnv` for the ALE-backed path:
+through `RetroEnv` and `RetroVecEnv`; use `AtariVecEnv` for the owned,
+ALE-derived shared-core path:
 
 ```bash
 pip install stable-retro-turbo
@@ -151,6 +152,15 @@ env.close()
 discrete Atari actions. The libretro/Stella backend remains available through
 `RetroEnv` and `RetroVecEnv`, including Stable Retro `.state` files and the
 button-mask action contract.
+
+The ALE-derived emulator and vector scheduler are compiled into the Stable
+Retro wheel. `ale-py` supplies the legal ROM registry, but its
+`AtariVectorEnv` is not wrapped or monkeypatched. `AtariVecEnv` supports
+`AutoresetMode.DISABLED`; a masked reset executes native reset work only for
+selected lanes and returns read-only snapshots for unselected lanes. Scalar
+seeds expand as `seed + lane_index`. Full-length seed sequences ignore
+unselected entries, and selected-length sequences map to selected lanes in
+ascending lane order.
 
 ## RetroVecEnv Parameters
 
@@ -356,7 +366,7 @@ Modal runs: full env benchmark
 
 - The import package is `stable_retro`; `retro` remains as a compatibility shim.
 - `RetroVecEnv` is the turbo-specific Gymnasium vector environment.
-- `AtariVecEnv` is the ALE-backed shared-core Atari vector environment; Stella remains available through `RetroEnv` and `RetroVecEnv`.
+- `AtariVecEnv` is the owned ALE-derived shared-core Atari vector environment; Stella remains available through `RetroEnv` and `RetroVecEnv`.
 - `RetroVectorEnv` is not exposed; `RetroVecEnv` is the public native vector API.
 - Source builds and CI cover Python `3.11` through `3.14`; the repo-local
   deterministic release helper publishes `cp311`, `cp312`, `cp313`, and `cp314`

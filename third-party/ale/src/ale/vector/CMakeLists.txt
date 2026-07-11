@@ -1,0 +1,10 @@
+target_sources(ale
+    PRIVATE
+        types.hpp
+        action_queue.hpp
+        result_staging.hpp
+        preprocessed_env.hpp
+        preprocessed_env.cpp
+        env_vectorizer.hpp
+        env_vectorizer.cpp
+)

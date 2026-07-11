@@ -259,7 +259,8 @@ setup(
     author_email="contact@farama.org",
     url="https://github.com/tsilva/stable-retro-turbo",
     version=VERSION_PATH.read_text(encoding="utf-8").strip(),
-    license="MIT",
+    license="GPL-2.0-only",
+    license_files=["LICENSE", "LICENSES.md", "third-party/ale/LICENSE.md"],
     install_requires=[
         "ale-py>=0.12.0",
         "gymnasium>=1.0.0",

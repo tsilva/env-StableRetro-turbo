@@ -24,6 +24,14 @@ THE SOFTWARE.
 
 # Libraries used
 
+## Arcade Learning Environment
+
+The native Atari vector backend vendors Arcade Learning Environment v0.12.0,
+with lifecycle and build changes documented in
+`third-party/ale/README.stable-retro.md`. It is licensed under GPL-2.0-only;
+the complete license is in `third-party/ale/LICENSE.md` and is included in
+source and wheel distributions.
+
 ## JSON
 ```
     __ _____ _____ _____

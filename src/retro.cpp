@@ -20,6 +20,7 @@ static inline T _hypot(T x, T y) {
 #include "script.h"
 #include "movie.h"
 #include "movie-bk2.h"
+#include "atari.h"
 
 #include <algorithm>
 #include <array>
@@ -3221,6 +3222,7 @@ py::str dataPath(py::handle hint = py::none()) {
 
 PYBIND11_MODULE(_retro, m) {
 	m.doc() = "libretro bindings";
+	bindAtariVecEnv(m);
 
 	py::class_<PyRetroEmulator>(m, "RetroEmulator")
 		.def(py::init<const string&>())

@@ -1,0 +1,15 @@
+target_sources(ale
+  PRIVATE
+    ColourPalette.cpp
+    Constants.cpp
+    Log.cpp
+    Palettes.hpp
+    ScreenExporter.cpp
+    SoundExporter.cpp
+    SoundNull.cxx
+    SoundRaw.cxx
+    SoundSDL.cxx
+    SDL2.cpp
+    DynamicLoad.cpp
+    ScreenSDL.cpp
+)

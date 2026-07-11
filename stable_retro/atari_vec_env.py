@@ -1,20 +1,28 @@
-"""Shared-core Atari vector environment.
+"""Owned native ALE vector environment with lane-local lifecycle control.
 
-This ALE-backed path intentionally does not consume libretro/Stella save states;
-those remain owned by :class:`RetroVecEnv`.
+The emulator and vector scheduler are compiled into :mod:`stable_retro._retro`.
+``ale-py`` remains the ROM registry, but its vector backend is not used here.
 """
 
 from __future__ import annotations
 
-from gymnasium.vector import AutoresetMode
+from numbers import Integral
+from typing import Any, Sequence
 
+import numpy as np
+from gymnasium.spaces import Box, Discrete
+from gymnasium.vector import AutoresetMode, VectorEnv
+from gymnasium.vector.utils import batch_space
+
+from stable_retro import _retro
 from stable_retro.enums import Actions, State
 
 try:
-    from ale_py import AtariVectorEnv as _AleAtariVectorEnv
-except ModuleNotFoundError as exc:  # pragma: no cover - exercised without the extra
+    from ale_py import roms
+except ModuleNotFoundError as exc:  # pragma: no cover - exercised without dependency
     raise ModuleNotFoundError(
-        "AtariVecEnv requires ale-py; install stable-retro-turbo[atari]",
+        "AtariVecEnv requires ale-py for its ROM registry; "
+        "install stable-retro-turbo[atari]",
     ) from exc
 
 
@@ -50,15 +58,35 @@ def _power_on_state(state) -> bool:
     return str(state).strip().lower() in {"none", "state.none"}
 
 
-class AtariVecEnv(_AleAtariVectorEnv):
-    """High-throughput Atari vector environment.
+def _normalize_autoreset_mode(value: AutoresetMode | str) -> AutoresetMode:
+    if isinstance(value, AutoresetMode):
+        return value
+    try:
+        return AutoresetMode(value)
+    except ValueError:
+        normalized = str(value).replace("_", "").replace("-", "").lower()
+        aliases = {
+            "disabled": AutoresetMode.DISABLED,
+            "nextstep": AutoresetMode.NEXT_STEP,
+            "samestep": AutoresetMode.SAME_STEP,
+        }
+        try:
+            return aliases[normalized]
+        except KeyError as exc:
+            raise ValueError(f"Invalid autoreset_mode: {value}") from exc
 
-    Unlike ``RetroVecEnv``, this backend shares reentrant emulator code across
-    lanes and uses native discrete Atari actions. Stable Retro ``.state`` files
-    remain available through the Stella-backed ``RetroVecEnv``.
+
+class AtariVecEnv(VectorEnv):
+    """High-throughput Atari vector environment with a native ALE backend.
+
+    In ``DISABLED`` mode, a terminal lane remains terminal and cannot be
+    stepped until it is selected by ``reset_mask``. Masked reset work is
+    scheduled lane-locally in native code; unselected lanes are only read to
+    produce the returned vector observation.
     """
 
-    backend = "atari-v1"
+    backend = "atari-v2"
+    metadata = {"autoreset_mode": AutoresetMode.SAME_STEP}
 
     def __init__(
         self,
@@ -109,19 +137,30 @@ class AtariVecEnv(_AleAtariVectorEnv):
             )
         if not isinstance(reward_clip, bool):
             raise TypeError("AtariVecEnv reward_clip must be a bool")
+        if int(num_envs) <= 0:
+            raise ValueError("num_envs must be positive")
 
         self.stable_retro_game = str(game)
         self.ale_game = ale_game_id(game)
-        super().__init__(
-            self.ale_game,
-            num_envs,
-            batch_size=batch_size,
-            num_threads=num_threads,
-            thread_affinity_offset=thread_affinity_offset,
-            max_num_frames_per_episode=max_episode_steps,
+        self.autoreset_mode = _normalize_autoreset_mode(autoreset_mode)
+        self.metadata = dict(type(self).metadata)
+        self.metadata["autoreset_mode"] = self.autoreset_mode
+        self.num_envs = int(num_envs)
+        self.batch_size = self.num_envs if int(batch_size) == 0 else int(batch_size)
+        if not 0 < self.batch_size <= self.num_envs:
+            raise ValueError("batch_size must be zero or between 1 and num_envs")
+
+        rom_path = str(roms.get_rom_path(self.ale_game))
+        self.ale = _retro._AtariVecEnv(
+            rom_path=rom_path,
+            num_envs=self.num_envs,
+            batch_size=int(batch_size),
+            num_threads=int(num_threads),
+            thread_affinity_offset=int(thread_affinity_offset),
+            max_episode_steps=int(max_episode_steps),
             repeat_action_probability=float(sticky_action_prob),
             full_action_space=full_action_space,
-            autoreset_mode=autoreset_mode,
+            autoreset_mode=self.autoreset_mode.value,
             img_height=obs_height,
             img_width=obs_width,
             grayscale=bool(obs_grayscale),
@@ -134,6 +173,91 @@ class AtariVecEnv(_AleAtariVectorEnv):
             reward_clipping=reward_clip,
             use_fire_reset=bool(use_fire_reset),
         )
+
+        obs_shape = (int(frame_stack), obs_height, obs_width)
+        if not obs_grayscale:
+            obs_shape += (3,)
+        self.single_observation_space = Box(
+            shape=obs_shape,
+            low=0,
+            high=255,
+            dtype=np.uint8,
+        )
+        self.single_action_space = Discrete(len(self.ale.get_action_set()))
+        self.observation_space = batch_space(
+            self.single_observation_space,
+            self.batch_size,
+        )
+        self.action_space = batch_space(self.single_action_space, self.batch_size)
+        self._closed = False
+
+    def _reset_indices(self, options: dict[str, Any] | None) -> np.ndarray:
+        if options is None or "reset_mask" not in options:
+            return np.arange(self.num_envs, dtype=np.int32)
+        reset_mask = options["reset_mask"]
+        if not isinstance(reset_mask, np.ndarray):
+            raise TypeError("reset_mask must be a numpy.ndarray")
+        if reset_mask.dtype != np.bool_:
+            raise TypeError("reset_mask must have dtype numpy.bool_")
+        if reset_mask.shape != (self.num_envs,):
+            raise ValueError(f"reset_mask must have shape ({self.num_envs},)")
+        return np.flatnonzero(reset_mask).astype(np.int32, copy=False)
+
+    def _reset_seeds(
+        self,
+        seed: int | Sequence[int | None] | np.ndarray | None,
+        indices: np.ndarray,
+    ) -> np.ndarray:
+        if seed is None:
+            return np.full(indices.size, -1, dtype=np.int32)
+        if isinstance(seed, Integral):
+            values = [int(seed) + int(index) for index in indices]
+        else:
+            if isinstance(seed, np.ndarray) and seed.ndim != 1:
+                raise ValueError("seed array must be one-dimensional")
+            try:
+                supplied = list(seed)
+            except TypeError as exc:
+                raise TypeError(
+                    "seed must be None, an integer, or a one-dimensional seed sequence",
+                ) from exc
+            if len(supplied) == self.num_envs:
+                values = [supplied[int(index)] for index in indices]
+            elif len(supplied) == indices.size:
+                values = supplied
+            else:
+                raise ValueError(
+                    "seed sequence must have length num_envs or the number of reset lanes",
+                )
+            values = [-1 if value is None else int(value) for value in values]
+        seeds = np.asarray(values, dtype=np.int64)
+        if np.any(seeds < -1) or np.any(seeds > np.iinfo(np.int32).max):
+            raise ValueError("seed values must be None or integers in [0, 2**31 - 1]")
+        return seeds.astype(np.int32, copy=False)
+
+    def reset(
+        self,
+        *,
+        seed: int | Sequence[int | None] | np.ndarray | None = None,
+        options: dict[str, Any] | None = None,
+    ):
+        indices = self._reset_indices(options)
+        seeds = self._reset_seeds(seed, indices)
+        return self.ale.reset(indices.tolist(), seeds.tolist())
+
+    def step(self, actions: np.ndarray):
+        return self.ale.step(np.asarray(actions, dtype=np.int64))
+
+    def send(self, actions: np.ndarray):
+        self.ale.send(np.asarray(actions, dtype=np.int64))
+
+    def recv(self):
+        return self.ale.recv()
+
+    def close(self, **kwargs):
+        if not self._closed:
+            self.ale = None
+            self._closed = True
 
 
 __all__ = ["AtariVecEnv", "ale_game_id"]
