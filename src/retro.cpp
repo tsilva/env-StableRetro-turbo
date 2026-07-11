@@ -60,18 +60,16 @@ static bool envFlagEnabled(const char* name) {
 		std::strcmp(value, "FALSE") != 0;
 }
 
-struct AreaResizeBin {
-	long y0 = 0;
-	long y1 = 0;
-	long x0 = 0;
-	long x1 = 0;
-	uint32_t count = 1;
+struct AreaResizeSpan {
+	long begin = 0;
+	long end = 0;
 };
 
 struct AreaResizePlan {
 	long dstH = 0;
 	long dstW = 0;
-	std::vector<AreaResizeBin> bins;
+	std::vector<AreaResizeSpan> rows;
+	std::vector<AreaResizeSpan> columns;
 };
 
 struct PyGameData;
@@ -139,6 +137,50 @@ struct PyRetroEmulator {
 		}
 		raw.resize(static_cast<size_t>(h) * pitch);
 		std::memcpy(raw.data(), img, raw.size());
+	}
+
+	void readRawFrameRegion(
+		std::vector<uint8_t>& raw,
+		long top,
+		long bottom,
+		long left,
+		long right
+	) {
+		const long width = m_re.getImageWidth();
+		const long height = m_re.getImageHeight();
+		const size_t pitch = static_cast<size_t>(m_re.getImagePitch());
+		const int depth = m_re.getImageDepth();
+		const void* img = m_re.getImageData();
+		if (!img) {
+			for (int i = 0; i < 180 && !img; ++i) {
+				m_re.run();
+				img = m_re.getImageData();
+			}
+		}
+		if (!img) {
+			throw std::runtime_error(
+				"Core did not provide a CPU framebuffer. "
+				"This usually means the core is using hardware rendering, which stable-retro can't capture yet."
+			);
+		}
+		if (depth != 16 && depth != 32) {
+			throw std::runtime_error("Unsupported image depth from core");
+		}
+		if (top < 0 || bottom > height || left < 0 || right > width || top >= bottom || left >= right) {
+			throw std::runtime_error("invalid raw frame region");
+		}
+		const size_t bytesPerPixel = static_cast<size_t>(depth / 8);
+		const size_t rowOffset = static_cast<size_t>(left) * bytesPerPixel;
+		const size_t rowBytes = static_cast<size_t>(right - left) * bytesPerPixel;
+		raw.resize(static_cast<size_t>(height) * pitch);
+		const uint8_t* source = static_cast<const uint8_t*>(img);
+		for (long y = top; y < bottom; ++y) {
+			std::memcpy(
+				raw.data() + static_cast<size_t>(y) * pitch + rowOffset,
+				source + static_cast<size_t>(y) * pitch + rowOffset,
+				rowBytes
+			);
+		}
 	}
 
 	py::array_t<uint8_t> processRgbFrame(
@@ -1203,9 +1245,9 @@ static void processXrgb8888GrayscaleAreaPlanToBuffer(
 ) {
 	const bool direct =
 		plan.dstH == rawH && plan.dstW == rawW &&
-		plan.bins.size() == static_cast<size_t>(rawH) * static_cast<size_t>(rawW) &&
-		!plan.bins.empty() && plan.bins.front().y0 == 0 && plan.bins.front().x0 == 0 &&
-		plan.bins.back().y1 == rawH && plan.bins.back().x1 == rawW;
+		!plan.rows.empty() && !plan.columns.empty() &&
+		plan.rows.front().begin == 0 && plan.rows.back().end == rawH &&
+		plan.columns.front().begin == 0 && plan.columns.back().end == rawW;
 	uint8_t* gray = dst;
 	if (!direct) {
 		scratch.resize(static_cast<size_t>(rawH) * static_cast<size_t>(rawW));
@@ -1224,16 +1266,22 @@ static void processXrgb8888GrayscaleAreaPlanToBuffer(
 		return;
 	}
 
-	for (size_t i = 0; i < plan.bins.size(); ++i) {
-		const AreaResizeBin& bin = plan.bins[i];
-		uint32_t sum = 0;
-		for (long sy = bin.y0; sy < bin.y1; ++sy) {
-			const uint8_t* row = gray + static_cast<size_t>(sy) * static_cast<size_t>(rawW);
-			for (long sx = bin.x0; sx < bin.x1; ++sx) {
-				sum += row[sx];
+	for (size_t dy = 0; dy < plan.rows.size(); ++dy) {
+		const AreaResizeSpan& rowSpan = plan.rows[dy];
+		for (size_t dx = 0; dx < plan.columns.size(); ++dx) {
+			const AreaResizeSpan& columnSpan = plan.columns[dx];
+			uint32_t sum = 0;
+			for (long sy = rowSpan.begin; sy < rowSpan.end; ++sy) {
+				const uint8_t* row = gray + static_cast<size_t>(sy) * static_cast<size_t>(rawW);
+				for (long sx = columnSpan.begin; sx < columnSpan.end; ++sx) {
+					sum += row[sx];
+				}
 			}
+			const uint32_t count = static_cast<uint32_t>(
+				(rowSpan.end - rowSpan.begin) * (columnSpan.end - columnSpan.begin)
+			);
+			dst[dy * plan.columns.size() + dx] = static_cast<uint8_t>(sum / count);
 		}
-		dst[i] = static_cast<uint8_t>(sum / bin.count);
 	}
 }
 
@@ -1251,25 +1299,45 @@ AreaResizePlan buildAreaResizePlan(long rawW, long rawH, const NativeCrop& crop,
 	AreaResizePlan plan;
 	plan.dstH = dstH;
 	plan.dstW = dstW;
-	plan.bins.reserve(static_cast<size_t>(dstH) * static_cast<size_t>(dstW));
+	plan.rows.reserve(static_cast<size_t>(dstH));
 	for (long dy = 0; dy < dstH; ++dy) {
 		long y0 = (dy * srcH) / dstH;
 		long y1 = std::max<long>(((dy + 1) * srcH) / dstH, y0 + 1);
 		y1 = std::min(y1, srcH);
-		for (long dx = 0; dx < dstW; ++dx) {
-			long x0 = (dx * srcW) / dstW;
-			long x1 = std::max<long>(((dx + 1) * srcW) / dstW, x0 + 1);
-			x1 = std::min(x1, srcW);
-			AreaResizeBin bin;
-			bin.y0 = crop.top + y0;
-			bin.y1 = crop.top + y1;
-			bin.x0 = crop.left + x0;
-			bin.x1 = crop.left + x1;
-			bin.count = static_cast<uint32_t>((y1 - y0) * (x1 - x0));
-			plan.bins.push_back(bin);
-		}
+		plan.rows.push_back({crop.top + y0, crop.top + y1});
+	}
+	plan.columns.reserve(static_cast<size_t>(dstW));
+	for (long dx = 0; dx < dstW; ++dx) {
+		long x0 = (dx * srcW) / dstW;
+		long x1 = std::max<long>(((dx + 1) * srcW) / dstW, x0 + 1);
+		x1 = std::min(x1, srcW);
+		plan.columns.push_back({crop.left + x0, crop.left + x1});
 	}
 	return plan;
+}
+
+template <typename PixelReader>
+void processAreaResizePlanToBuffer(
+	const AreaResizePlan& plan,
+	PixelReader&& readPixel,
+	uint8_t* dst
+) {
+	for (size_t dy = 0; dy < plan.rows.size(); ++dy) {
+		const AreaResizeSpan& rowSpan = plan.rows[dy];
+		for (size_t dx = 0; dx < plan.columns.size(); ++dx) {
+			const AreaResizeSpan& columnSpan = plan.columns[dx];
+			uint32_t sum = 0;
+			for (long sy = rowSpan.begin; sy < rowSpan.end; ++sy) {
+				for (long sx = columnSpan.begin; sx < columnSpan.end; ++sx) {
+					sum += readPixel(sy, sx);
+				}
+			}
+			const uint32_t count = static_cast<uint32_t>(
+				(rowSpan.end - rowSpan.begin) * (columnSpan.end - columnSpan.begin)
+			);
+			dst[dy * plan.columns.size() + dx] = static_cast<uint8_t>(sum / count);
+		}
+	}
 }
 
 void processNativeGrayscaleAreaPlanToBuffer(
@@ -1284,25 +1352,23 @@ void processNativeGrayscaleAreaPlanToBuffer(
 	uint8_t* dst
 ) {
 	if (depth == 16) {
-		for (size_t i = 0; i < plan.bins.size(); ++i) {
-			const AreaResizeBin& bin = plan.bins[i];
-			uint32_t sum = 0;
-			for (long sy = bin.y0; sy < bin.y1; ++sy) {
+		if (maxRaw) {
+			processAreaResizePlanToBuffer(plan, [&](long sy, long sx) {
 				const uint8_t* row = raw + static_cast<size_t>(sy) * pitch;
-				const uint8_t* maxRow = maxRaw ? maxRaw + static_cast<size_t>(sy) * pitch : nullptr;
-				for (long sx = bin.x0; sx < bin.x1; ++sx) {
-					uint16_t rgb;
-					std::memcpy(&rgb, row + static_cast<size_t>(sx) * 2, sizeof(rgb));
-					if (maxRow) {
-						uint16_t maxRgb;
-						std::memcpy(&maxRgb, maxRow + static_cast<size_t>(sx) * 2, sizeof(maxRgb));
-						sum += rgb565MaxGray(rgb, maxRgb);
-					} else {
-						sum += rgb565Gray(rgb);
-					}
-				}
-			}
-			dst[i] = static_cast<uint8_t>(sum / bin.count);
+				const uint8_t* maxRow = maxRaw + static_cast<size_t>(sy) * pitch;
+				uint16_t rgb;
+				std::memcpy(&rgb, row + static_cast<size_t>(sx) * 2, sizeof(rgb));
+				uint16_t maxRgb;
+				std::memcpy(&maxRgb, maxRow + static_cast<size_t>(sx) * 2, sizeof(maxRgb));
+				return rgb565MaxGray(rgb, maxRgb);
+			}, dst);
+		} else {
+			processAreaResizePlanToBuffer(plan, [&](long sy, long sx) {
+				const uint8_t* row = raw + static_cast<size_t>(sy) * pitch;
+				uint16_t rgb;
+				std::memcpy(&rgb, row + static_cast<size_t>(sx) * 2, sizeof(rgb));
+				return rgb565Gray(rgb);
+			}, dst);
 		}
 		return;
 	}
@@ -1319,25 +1385,23 @@ void processNativeGrayscaleAreaPlanToBuffer(
 			dst
 		);
 #else
-		for (size_t i = 0; i < plan.bins.size(); ++i) {
-			const AreaResizeBin& bin = plan.bins[i];
-			uint32_t sum = 0;
-			for (long sy = bin.y0; sy < bin.y1; ++sy) {
+		if (maxRaw) {
+			processAreaResizePlanToBuffer(plan, [&](long sy, long sx) {
 				const uint8_t* row = raw + static_cast<size_t>(sy) * pitch;
-				const uint8_t* maxRow = maxRaw ? maxRaw + static_cast<size_t>(sy) * pitch : nullptr;
-				for (long sx = bin.x0; sx < bin.x1; ++sx) {
-					uint32_t xrgb;
-					std::memcpy(&xrgb, row + static_cast<size_t>(sx) * 4, sizeof(xrgb));
-					if (maxRow) {
-						uint32_t maxXrgb;
-						std::memcpy(&maxXrgb, maxRow + static_cast<size_t>(sx) * 4, sizeof(maxXrgb));
-						sum += xrgb8888MaxGray(xrgb, maxXrgb);
-					} else {
-						sum += xrgb8888Gray(xrgb);
-					}
-				}
-			}
-			dst[i] = static_cast<uint8_t>(sum / bin.count);
+				const uint8_t* maxRow = maxRaw + static_cast<size_t>(sy) * pitch;
+				uint32_t xrgb;
+				std::memcpy(&xrgb, row + static_cast<size_t>(sx) * 4, sizeof(xrgb));
+				uint32_t maxXrgb;
+				std::memcpy(&maxXrgb, maxRow + static_cast<size_t>(sx) * 4, sizeof(maxXrgb));
+				return xrgb8888MaxGray(xrgb, maxXrgb);
+			}, dst);
+		} else {
+			processAreaResizePlanToBuffer(plan, [&](long sy, long sx) {
+				const uint8_t* row = raw + static_cast<size_t>(sy) * pitch;
+				uint32_t xrgb;
+				std::memcpy(&xrgb, row + static_cast<size_t>(sx) * 4, sizeof(xrgb));
+				return xrgb8888Gray(xrgb);
+			}, dst);
 		}
 #endif
 		return;
@@ -1356,31 +1420,25 @@ void processIndexedGrayscaleAreaPlanToBuffer(
 		updateIndexedPaletteCache(frame, *cache);
 		const uint8_t* gray = cache->gray.data();
 		const uint8_t* maxGray = cache->maxGray.data();
-		for (size_t i = 0; i < plan.bins.size(); ++i) {
-			const AreaResizeBin& bin = plan.bins[i];
-			uint32_t sum = 0;
-			for (long sy = bin.y0; sy < bin.y1; ++sy) {
+		if (maxRaw) {
+			processAreaResizePlanToBuffer(plan, [&](long sy, long sx) {
 				const uint8_t* row = frame.data + static_cast<size_t>(sy) * frame.pitch;
-				const uint8_t* maxRow = maxRaw ? maxRaw + static_cast<size_t>(sy) * frame.pitch : nullptr;
-				for (long sx = bin.x0; sx < bin.x1; ++sx) {
-					const uint8_t pixel = row[sx];
-					sum += maxRow ? maxGray[(static_cast<size_t>(pixel) << 8) | maxRow[sx]] : gray[pixel];
-				}
-			}
-			dst[i] = static_cast<uint8_t>(sum / bin.count);
+				const uint8_t* maxRow = maxRaw + static_cast<size_t>(sy) * frame.pitch;
+				return maxGray[(static_cast<size_t>(row[sx]) << 8) | maxRow[sx]];
+			}, dst);
+		} else {
+			processAreaResizePlanToBuffer(plan, [&](long sy, long sx) {
+				const uint8_t* row = frame.data + static_cast<size_t>(sy) * frame.pitch;
+				return gray[row[sx]];
+			}, dst);
 		}
 		return;
 	}
-	for (size_t i = 0; i < plan.bins.size(); ++i) {
-		const AreaResizeBin& bin = plan.bins[i];
-		uint32_t sum = 0;
-		for (long sy = bin.y0; sy < bin.y1; ++sy) {
-			for (long sx = bin.x0; sx < bin.x1; ++sx) {
-				sum += indexedGray(frame, maxRaw, sy, sx);
-			}
-		}
-		dst[i] = static_cast<uint8_t>(sum / bin.count);
-	}
+	processAreaResizePlanToBuffer(
+		plan,
+		[&](long sy, long sx) { return indexedGray(frame, maxRaw, sy, sx); },
+		dst
+	);
 }
 
 void processNativeGrayscaleFrameToBuffer(
@@ -2332,8 +2390,10 @@ private:
 		std::vector<uint8_t> rgb;
 		std::vector<uint8_t> prevRaw;
 		std::vector<uint8_t> currRaw;
+		bool hasPrevRaw = false;
 		std::vector<uint8_t> grayscaleScratch;
 		std::vector<uint8_t> prevIndexed;
+		bool hasPrevIndexed = false;
 		IndexedPaletteCache indexedPaletteCache;
 		std::vector<uint8_t> action;
 		std::vector<uint8_t> lastMask;
@@ -2498,7 +2558,7 @@ private:
 		}
 	}
 
-	void pushFrame(Slot& slot, const std::vector<uint8_t>& singleObs) {
+	bool pushFrame(Slot& slot, const std::vector<uint8_t>& singleObs, uint8_t* output = nullptr) {
 		if (m_channelsFirst) {
 			const size_t frameSize = m_singleObsSize;
 			writeSingleObservationChannelsFirst(
@@ -2506,21 +2566,46 @@ private:
 				slot.frameStack.data() + slot.frameStackIndex * frameSize
 			);
 			slot.frameStackIndex = (slot.frameStackIndex + 1) % static_cast<size_t>(m_frameStack);
-			return;
+			return false;
 		}
 		if (m_frameStack == 1) {
 			std::memcpy(slot.frameStack.data(), singleObs.data(), m_singleObsSize);
-			return;
+			return false;
 		}
 		const size_t pixelCount = static_cast<size_t>(m_obsHeight) * static_cast<size_t>(m_obsWidth);
 		const size_t channels = static_cast<size_t>(m_obsChannels);
 		const size_t stackedChannels = static_cast<size_t>(m_stackedChannels);
+		if (channels == 1 && m_frameStack == 4) {
+			for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
+				uint8_t* stack = slot.frameStack.data() + pixel * 4;
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+				uint32_t packed;
+				std::memcpy(&packed, stack, sizeof(packed));
+				packed = (packed >> 8) | (static_cast<uint32_t>(singleObs[pixel]) << 24);
+				std::memcpy(stack, &packed, sizeof(packed));
+				if (output) {
+					std::memcpy(output + pixel * 4, &packed, sizeof(packed));
+				}
+#else
+				const uint8_t newest = singleObs[pixel];
+				stack[0] = stack[1];
+				stack[1] = stack[2];
+				stack[2] = stack[3];
+				stack[3] = newest;
+				if (output) {
+					std::memcpy(output + pixel * 4, stack, 4);
+				}
+#endif
+			}
+			return output != nullptr;
+		}
 		const size_t keptChannels = static_cast<size_t>(m_frameStack - 1) * channels;
 		for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
 			uint8_t* dst = slot.frameStack.data() + pixel * stackedChannels;
 			std::memmove(dst, dst + channels, keptChannels);
 			std::memcpy(dst + keptChannels, singleObs.data() + pixel * channels, channels);
 		}
+		return false;
 	}
 
 	void writeStackedObservation(const Slot& slot, uint8_t* dst) const {
@@ -2719,8 +2804,8 @@ private:
 		std::vector<uint8_t> prevRgb;
 		std::vector<uint8_t> currRgb;
 		std::vector<uint8_t> preSkipState;
-		slot.prevRaw.clear();
-		slot.prevIndexed.clear();
+		slot.hasPrevRaw = false;
+		slot.hasPrevIndexed = false;
 		for (int i = 0; i < m_frameSkip; ++i) {
 			const bool mayNeedPixels =
 				m_maxpoolLastTwo ? (i >= m_frameSkip - 2) : (i == m_frameSkip - 1);
@@ -2756,15 +2841,30 @@ private:
 						IndexedVideoFrame indexedFrame;
 						if (slot.usesIndexedVideo && slot.emulator->m_re.getIndexedVideoFrame(indexedFrame)) {
 							slot.prevIndexed.resize(static_cast<size_t>(indexedFrame.pitch) * static_cast<size_t>(indexedFrame.height));
-							for (unsigned row = 0; row < indexedFrame.height; ++row) {
+							const long top = m_useGrayscaleAreaPlan ? m_grayscaleAreaPlan.rows.front().begin : 0;
+							const long bottom = m_useGrayscaleAreaPlan ? m_grayscaleAreaPlan.rows.back().end : indexedFrame.height;
+							const long left = m_useGrayscaleAreaPlan ? m_grayscaleAreaPlan.columns.front().begin : 0;
+							const long right = m_useGrayscaleAreaPlan ? m_grayscaleAreaPlan.columns.back().end : indexedFrame.width;
+							for (long row = top; row < bottom; ++row) {
 								std::memcpy(
-									slot.prevIndexed.data() + static_cast<size_t>(row) * indexedFrame.pitch,
-									indexedFrame.data + static_cast<size_t>(row) * indexedFrame.pitch,
-									indexedFrame.pitch
+									slot.prevIndexed.data() + static_cast<size_t>(row) * indexedFrame.pitch + static_cast<size_t>(left),
+									indexedFrame.data + static_cast<size_t>(row) * indexedFrame.pitch + static_cast<size_t>(left),
+									static_cast<size_t>(right - left)
 								);
 							}
+							slot.hasPrevIndexed = true;
+						} else if (m_useGrayscaleAreaPlan) {
+							slot.emulator->readRawFrameRegion(
+								slot.prevRaw,
+								m_grayscaleAreaPlan.rows.front().begin,
+								m_grayscaleAreaPlan.rows.back().end,
+								m_grayscaleAreaPlan.columns.front().begin,
+								m_grayscaleAreaPlan.columns.back().end
+							);
+							slot.hasPrevRaw = true;
 						} else {
 							slot.emulator->readRawFrame(slot.prevRaw);
+							slot.hasPrevRaw = true;
 						}
 					}
 				} else {
@@ -2787,12 +2887,16 @@ private:
 				if (slot.usesIndexedVideo && slot.emulator->m_re.getIndexedVideoFrame(indexedFrame) && m_useGrayscaleAreaPlan) {
 					processIndexedGrayscaleAreaPlanToBuffer(
 						indexedFrame,
-						slot.prevIndexed.empty() ? nullptr : slot.prevIndexed.data(),
+						slot.hasPrevIndexed ? slot.prevIndexed.data() : nullptr,
 						&slot.indexedPaletteCache,
 						m_grayscaleAreaPlan,
 						slot.singleObs.data()
 					);
-					pushFrame(slot, slot.singleObs);
+					const bool observationWritten = pushFrame(
+						slot,
+						slot.singleObs,
+						done ? nullptr : dst
+					);
 					output.reward = clipReward(totalReward);
 						output.done = done;
 						if (m_reportInitialState && (m_fullInfo || done)) {
@@ -2818,7 +2922,7 @@ private:
 								slot.pendingReset = true;
 							}
 							output.resetStartStateLabel = slot.currentStartStateLabel;
-					} else {
+					} else if (!observationWritten) {
 						writeStackedObservation(slot, dst);
 					}
 					return;
@@ -2831,7 +2935,7 @@ private:
 				if (m_useGrayscaleAreaPlan) {
 					processNativeGrayscaleAreaPlanToBuffer(
 						raw,
-						slot.prevRaw.empty() ? nullptr : slot.prevRaw.data(),
+						slot.hasPrevRaw ? slot.prevRaw.data() : nullptr,
 						static_cast<size_t>(slot.emulator->m_re.getImagePitch()),
 						slot.emulator->m_re.getImageDepth(),
 						slot.emulator->m_re.getImageWidth(),
@@ -2843,7 +2947,7 @@ private:
 				} else {
 					processNativeGrayscaleFrameToBuffer(
 						raw,
-						slot.prevRaw.empty() ? nullptr : slot.prevRaw.data(),
+						slot.hasPrevRaw ? slot.prevRaw.data() : nullptr,
 						slot.emulator->m_re.getImageWidth(),
 						slot.emulator->m_re.getImageHeight(),
 						static_cast<size_t>(slot.emulator->m_re.getImagePitch()),
@@ -2876,7 +2980,11 @@ private:
 				);
 			}
 		}
-		pushFrame(slot, slot.singleObs);
+		const bool observationWritten = pushFrame(
+			slot,
+			slot.singleObs,
+			done ? nullptr : dst
+		);
 		output.reward = clipReward(totalReward);
 			output.done = done;
 			if (m_reportInitialState && (m_fullInfo || done)) {
@@ -2902,7 +3010,7 @@ private:
 					slot.pendingReset = true;
 				}
 				output.resetStartStateLabel = slot.currentStartStateLabel;
-		} else {
+		} else if (!observationWritten) {
 			writeStackedObservation(slot, dst);
 		}
 	}
