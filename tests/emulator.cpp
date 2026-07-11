@@ -144,7 +144,8 @@ TEST_F(EmulatorTest, StellaStableRetroFastPathHooks) {
 
 	EXPECT_TRUE(e.runSkipRender());
 	IndexedVideoFrame skipped;
-	EXPECT_FALSE(e.getIndexedVideoFrame(skipped));
+	EXPECT_TRUE(e.getIndexedVideoFrame(skipped));
+	EXPECT_THAT(skipped.data, NotNull());
 }
 
 TEST_P(EmulatorTest, States) {

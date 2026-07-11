@@ -23,6 +23,7 @@ jobs:
 
       - name: Install pip package and build tests
         run: |
+          python -m pip install pytest
           cmake .
           make -j2
           make -j2 -f tests/Makefile
