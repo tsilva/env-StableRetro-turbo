@@ -1,13 +1,29 @@
 import gzip
+import struct
 
 import stable_retro
 from stable_retro.scripts.import_path import _refresh_atari_start_state
 
 
 def test_refresh_atari_start_state_uses_current_core(monkeypatch, tmp_path):
+    legacy = (
+        struct.pack("<I", len(b"03090100state"))
+        + b"03090100state"
+        + struct.pack("<I", len(b"System"))
+        + b"System"
+        + struct.pack("<I", 123)
+        + b"\x7f"
+        + b"remaining-state"
+    )
+    (tmp_path / "Start.state").write_bytes(gzip.compress(legacy, mtime=0))
+
     class FakeEmulator:
         def __init__(self, rom_path):
             assert rom_path == "breakout.a26"
+
+        def set_state(self, state):
+            assert b"03090101state" in state[:32]
+            return False
 
         def get_state(self):
             return b"current-stella-state"

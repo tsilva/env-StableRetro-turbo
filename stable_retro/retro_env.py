@@ -173,16 +173,13 @@ class RetroEnv(gym.Env, EzPickle):
         self.em.configure_data(self.data)
         self.em.step()
 
-        # Stella save states are core-version-specific. Integrations that have
-        # not yet been re-imported may still contain the legacy 3.9.1 header;
-        # start them from the current core's deterministic reset state instead
-        # of failing during reset. New imports write the current format.
-        if (
-            self.system == "Atari2600"
-            and self.initial_state
-            and b"03090101state" not in self.initial_state[:32]
-        ):
-            self.initial_state = self.em.get_state()
+        if self.system == "Atari2600" and self.initial_state:
+            from stable_retro.stella_state import migrate_legacy_state
+
+            self.initial_state = migrate_legacy_state(
+                self.em,
+                self.initial_state,
+            )
 
         core = retro.get_system_info(self.system)
         self.buttons = core["buttons"]

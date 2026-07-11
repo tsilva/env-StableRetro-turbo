@@ -1634,7 +1634,8 @@ public:
 		}
 		const std::string& constructionInitialState = initialStateForConstruction();
 		const bool indexedVideoEnabled = !envFlagEnabled("STABLE_RETRO_DISABLE_INDEXED_VIDEO");
-		const bool atariIndexedVideoEnabled = envFlagEnabled("STABLE_RETRO_ENABLE_ATARI_INDEXED_VIDEO");
+		const bool atariIndexedVideoEnabled =
+			!envFlagEnabled("STABLE_RETRO_DISABLE_ATARI_INDEXED_VIDEO");
 		m_slots.reserve(numEnvs);
 		for (size_t i = 0; i < numEnvs; ++i) {
 			auto slot = std::make_unique<Slot>(romPath, dataPath, scenarioPath, constructionInitialState, i);

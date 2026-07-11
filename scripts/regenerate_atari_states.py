@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""Regenerate Atari Start states after updating the vendored Stella core."""
+"""Migrate curated Atari Start states to the vendored Stella core."""
 
 from __future__ import annotations
 
 import argparse
 import gzip
 import hashlib
+import subprocess
 from pathlib import Path
 
 import stable_retro as retro
+from stable_retro.stella_state import migrate_legacy_state
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -23,7 +25,7 @@ def _sha1(path: Path) -> str:
     return digest.hexdigest()
 
 
-def regenerate(*, update_imports: bool) -> int:
+def regenerate(*, update_imports: bool, legacy_ref: str) -> int:
     count = 0
     for game_dir in sorted(DATA_ROOT.glob("*-Atari2600-v0")):
         game = game_dir.name
@@ -38,8 +40,19 @@ def regenerate(*, update_imports: bool) -> int:
             raise RuntimeError(f"ROM hash mismatch for {game}: {rom_path}")
 
         old_state = (game_dir / "Start.state").read_bytes()
+        legacy_state = gzip.decompress(
+            subprocess.check_output(
+                [
+                    "git",
+                    "show",
+                    f"{legacy_ref}:stable_retro/data/stable/{game}/Start.state",
+                ],
+                cwd=REPO_ROOT,
+            ),
+        )
         emulator = retro.RetroEmulator(str(rom_path))
-        new_state = gzip.compress(emulator.get_state(), compresslevel=9, mtime=0)
+        migrated_state = migrate_legacy_state(emulator, legacy_state)
+        new_state = gzip.compress(migrated_state, compresslevel=9, mtime=0)
         del emulator
         (game_dir / "Start.state").write_bytes(new_state)
 
@@ -62,8 +75,16 @@ def main() -> int:
         action="store_true",
         help="also update matching imported Start.state files beside each ROM",
     )
+    parser.add_argument(
+        "--legacy-ref",
+        default="v1.0.1.post17",
+        help="git ref containing the curated legacy Stella states",
+    )
     args = parser.parse_args()
-    count = regenerate(update_imports=args.update_imports)
+    count = regenerate(
+        update_imports=args.update_imports,
+        legacy_ref=args.legacy_ref,
+    )
     print(f"regenerated_atari_states={count}")
     return 0
 

@@ -63,6 +63,7 @@ static uint8_t *frameBufferPrev = NULL;
 static uint8_t framePixelBytes = 2;
 static const uint32_t *currentPalette32 = NULL;
 static uint16_t currentPalette16[256] = {0};
+static bool stable_retro_indexed_video_enabled = false;
 
 #define MAX_RETROPAD_DEVICES 2
 
@@ -1291,9 +1292,9 @@ void retro_get_system_av_info(struct retro_system_av_info *info)
    info->timing.fps            = (double)console->getFramerateNum() /
                                  (double)console->getFramerateDen();
    info->timing.sample_rate    = 31400;
-   info->geometry.base_width   = 160 * 2;
+   info->geometry.base_width   = 160;
    info->geometry.base_height  = videoHeight;
-   info->geometry.max_width    = 320;
+   info->geometry.max_width    = 160;
    info->geometry.max_height   = 256;
    info->geometry.aspect_ratio = 4.0f / 3.0f;
 }
@@ -1760,6 +1761,7 @@ void retro_init(void)
 void retro_deinit(void)
 {
    libretro_supports_bitmasks = false;
+   stable_retro_indexed_video_enabled = false;
    left_controller_type       = Controller::Joystick;
    right_controller_type      = Controller::Joystick;
    MouseAxisValue0            = Event::MouseAxisXValue;
@@ -1837,15 +1839,15 @@ static void stable_retro_run_internal(bool skip_render)
    if (videoHeight > FRAME_BUFFER_MAX_LINES)
       videoHeight = FRAME_BUFFER_MAX_LINES;
 
-   // Conversion updates Stella's visible-frame state even when the frontend
-   // does not need an intermediate callback. Skipping it changes observations.
-   if (framePixelBytes == 2)
-      blend_frames_16(tia.currentFrameBuffer(), videoWidth, videoHeight);
-   else
-      blend_frames_32(tia.currentFrameBuffer(), videoWidth, videoHeight);
+   if (!skip_render && !stable_retro_indexed_video_enabled)
+   {
+      if (framePixelBytes == 2)
+         blend_frames_16(tia.currentFrameBuffer(), videoWidth, videoHeight);
+      else
+         blend_frames_32(tia.currentFrameBuffer(), videoWidth, videoHeight);
 
-   if (!skip_render)
       video_cb(frameBuffer, videoWidth, videoHeight, videoWidth * framePixelBytes);
+   }
 
    if (stable_retro_audio_enabled)
    {
@@ -1876,4 +1878,34 @@ extern "C" RETRO_API void stable_retro_run_skip_render(void)
 extern "C" RETRO_API void stable_retro_set_audio_enabled(bool enabled)
 {
    stable_retro_audio_enabled = enabled;
+}
+
+extern "C" RETRO_API void stable_retro_set_indexed_video(bool enabled)
+{
+   stable_retro_indexed_video_enabled = enabled;
+}
+
+extern "C" RETRO_API bool stable_retro_get_indexed_video(
+      const uint8_t **data, const uint16_t **palette,
+      unsigned *width, unsigned *height, size_t *pitch,
+      bool *raw_palette, int *deemp)
+{
+   if(!stable_retro_indexed_video_enabled || !console)
+      return false;
+
+   TIA& tia = console->tia();
+   const uint32_t *palette32 = console->getPalette(0);
+   if(palette32 != currentPalette32)
+   {
+      currentPalette32 = palette32;
+      convert_palette(palette32, currentPalette16);
+   }
+   *data = tia.currentFrameBuffer();
+   *palette = currentPalette16;
+   *width = tia.width();
+   *height = tia.height();
+   *pitch = tia.width();
+   *raw_palette = false;
+   *deemp = 0;
+   return true;
 }

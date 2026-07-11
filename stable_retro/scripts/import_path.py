@@ -9,16 +9,20 @@ import stable_retro.data
 
 
 def _refresh_atari_start_state(game, game_path, rom_path):
-    """Write a Stella-version-compatible reset state for imported Atari ROMs."""
+    """Migrate a curated Atari state after its matching ROM is imported."""
     if not game.endswith("-Atari2600-v0"):
         return
     import stable_retro
+    from stable_retro.stella_state import migrate_legacy_state
 
     emulator = stable_retro.RetroEmulator(rom_path)
-    state = gzip.compress(emulator.get_state(), compresslevel=9, mtime=0)
+    state_path = os.path.join(game_path, "Start.state")
+    with gzip.open(state_path, "rb") as state_file:
+        state = state_file.read()
+    state = migrate_legacy_state(emulator, state)
     del emulator
-    with open(os.path.join(game_path, "Start.state"), "wb") as state_file:
-        state_file.write(state)
+    with open(state_path, "wb") as state_file:
+        state_file.write(gzip.compress(state, compresslevel=9, mtime=0))
 
 
 def _check_zipfile(f, process_f):

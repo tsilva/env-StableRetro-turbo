@@ -2139,6 +2139,21 @@ def _has_stella_core():
     )
 
 
+def test_stella_reports_the_submitted_frame_width():
+    if not _has_stella_core():
+        pytest.skip("stella core is not built")
+
+    import stable_retro as retro
+
+    root = Path(__file__).resolve().parents[1]
+    emulator = retro.RetroEmulator(str(root / "roms" / "automaton.a26"))
+    try:
+        assert emulator.get_resolution()[0] == 160
+        assert emulator.get_screen().shape[1] == 160
+    finally:
+        del emulator
+
+
 def _native_atari_render_skip_trace(tmp_path, *, disable_render_skip, state_path):
     import stable_retro as retro
     from stable_retro.vec_env import RetroVecEnv

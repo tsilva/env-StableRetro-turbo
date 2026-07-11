@@ -646,6 +646,14 @@ ifneq (,$(findstring msvc,$(platform)))
 endif
    CFLAGS   += -O2 -DNDEBUG
    CXXFLAGS += -O2 -DNDEBUG
+ifeq (,$(findstring msvc,$(platform)))
+   # Stella's TIA loop spans several translation units. O3 plus LTO lets the
+   # release compiler inline across them without targeting the build host's
+   # specific CPU, so wheels remain portable.
+   CFLAGS   += -O3 -flto
+   CXXFLAGS += -O3 -flto
+   LDFLAGS  += -flto
+endif
 endif
 
 ifeq (,$(findstring msvc,$(platform)))
