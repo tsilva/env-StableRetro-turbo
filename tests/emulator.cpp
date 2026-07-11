@@ -124,7 +124,7 @@ TEST_P(EmulatorTest, Output) {
 
 TEST_F(EmulatorTest, StellaStableRetroFastPathHooks) {
 	if (!hasCoreInfo("stella")) {
-		GTEST_SKIP() << "stella core is not built";
+		return;  // The bundled GoogleTest predates GTEST_SKIP().
 	}
 
 	Emulator e;
