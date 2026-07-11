@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from benchmark_vec_env import _load_profiles
+from stable_retro.atari_vec_env import ale_game_id
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,20 +27,7 @@ def _default_output_path() -> Path:
 
 
 def _ale_rom_id_from_retro_game(game: str) -> str:
-    base = game
-    if base.endswith("-v0"):
-        base = base[:-3]
-    if base.endswith("-Atari2600"):
-        base = base[: -len("-Atari2600")]
-    out = []
-    for i, char in enumerate(base):
-        if char == "-":
-            out.append("_")
-        elif char.isupper() and i and base[i - 1].islower():
-            out.extend(("_", char.lower()))
-        else:
-            out.append(char.lower())
-    return "".join(out).strip("_")
+    return ale_game_id(game)
 
 
 def _summary(values: list[float]) -> dict[str, float]:
@@ -166,14 +154,64 @@ def _run_alepy_child(config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _run_v1_child(config: dict[str, Any]) -> dict[str, Any]:
+    import numpy as np
+    import stable_retro as retro
+
+    env = retro.AtariVecEnv(
+        config["game"],
+        state=retro.State.NONE,
+        num_envs=config["num_envs"],
+        num_threads=config["num_threads"],
+        obs_resize=tuple(config["resize"]),
+        obs_grayscale=config["grayscale"],
+        frame_skip=config["frame_skip"],
+        frame_stack=config["frame_stack"],
+        maxpool_last_two=config["maxpool_last_two"],
+        noop_reset_max=0,
+        sticky_action_prob=0.0,
+        reward_clip=False,
+        use_fire_reset=False,
+    )
+    obs, _info = env.reset(seed=0)
+    action = np.zeros((config["num_envs"],), dtype=np.int64)
+    for _ in range(config["warmup_steps"]):
+        env.step(action)
+
+    steps = 0
+    start = time.perf_counter()
+    while time.perf_counter() - start < config["seconds"]:
+        env.step(action)
+        steps += config["num_envs"]
+    elapsed = time.perf_counter() - start
+    env.close()
+    return {
+        "steps": steps,
+        "seconds": elapsed,
+        "steps_per_second": steps / elapsed,
+        "obs_shape": list(obs.shape),
+        "action_shape": list(action.shape),
+        "action_dtype": str(action.dtype),
+        "stable_retro_file": retro.__file__,
+        "stable_retro_version": getattr(retro, "__version__", None),
+        "backend": "atari-v1",
+    }
+
+
 def _run_child(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--child-backend", choices=("stable", "alepy"), required=True)
+    parser.add_argument(
+        "--child-backend",
+        choices=("stable", "v1", "alepy"),
+        required=True,
+    )
     parser.add_argument("--child-config", required=True)
     args = parser.parse_args(argv)
     config = json.loads(args.child_config)
     if args.child_backend == "stable":
         payload = _run_stable_child(config)
+    elif args.child_backend == "v1":
+        payload = _run_v1_child(config)
     else:
         payload = _run_alepy_child(config)
     print(json.dumps(payload, sort_keys=True), flush=True)
@@ -352,6 +390,13 @@ def main(argv: list[str] | None = None) -> int:
         _run_condition(
             name="stable_retro",
             backend="stable",
+            config=config,
+            repeats=args.repeats,
+            timeout=args.child_timeout,
+        ),
+        _run_condition(
+            name="stable_retro_atari_v1",
+            backend="v1",
             config=config,
             repeats=args.repeats,
             timeout=args.child_timeout,

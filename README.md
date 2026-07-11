@@ -118,6 +118,41 @@ obs, rewards, terminations, truncations, infos = env.step(env.action_space.sampl
 env.close()  # Release native emulator resources.
 ```
 
+### Atari v1 shared-core backend
+
+Install the optional Atari runtime and use `AtariVecEnv` for new Atari
+training runs:
+
+```bash
+pip install "stable-retro-turbo[atari]"
+```
+
+```python
+import numpy as np
+import stable_retro as retro
+
+env = retro.AtariVecEnv(
+    "Breakout-Atari2600-v0",
+    state=retro.State.NONE,
+    num_envs=32,
+    num_threads=16,
+    noop_reset_max=0,
+    use_fire_reset=False,
+    reward_clip=False,
+)
+obs, infos = env.reset(seed=123)
+obs, rewards, terminations, truncations, infos = env.step(
+    np.zeros(32, dtype=np.int64),
+)
+env.close()
+```
+
+`AtariVecEnv` is the versioned Atari v1 path. It shares reentrant emulator code
+across lanes and uses native discrete Atari actions. It deliberately does not
+load Stable Retro `.state` files. Existing Atari states and the legacy
+button-mask action contract remain available through `RetroVecEnv`; use
+`AtariVecEnv` for new power-on-reset Atari experiments.
+
 ## RetroVecEnv Parameters
 
 ```python
@@ -259,7 +294,7 @@ selected lanes.
 uv run python scripts/benchmark_vec_env.py --list-profiles                         # show saved benchmark profiles
 uv run python scripts/benchmark_vec_env.py --profile supermario-level1-1 --dry-run # print resolved env benchmark config
 uv run python scripts/benchmark_vec_env.py --profile supermario-level1-1           # run native/classic rollout benchmark
-uv run python scripts/benchmark_atari_alepy.py --dry-run                           # compare Atari native vec env with ale-py
+uv run python scripts/benchmark_atari_alepy.py --dry-run                           # compare Atari v0/v1 with direct ale-py
 make benchmark-local BENCHMARK_ARGS=--dry-run GAME=MegaMan PLATFORM=Nes STATE=Level1
 make benchmark GAME=SuperMarioBros PLATFORM=Nes STATE=Level1-1
 uv run pytest tests/test_python/test_vec_env.py                                    # run focused RetroVecEnv tests
@@ -324,6 +359,7 @@ Modal runs: full env benchmark
 
 - The import package is `stable_retro`; `retro` remains as a compatibility shim.
 - `RetroVecEnv` is the turbo-specific Gymnasium vector environment.
+- `AtariVecEnv` is the optional shared-core Atari v1 vector environment.
 - `RetroVectorEnv` is not exposed; `RetroVecEnv` is the public native vector API.
 - Source builds and CI cover Python `3.11` through `3.14`; the repo-local
   deterministic release helper publishes `cp311`, `cp312`, `cp313`, and `cp314`

@@ -56,6 +56,7 @@ __all__ = [
     "make",
     "RetroEnv",
     "RetroVecEnv",
+    "AtariVecEnv",
 ]
 
 stable_retro.data.init_core_info(core_path())
@@ -66,6 +67,10 @@ def __getattr__(name):
         from stable_retro.vec_env import RetroVecEnv
 
         return RetroVecEnv
+    if name == "AtariVecEnv":
+        from stable_retro.atari_vec_env import AtariVecEnv
+
+        return AtariVecEnv
     raise AttributeError(name)
 
 

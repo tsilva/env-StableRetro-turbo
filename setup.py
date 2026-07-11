@@ -265,6 +265,9 @@ setup(
         "pyglet>=1.5.27,<2",
         "farama-notifications>=0.0.1",
     ],
+    extras_require={
+        "atari": ["ale-py>=0.12.0"],
+    },
     python_requires=">=3.11,<3.15",
     classifiers=[
         "Programming Language :: Python :: 3",

@@ -11,6 +11,7 @@ dynamic = [
   "authors",
   "license",
   "dependencies",
+  "optional-dependencies",
   "classifiers",
 ]
 
