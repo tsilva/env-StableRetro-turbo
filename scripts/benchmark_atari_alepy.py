@@ -9,6 +9,7 @@ import platform
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,63 @@ def _parse_resize(value: str) -> tuple[int, int]:
     if height <= 0 or width <= 0:
         raise SystemExit(f"Invalid resize value {value!r}; dimensions must be positive")
     return height, width
+
+
+def _stable_state_expr(state: str):
+    import stable_retro as retro
+
+    normalized = str(state).strip().lower()
+    if normalized in {"none", "state.none"}:
+        return retro.State.NONE
+    if normalized in {"default", "state.default"}:
+        return retro.State.DEFAULT
+    return state
+
+
+def _run_stella_child(config: dict[str, Any]) -> dict[str, Any]:
+    import numpy as np
+    import stable_retro as retro
+    from stable_retro.vec_env import RetroVecEnv
+
+    env = RetroVecEnv(
+        config["game"],
+        state=_stable_state_expr(config["state"]),
+        num_envs=config["num_envs"],
+        num_threads=config["num_threads"],
+        obs_copy=config["obs_copy"],
+        render_mode="rgb_array",
+        obs_resize=tuple(config["resize"]),
+        obs_grayscale=config["grayscale"],
+        frame_skip=config["frame_skip"],
+        frame_stack=config["frame_stack"],
+        maxpool_last_two=config["maxpool_last_two"],
+        obs_resize_algorithm=config["resize_algorithm"],
+        obs_layout="chw",
+        info_filter="none",
+    )
+    obs, _info = env.reset(seed=0)
+    action = np.zeros((config["num_envs"], env.num_buttons), dtype=np.uint8)
+    for _ in range(config["warmup_steps"]):
+        env.step(action)
+
+    steps = 0
+    start = time.perf_counter()
+    while time.perf_counter() - start < config["seconds"]:
+        env.step(action)
+        steps += config["num_envs"]
+    elapsed = time.perf_counter() - start
+    env.close()
+    return {
+        "steps": steps,
+        "seconds": elapsed,
+        "steps_per_second": steps / elapsed,
+        "obs_shape": list(obs.shape),
+        "action_shape": list(action.shape),
+        "action_dtype": str(action.dtype),
+        "stable_retro_file": retro.__file__,
+        "stable_retro_version": getattr(retro, "__version__", None),
+        "backend": "stella-libretro",
+    }
 
 
 def _run_alepy_child(config: dict[str, Any]) -> dict[str, Any]:
@@ -143,13 +201,15 @@ def _run_child(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument(
         "--child-backend",
-        choices=("v1", "alepy"),
+        choices=("stella", "v1", "alepy"),
         required=True,
     )
     parser.add_argument("--child-config", required=True)
     args = parser.parse_args(argv)
     config = json.loads(args.child_config)
-    if args.child_backend == "v1":
+    if args.child_backend == "stella":
+        payload = _run_stella_child(config)
+    elif args.child_backend == "v1":
         payload = _run_v1_child(config)
     else:
         payload = _run_alepy_child(config)
@@ -171,22 +231,26 @@ def _run_condition(
         env["PYTHONPATH"] = str(ROOT)
         if config.get("stable_indexed_video"):
             env["STABLE_RETRO_ENABLE_ATARI_INDEXED_VIDEO"] = "1"
-        proc = subprocess.run(
-            [
-                sys.executable,
-                str(Path(__file__).resolve()),
-                "--child-backend",
-                backend,
-                "--child-config",
-                json.dumps(config, sort_keys=True),
-            ],
-            cwd=ROOT,
-            env=env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout,
-        )
+        with tempfile.TemporaryDirectory(prefix="stable-retro-ale-roms-") as roms_dir:
+            ale_rom = Path(roms_dir) / f"{config['ale_game']}.bin"
+            ale_rom.symlink_to(Path(config["ale_rom_path"]).resolve())
+            env["ALE_ROMS_DIR"] = roms_dir
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(Path(__file__).resolve()),
+                    "--child-backend",
+                    backend,
+                    "--child-config",
+                    json.dumps(config, sort_keys=True),
+                ],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=timeout,
+            )
         if proc.returncode != 0:
             raise RuntimeError(
                 f"{name} repeat {repeat} failed with {proc.returncode}\n"
@@ -206,13 +270,18 @@ def _run_condition(
 
 
 def _build_config(args, profile) -> dict[str, Any]:
+    import stable_retro as retro
+
     resize = _parse_resize(profile.resize if args.resize is None else args.resize)
     num_envs = profile.num_envs if args.num_envs is None else args.num_envs
     num_threads = profile.num_threads if args.num_threads is None else args.num_threads
     ale_game = args.ale_game or _ale_rom_id_from_retro_game(profile.game)
+    ale_rom_path = args.ale_rom_path or retro.data.get_romfile_path(profile.game)
     return {
         "game": profile.game,
+        "state": profile.state if args.state is None else args.state,
         "ale_game": ale_game,
+        "ale_rom_path": str(Path(ale_rom_path).resolve()),
         "resize": list(resize),
         "grayscale": profile.grayscale,
         "frame_skip": profile.frame_skip if args.frame_skip is None else args.frame_skip,
@@ -242,6 +311,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--profile", default=DEFAULT_PROFILE)
     parser.add_argument("--ale-game", default=None)
+    parser.add_argument("--ale-rom-path", default=None)
+    parser.add_argument("--state", default=None)
     parser.add_argument("--resize", default=None)
     parser.add_argument("--frame-skip", type=int, default=None)
     parser.add_argument("--frame-stack", type=int, default=None)
@@ -281,7 +352,9 @@ def main(argv: list[str] | None = None) -> int:
     workload = {
         "profile": args.profile,
         "action_policy": "fixed_noop",
+        "stella_state": config["state"],
         "ale_game": config["ale_game"],
+        "ale_rom_path": config["ale_rom_path"],
         **{
             key: config[key]
             for key in (
@@ -300,10 +373,11 @@ def main(argv: list[str] | None = None) -> int:
         },
     }
     print(
-        "profile={profile} game={game} ale_game={ale_game} "
+        "profile={profile} game={game} stella_state={state} ale_game={ale_game} "
         "envs={num_envs} threads={num_threads} seconds={seconds} repeats={repeats}".format(
             profile=args.profile,
             game=config["game"],
+            state=config["state"],
             ale_game=config["ale_game"],
             num_envs=config["num_envs"],
             num_threads=config["num_threads"],
@@ -317,6 +391,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     results = [
+        _run_condition(
+            name="stable_retro_stella",
+            backend="stella",
+            config=config,
+            repeats=args.repeats,
+            timeout=args.child_timeout,
+        ),
         _run_condition(
             name="stable_retro_atari_v1",
             backend="v1",

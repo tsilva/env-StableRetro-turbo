@@ -17,14 +17,13 @@
 // $Id: CartEFSC.cxx 2838 2014-01-17 23:34:03Z stephena $
 //============================================================================
 
-#include <cassert>
 #include <cstring>
 
 #include "System.hxx"
 #include "CartEFSC.hxx"
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-CartridgeEFSC::CartridgeEFSC(const uInt8* image, uInt32 size, const Settings& settings)
+CartridgeEFSC::CartridgeEFSC(const uint8_t* image, uint32_t size, const Settings& settings)
   : Cartridge(settings)
 {
   // Copy the ROM image into my buffer
@@ -48,7 +47,7 @@ void CartridgeEFSC::reset()
 {
   // Initialize RAM
   if(mySettings.getBool("ramrandom"))
-    for(uInt32 i = 0; i < 128; ++i)
+    for(uint32_t i = 0; i < 128; ++i)
       myRAM[i] = mySystem->randGenerator().next();
   else
     memset(myRAM, 0, 128);
@@ -61,27 +60,23 @@ void CartridgeEFSC::reset()
 void CartridgeEFSC::install(System& system)
 {
   mySystem = &system;
-  uInt16 shift = mySystem->pageShift();
-  uInt16 mask = mySystem->pageMask();
-
-  // Make sure the system we're being installed in has a page size that'll work
-  assert((0x1000 & mask) == 0);
+  uint16_t shift = mySystem->pageShift();
 
   System::PageAccess access(0, 0, 0, this, System::PA_READ);
 
   // Set the page accessing method for the RAM writing pages
   access.type = System::PA_WRITE;
-  for(uInt32 j = 0x1000; j < 0x1080; j += (1 << shift))
+  for(uint32_t j = 0x1000; j < 0x1080; j += (1 << shift))
   {
     access.directPokeBase = &myRAM[j & 0x007F];
     access.codeAccessBase = &myCodeAccessBase[j & 0x007F];
     mySystem->setPageAccess(j >> shift, access);
   }
-
+ 
   // Set the page accessing method for the RAM reading pages
   access.directPokeBase = 0;
   access.type = System::PA_READ;
-  for(uInt32 k = 0x1080; k < 0x1100; k += (1 << shift))
+  for(uint32_t k = 0x1080; k < 0x1100; k += (1 << shift))
   {
     access.directPeekBase = &myRAM[k & 0x007F];
     access.codeAccessBase = &myCodeAccessBase[0x80 + (k & 0x007F)];
@@ -93,9 +88,9 @@ void CartridgeEFSC::install(System& system)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt8 CartridgeEFSC::peek(uInt16 address)
+uint8_t CartridgeEFSC::peek(uint16_t address)
 {
-  uInt16 peekAddress = address;
+  uint16_t peekAddress = address;
   address &= 0x0FFF;
 
   // Switch banks if necessary
@@ -105,7 +100,7 @@ uInt8 CartridgeEFSC::peek(uInt16 address)
   if(address < 0x0080)  // Write port is at 0xF000 - 0xF080 (128 bytes)
   {
     // Reading from the write port triggers an unwanted write
-    uInt8 value = mySystem->getDataBusState(0xFF);
+    uint8_t value = mySystem->getDataBusState(0xFF);
 
     if(bankLocked())
       return value;
@@ -114,13 +109,13 @@ uInt8 CartridgeEFSC::peek(uInt16 address)
       triggerReadFromWritePort(peekAddress);
       return myRAM[address] = value;
     }
-  }
+  }  
   else
     return myImage[(myCurrentBank << 12) + address];
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeEFSC::poke(uInt16 address, uInt8)
+bool CartridgeEFSC::poke(uint16_t address, uint8_t)
 {
   address &= 0x0FFF;
 
@@ -135,27 +130,27 @@ bool CartridgeEFSC::poke(uInt16 address, uInt8)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeEFSC::bank(uInt16 bank)
+bool CartridgeEFSC::bank(uint16_t bank)
 {
   if(bankLocked()) return false;
 
   // Remember what bank we're in
   myCurrentBank = bank;
-  uInt16 offset = myCurrentBank << 12;
-  uInt16 shift = mySystem->pageShift();
-  uInt16 mask = mySystem->pageMask();
+  uint16_t offset = myCurrentBank << 12;
+  uint16_t shift = mySystem->pageShift();
+  uint16_t mask = mySystem->pageMask();
 
   System::PageAccess access(0, 0, 0, this, System::PA_READ);
 
   // Set the page accessing methods for the hot spots
-  for(uInt32 i = (0x1FE0 & ~mask); i < 0x2000; i += (1 << shift))
+  for(uint32_t i = (0x1FE0 & ~mask); i < 0x2000; i += (1 << shift))
   {
     access.codeAccessBase = &myCodeAccessBase[offset + (i & 0x0FFF)];
     mySystem->setPageAccess(i >> shift, access);
   }
 
   // Setup the page access methods for the current bank
-  for(uInt32 address = 0x1100; address < (0x1FE0U & ~mask);
+  for(uint32_t address = 0x1100; address < (0x1FE0U & ~mask);
       address += (1 << shift))
   {
     access.directPeekBase = &myImage[offset + (address & 0x0FFF)];
@@ -166,19 +161,19 @@ bool CartridgeEFSC::bank(uInt16 bank)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt16 CartridgeEFSC::bank() const
+uint16_t CartridgeEFSC::bank() const
 {
   return myCurrentBank;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt16 CartridgeEFSC::bankCount() const
+uint16_t CartridgeEFSC::bankCount() const
 {
   return 16;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeEFSC::patch(uInt16 address, uInt8 value)
+bool CartridgeEFSC::patch(uint16_t address, uint8_t value)
 {
   address &= 0x0FFF;
 
@@ -193,10 +188,10 @@ bool CartridgeEFSC::patch(uInt16 address, uInt8 value)
     myImage[(myCurrentBank << 12) + address] = value;
 
   return myBankChanged = true;
-}
+} 
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-const uInt8* CartridgeEFSC::getImage(int& size) const
+const uint8_t* CartridgeEFSC::getImage(int& size) const
 {
   size = 65536;
   return myImage;

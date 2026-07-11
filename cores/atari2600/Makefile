@@ -23,6 +23,9 @@ EXE_EXT = .exe
 else ifneq ($(findstring Darwin,$(shell uname -a)),)
    system_platform = osx
 	arch = intel
+ifeq ($(shell uname -p),arm64)
+	arch = arm
+endif
 ifeq ($(shell uname -p),powerpc)
 	arch = ppc
 endif
@@ -38,7 +41,7 @@ LIBRETRO_INSTALL_DIR := libretro
 TARGET_NAME := stella
 GIT_VERSION := " $(shell git rev-parse --short HEAD || echo unknown)"
 ifneq ($(GIT_VERSION)," unknown")
-	CXXFLAGS += -DGIT_VERSION=\"$(GIT_VERSION)\"
+	FLAGS += -DGIT_VERSION=\"$(GIT_VERSION)\"
 endif
 
 SPACE :=
@@ -65,34 +68,65 @@ ifeq ($(arch),ppc)
 endif
    OSXVER = `sw_vers -productVersion | cut -d. -f 2`
    OSX_LT_MAVERICKS = `(( $(OSXVER) <= 9)) && echo "YES"`
+ifeq ($(OSX_LT_MAVERICKS),"YES")
    fpic += -mmacosx-version-min=10.1
+else
+   fpic += -stdlib=libc++
+endif
+   ifeq ($(CROSS_COMPILE),1)
+		TARGET_RULE   = -target $(LIBRETRO_APPLE_PLATFORM) -isysroot $(LIBRETRO_APPLE_ISYSROOT)
+		CFLAGS   += $(TARGET_RULE)
+		CPPFLAGS += $(TARGET_RULE)
+		CXXFLAGS += $(TARGET_RULE)
+		LDFLAGS  += $(TARGET_RULE)
+   else ifneq ($(OSX_LT_MAVERICKS),"YES")
+	        fpic     += -mmacosx-version-min=10.7
+   endif
 
 # iOS
 else ifneq (,$(findstring ios,$(platform)))
    TARGET := $(TARGET_NAME)_libretro_ios.dylib
    fpic := -fPIC
    SHARED := -dynamiclib
+   MINVERSION :=
 
 ifeq ($(IOSSDK),)
    IOSSDK := $(shell xcodebuild -version -sdk iphoneos Path)
 endif
 
 ifeq ($(platform),ios-arm64)
-	CC = cc -arch arm64 -isysroot $(IOSSDK)
+	CC = clang -arch arm64 -isysroot $(IOSSDK)
 	CXX = clang++ -arch arm64 -isysroot $(IOSSDK)
 else
-	CC = cc -arch armv7 -isysroot $(IOSSDK)
+	CC = clang -arch armv7 -isysroot $(IOSSDK)
 	CXX = clang++ -arch armv7 -isysroot $(IOSSDK)
 endif
 ifeq ($(platform),$(filter $(platform),ios9 ios-arm64))
-   SHARED += -miphoneos-version-min=8.0
-   CC     +=  -miphoneos-version-min=8.0
-   CXX    +=  -miphoneos-version-min=8.0
+   MINVERSION = -miphoneos-version-min=8.0
 else
-   SHARED += -miphoneos-version-min=5.0
-   CC     +=  -miphoneos-version-min=5.0
-   CXX    +=  -miphoneos-version-min=5.0
+   MINVERSION = -miphoneos-version-min=5.0
 endif
+   SHARED += $(MINVERSION)
+   CFLAGS += $(MINVERSION)
+   CXXFLAGS += $(MINVERSION)
+
+# tvOS
+else ifeq ($(platform), tvos-arm64)
+	TARGET := $(TARGET_NAME)_libretro_tvos.dylib
+	fpic := -fPIC
+	SHARED := -dynamiclib
+	DEFINES := -DIOS -stdlib=libc++
+	ifeq ($(IOSSDK),)
+		IOSSDK := $(shell xcodebuild -version -sdk appletvos Path)
+	endif
+
+        CC = clang -arch arm64 -isysroot $(IOSSDK)
+        CXX = clang++ -arch arm64 -isysroot $(IOSSDK)
+        MINVERSION = -mappletvos-version-min=11.0
+        SHARED += $(MINVERSION)
+        CFLAGS += $(MINVERSION)
+        CXXFLAGS += $(MINVERSION)
+
 else ifeq ($(platform), theos_ios)
 DEPLOYMENT_IOSVERSION = 5.0
 TARGET = iphone:latest:$(DEPLOYMENT_IOSVERSION)
@@ -108,14 +142,6 @@ else ifeq ($(platform), qnx)
    SHARED := -shared -Wl,--no-undefined -Wl,--version-script=link.T
 	CC = qcc -Vgcc_ntoarmv7le
 	CXX = QCC -Vgcc_ntoarmv7le_cpp
-else ifeq ($(platform), ps3)
-   TARGET := $(TARGET_NAME)_libretro_$(platform).a
-   CC = $(CELL_SDK)/host-win32/ppu/bin/ppu-lv2-gcc.exe
-   CXX = $(CELL_SDK)/host-win32/ppu/bin/ppu-lv2-g++.exe
-   AR = $(CELL_SDK)/host-win32/ppu/bin/ppu-lv2-ar.exe
-   STATIC_LINKING = 1
-	FLAGS += -DMSB_FIRST
-	OLD_GCC = 1
 # Nintendo Game Cube
 else ifeq ($(platform), ngc)
    TARGET := $(TARGET_NAME)_libretro_$(platform).a
@@ -166,24 +192,28 @@ include $(DEVKITPRO)/libnx/switch_rules
     CFLAGS += -std=gnu11
     STATIC_LINKING = 1
 
-else ifeq ($(platform), sncps3)
-   TARGET := $(TARGET_NAME)_libretro_ps3.a
-   CC = $(CELL_SDK)/host-win32/sn/bin/ps3ppusnc.exe
-   CXX = $(CELL_SDK)/host-win32/sn/bin/ps3ppusnc.exe
-   AR = $(CELL_SDK)/host-win32/sn/bin/ps3snarl.exe
-   STATIC_LINKING = 1
-	FLAGS += -DMSB_FIRST
-	NO_GCC = 1
-
 # Lightweight PS3 Homebrew SDK
-else ifeq ($(platform), psl1ght)
-   TARGET := $(TARGET_NAME)_libretro_$(platform).a
-   CC = $(PS3DEV)/ppu/bin/ppu-gcc$
-   CXX = $(PS3DEV)/ppu/bin/ppu-g++$
-   AR = $(PS3DEV)/ppu/bin/ppu-ar$
-   STATIC_LINKING = 1
-	FLAGS += -DMSB_FIRST
+else ifneq (,$(filter $(platform), ps3 psl1ght))
+    TARGET := $(TARGET_NAME)_libretro_$(platform).a
+    CC = $(PS3DEV)/ppu/bin/ppu-$(COMMONLV)gcc$(EXE_EXT)
+    CXX = $(PS3DEV)/ppu/bin/ppu-$(COMMONLV)g++$(EXE_EXT)
+    AR = $(PS3DEV)/ppu/bin/ppu-$(COMMONLV)ar$(EXE_EXT)
+    STATIC_LINKING = 1
+    FLAGS += -DMSB_FIRST -D__PS3__ 
 	OLD_GCC = 1
+    ifeq ($(platform), psl1ght)
+        FLAGS += -D__PSL1GHT__ -I$(PS3DEV)/ppu/include
+    endif
+
+# PS2
+else ifeq ($(platform), ps2)
+   TARGET := $(TARGET_NAME)_libretro_$(platform).a
+   CC = mips64r5900el-ps2-elf-gcc$(EXE_EXT)
+   CXX = mips64r5900el-ps2-elf-g++$(EXE_EXT)
+   AR = mips64r5900el-ps2-elf-ar$(EXE_EXT)
+   STATIC_LINKING = 1
+   OLD_GCC = 1
+   FLAGS += -G0 -DPS2 -DXBGR8888
 
 # PSP
 else ifeq ($(platform), psp1)
@@ -211,7 +241,7 @@ else ifeq ($(platform), ctr)
    AR = $(DEVKITARM)/bin/arm-none-eabi-ar$(EXE_EXT)
    FLAGS += -march=armv6k -mtune=mpcore -mfloat-abi=hard
    FLAGS += -Wall -mword-relocations
-   FLAGS += -fomit-frame-pointer -ffast-math
+   FLAGS += -fomit-frame-pointer
    FLAGS += -DARM11 -D_3DS
    STATIC_LINKING = 1
 
@@ -221,7 +251,7 @@ else ifeq ($(platform), rpi1)
 	fpic := -fPIC
 	SHARED := -shared -Wl,--no-undefined -Wl,--version-script=link.T
 	FLAGS += -marm -march=armv6j -mfpu=vfp -mfloat-abi=hard
-	FLAGS += -fomit-frame-pointer -ffast-math
+	FLAGS += -fomit-frame-pointer
 
 # Raspberry Pi 2
 else ifeq ($(platform), rpi2)
@@ -229,7 +259,7 @@ else ifeq ($(platform), rpi2)
 	fpic := -fPIC
 	SHARED := -shared -Wl,--no-undefined -Wl,--version-script=link.T
 	FLAGS += -marm -mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard
-	FLAGS += -fomit-frame-pointer -ffast-math
+	FLAGS += -fomit-frame-pointer
 
 # Raspberry Pi 3
 else ifeq ($(platform), rpi3)
@@ -237,7 +267,37 @@ else ifeq ($(platform), rpi3)
 	fpic := -fPIC
 	SHARED := -shared -Wl,--no-undefined -Wl,--version-script=link.T
 	FLAGS += -marm -mcpu=cortex-a53 -mfpu=neon-fp-armv8 -mfloat-abi=hard
-	FLAGS += -fomit-frame-pointer -ffast-math
+	FLAGS += -fomit-frame-pointer
+
+	# Raspberry Pi 4
+	else ifeq ($(platform), rpi4)
+		TARGET := $(TARGET_NAME)_libretro.so
+		fpic := -fPIC
+		SHARED := -shared -Wl,--no-undefined -Wl,--version-script=link.T
+		FLAGS += -marm -mcpu=cortex-a72 -mfpu=neon-fp-armv8 -mfloat-abi=hard
+		FLAGS += -fomit-frame-pointer
+
+# ARM
+else ifneq (,$(findstring armv,$(platform)))
+	TARGET := $(TARGET_NAME)_libretro.so
+	SHARED := -shared -Wl,--no-undefined -Wl,--version-script=link.T
+	FLAGS += -fomit-frame-pointer
+	fpic := -fPIC
+	CC = gcc
+	ifneq (,$(findstring cortexa8,$(platform)))
+		FLAGS += -marm -mcpu=cortex-a8
+	else ifneq (,$(findstring cortexa9,$(platform)))
+		FLAGS += -marm -mcpu=cortex-a9
+	endif
+		FLAGS += -marm
+	ifneq (,$(findstring neon,$(platform)))
+		FLAGS += -mfpu=neon
+	endif
+	ifneq (,$(findstring softfloat,$(platform)))
+		FLAGS += -mfloat-abi=softfp
+	else ifneq (,$(findstring hardfloat,$(platform)))
+		FLAGS += -mfloat-abi=hard
+	endif
 
 # Classic Platforms ####################
 # Platform affix = classic_<ISA>_<µARCH>
@@ -276,6 +336,18 @@ else ifeq ($(platform), emscripten)
 	STATIC_LINKING = 1
 
 # GCW0
+else ifeq ($(platform), rs90)
+	TARGET := $(TARGET_NAME)_libretro.so
+	CC = /opt/rs90-toolchain/usr/bin/mipsel-linux-gcc
+	CXX = /opt/rs90-toolchain/usr/bin/mipsel-linux-g++
+	AR = /opt/rs90-toolchain/usr/bin/mipsel-linux-ar
+	SHARED := -shared -Wl,--no-undefined -Wl,--version-script=link.T
+	LDFLAGS += $(PTHREAD_FLAGS) -lrt
+	FLAGS += $(PTHREAD_FLAGS) -DHAVE_MKDIR
+	FLAGS += -fomit-frame-pointer -march=mips32 -mtune=mips32
+	fpic := -fPIC
+
+# GCW0
 else ifeq ($(platform), gcw0)
 	TARGET := $(TARGET_NAME)_libretro.so
 	CC = /opt/gcw0-toolchain/usr/bin/mipsel-linux-gcc
@@ -284,7 +356,31 @@ else ifeq ($(platform), gcw0)
 	SHARED := -shared -Wl,--no-undefined -Wl,--version-script=link.T
 	LDFLAGS += $(PTHREAD_FLAGS) -lrt
 	FLAGS += $(PTHREAD_FLAGS) -DHAVE_MKDIR
-	FLAGS += -ffast-math -march=mips32 -mtune=mips32r2 -mhard-float
+	FLAGS += -fomit-frame-pointer -march=mips32 -mtune=mips32r2 -mhard-float
+	fpic := -fPIC
+
+# GCW0
+else ifeq ($(platform), retrofw)
+	TARGET := $(TARGET_NAME)_libretro.so
+	CC = /opt/retrofw-toolchain/usr/bin/mipsel-linux-gcc
+	CXX = /opt/retrofw-toolchain/usr/bin/mipsel-linux-g++
+	AR = /opt/retrofw-toolchain/usr/bin/mipsel-linux-ar
+	SHARED := -shared -Wl,--no-undefined -Wl,--version-script=link.T
+	LDFLAGS += $(PTHREAD_FLAGS) -lrt
+	FLAGS += $(PTHREAD_FLAGS) -DHAVE_MKDIR
+	FLAGS += -fomit-frame-pointer -march=mips32 -mtune=mips32 -mhard-float
+	fpic := -fPIC
+
+# MIYOO
+else ifeq ($(platform), miyoo)
+	TARGET := $(TARGET_NAME)_libretro.so
+   CC = /opt/miyoo/usr/bin/arm-linux-gcc
+   CXX = /opt/miyoo/usr/bin/arm-linux-g++
+   AR = /opt/miyoo/usr/bin/arm-linux-ar
+	SHARED := -shared -Wl,--no-undefined -Wl,--version-script=link.T
+	LDFLAGS += $(PTHREAD_FLAGS) -lrt
+	FLAGS += $(PTHREAD_FLAGS) -DHAVE_MKDIR
+	FLAGS += -fomit-frame-pointer -march=armv5te -mtune=arm926ej-s
 	fpic := -fPIC
 
 # Windows MSVC 2003 Xbox 1
@@ -298,8 +394,7 @@ export INCLUDE := $(XDK)/xbox/include
 export LIB := $(XDK)/xbox/lib
 PATH := $(call unixcygpath,$(XDK)/xbox/bin/vc71):$(PATH)
 PSS_STYLE :=2
-CFLAGS   += -D_XBOX -D_XBOX1
-CXXFLAGS += -D_XBOX -D_XBOX1
+FLAGS   += -D_XBOX -D_XBOX1
 STATIC_LINKING=1
 HAS_GCC := 0
 # Windows MSVC 2010 Xbox 360
@@ -314,8 +409,7 @@ export INCLUDE := $(XEDK)/include/xbox
 export LIB := $(XEDK)/lib/xbox
 PSS_STYLE :=2
 FLAGS += -DMSB_FIRST
-CFLAGS   += -D_XBOX -D_XBOX360
-CXXFLAGS += -D_XBOX -D_XBOX360
+FLAGS   += -D_XBOX -D_XBOX360
 STATIC_LINKING=1
 HAS_GCC := 0
 
@@ -329,16 +423,17 @@ PATH := $(PATH):$(shell IFS=$$'\n'; cygpath "$(VS100COMNTOOLS)../IDE")
 LIB := $(shell IFS=$$'\n'; cygpath "$(VS100COMNTOOLS)../../VC/lib/amd64")
 INCLUDE := $(shell IFS=$$'\n'; cygpath "$(VS100COMNTOOLS)../../VC/include")
 
-WindowsSdkDir := $(shell reg query "HKLM\SOFTWARE\Microsoft\Microsoft SDKs\Windows\v7.0A" -v "InstallationFolder" | grep -o '[A-Z]:\\.*')lib/x64
-WindowsSdkDir ?= $(shell reg query "HKLM\SOFTWARE\Microsoft\Microsoft SDKs\Windows\v7.1A" -v "InstallationFolder" | grep -o '[A-Z]:\\.*')lib/x64
+WindowsSdkDir := $(shell reg query "HKLM\SOFTWARE\Microsoft\Microsoft SDKs\Windows\v7.1A" -v "InstallationFolder" | grep -o '[A-Z]:\\.*')
+WindowsSdkDir ?= $(shell reg query "HKLM\SOFTWARE\Microsoft\Microsoft SDKs\Windows\v7.0A" -v "InstallationFolder" | grep -o '[A-Z]:\\.*')
 
-WindowsSdkDirInc := $(shell reg query "HKLM\SOFTWARE\Microsoft\Microsoft SDKs\Windows\v7.0A" -v "InstallationFolder" | grep -o '[A-Z]:\\.*')Include
-WindowsSdkDirInc ?= $(shell reg query "HKLM\SOFTWARE\Microsoft\Microsoft SDKs\Windows\v7.1A" -v "InstallationFolder" | grep -o '[A-Z]:\\.*')Include
+WindowsSDKIncludeDir := $(shell cygpath -w "$(WindowsSdkDir)\Include")
+WindowsSDKGlIncludeDir := $(shell cygpath -w "$(WindowsSdkDir)\Include\gl")
+WindowsSDKLibDir := $(shell cygpath -w "$(WindowsSdkDir)\Lib\x64")
 
+INCFLAGS_PLATFORM = -I"$(WindowsSDKIncludeDir)"
 
-INCFLAGS_PLATFORM = -I"$(WindowsSdkDirInc)"
-export INCLUDE := $(INCLUDE)
-export LIB := $(LIB);$(WindowsSdkDir)
+export INCLUDE := $(INCLUDE);$(WindowsSDKIncludeDir);$(WindowsSDKGlIncludeDir)
+export LIB := $(LIB);$(WindowsSDKLibDir)
 TARGET := $(TARGET_NAME)_libretro.dll
 PSS_STYLE :=2
 LDFLAGS += -DLL
@@ -352,16 +447,16 @@ PATH := $(PATH):$(shell IFS=$$'\n'; cygpath "$(VS100COMNTOOLS)../IDE")
 LIB := $(shell IFS=$$'\n'; cygpath -w "$(VS100COMNTOOLS)../../VC/lib")
 INCLUDE := $(shell IFS=$$'\n'; cygpath "$(VS100COMNTOOLS)../../VC/include")
 
-WindowsSdkDir := $(shell reg query "HKLM\SOFTWARE\Microsoft\Microsoft SDKs\Windows\v7.0A" -v "InstallationFolder" | grep -o '[A-Z]:\\.*')lib
-WindowsSdkDir ?= $(shell reg query "HKLM\SOFTWARE\Microsoft\Microsoft SDKs\Windows\v7.1A" -v "InstallationFolder" | grep -o '[A-Z]:\\.*')lib
+WindowsSdkDir := $(shell reg query "HKLM\SOFTWARE\Microsoft\Microsoft SDKs\Windows\v7.1A" -v "InstallationFolder" | grep -o '[A-Z]:\\.*')
+WindowsSdkDir ?= $(shell reg query "HKLM\SOFTWARE\Microsoft\Microsoft SDKs\Windows\v7.0A" -v "InstallationFolder" | grep -o '[A-Z]:\\.*')
 
-WindowsSdkDirInc := $(shell reg query "HKLM\SOFTWARE\Microsoft\Microsoft SDKs\Windows\v7.0A" -v "InstallationFolder" | grep -o '[A-Z]:\\.*')Include
-WindowsSdkDirInc ?= $(shell reg query "HKLM\SOFTWARE\Microsoft\Microsoft SDKs\Windows\v7.1A" -v "InstallationFolder" | grep -o '[A-Z]:\\.*')Include
+WindowsSDKIncludeDir := $(shell cygpath -w "$(WindowsSdkDir)\Include")
+WindowsSDKGlIncludeDir := $(shell cygpath -w "$(WindowsSdkDir)\Include\gl")
+WindowsSDKLibDir := $(shell cygpath -w "$(WindowsSdkDir)\Lib")
 
-
-INCFLAGS_PLATFORM = -I"$(WindowsSdkDirInc)"
-export INCLUDE := $(INCLUDE)
-export LIB := $(LIB);$(WindowsSdkDir)
+INCFLAGS_PLATFORM = -I"$(WindowsSDKIncludeDir)"
+export INCLUDE := $(INCLUDE);$(WindowsSDKIncludeDir);$(WindowsSDKGlIncludeDir)
+export LIB := $(LIB);$(WindowsSDKLibDir)
 TARGET := $(TARGET_NAME)_libretro.dll
 PSS_STYLE :=2
 LDFLAGS += -DLL
@@ -377,10 +472,18 @@ INCLUDE := $(shell IFS=$$'\n'; cygpath "$(VS80COMNTOOLS)../../VC/include")
 LIB := $(shell IFS=$$'\n'; cygpath -w "$(VS80COMNTOOLS)../../VC/lib")
 BIN := $(shell IFS=$$'\n'; cygpath "$(VS80COMNTOOLS)../../VC/bin")
 
-WindowsSdkDir := $(INETSDK)
+WindowsSdkDir := $(shell reg query "HKLM\SOFTWARE\Microsoft\MicrosoftSDK\InstalledSDKs\8F9E5EF3-A9A5-491B-A889-C58EFFECE8B3" -v "Install Dir" | grep -o '[A-Z]:\\.*')
 
-export INCLUDE := $(INCLUDE);$(INETSDK)/Include;libretro-common/include/compat/msvc
-export LIB := $(LIB);$(WindowsSdkDir);$(INETSDK)/Lib
+WindowsSDKIncludeDir := $(shell cygpath -w "$(WindowsSdkDir)\Include")
+WindowsSDKAtlIncludeDir := $(shell cygpath -w "$(WindowsSdkDir)\Include\atl")
+WindowsSDKCrtIncludeDir := $(shell cygpath -w "$(WindowsSdkDir)\Include\crt")
+WindowsSDKGlIncludeDir := $(shell cygpath -w "$(WindowsSdkDir)\Include\gl")
+WindowsSDKMfcIncludeDir := $(shell cygpath -w "$(WindowsSdkDir)\Include\mfc")
+WindowsSDKLibDir := $(shell cygpath -w "$(WindowsSdkDir)\Lib")
+
+INCFLAGS_PLATFORM = -I"$(WindowsSDKIncludeDir)"
+export INCLUDE := $(INCLUDE);$(WindowsSDKIncludeDir);$(WindowsSDKAtlIncludeDir);$(WindowsSDKCrtIncludeDir);$(WindowsSDKGlIncludeDir);$(WindowsSDKMfcIncludeDir);libretro-common/include/compat/msvc
+export LIB := $(LIB);$(WindowsSDKLibDir)
 TARGET := $(TARGET_NAME)_libretro.dll
 PSS_STYLE :=2
 LDFLAGS += -DLL
@@ -404,7 +507,7 @@ export LIB := $(LIB);$(WindowsSdkDir);$(INETSDK)/Lib
 TARGET := $(TARGET_NAME)_libretro.dll
 PSS_STYLE :=2
 LDFLAGS += -DLL
-CFLAGS += -D_CRT_SECURE_NO_DEPRECATE
+FLAGS += -D_CRT_SECURE_NO_DEPRECATE
 
 # Windows MSVC 2017 all architectures
 else ifneq (,$(findstring windows_msvc2017,$(platform)))
@@ -439,7 +542,7 @@ else ifneq (,$(findstring windows_msvc2017,$(platform)))
 	reg_query = $(call filter_out2,$(subst $2,,$(shell reg query "$2" -v "$1" 2>nul)))
 	fix_path = $(subst $(SPACE),\ ,$(subst \,/,$1))
 
-	ProgramFiles86w := $(shell cmd /c "echo %PROGRAMFILES(x86)%")
+	ProgramFiles86w := $(shell cmd //c "echo %PROGRAMFILES(x86)%")
 	ProgramFiles86 := $(shell cygpath "$(ProgramFiles86w)")
 
 	WindowsSdkDir ?= $(call reg_query,InstallationFolder,HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\Microsoft\Microsoft SDKs\Windows\v10.0)
@@ -504,8 +607,8 @@ else ifneq (,$(findstring windows_msvc2017,$(platform)))
 # Windows
 else
    TARGET := $(TARGET_NAME)_libretro.dll
-   CC = gcc
-   CXX = g++
+   CC ?= gcc
+   CXX ?= g++
    SHARED := -shared -Wl,--no-undefined -Wl,--version-script=link.T
    LDFLAGS += -static-libgcc -static-libstdc++ -lwinmm
 endif
@@ -515,44 +618,40 @@ LIBRETRO_DIR := .
 
 include Makefile.common
 
-OBJECTS := $(SOURCES_CXX:.cxx=.o)
+OBJECTS := $(SOURCES_CXX:.cxx=.o) $(SOURCES_C:.c=.o)
 
 ifeq ($(DEBUG), 1)
 ifneq (,$(findstring msvc,$(platform)))
-	ifeq ($(STATIC_LINKING),1)
-	CFLAGS += -MTd
-	CXXFLAGS += -MTd
+   CFLAGS   += -MTd
+   CXXFLAGS += -MTd
+   CFLAGS   += -Od -Zi -D_DEBUG
+   CXXFLAGS += -Od -Zi -D_DEBUG
 else
-	CFLAGS += -MDd
-	CXXFLAGS += -MDd
+   CFLAGS   += -O0 -g
+   CXXFLAGS += -O0 -g
 endif
-
-CFLAGS += -Od -Zi -DDEBUG -D_DEBUG
-CXXFLAGS += -Od -Zi -DDEBUG -D_DEBUG
-	else
-	CFLAGS += -O0 -g -DDEBUG
-	CXXFLAGS += -O0 -g -DDEBUG
-endif
+   CFLAGS   += -DDEBUG
+   CXXFLAGS += -DDEBUG
 else
 ifneq (,$(findstring msvc,$(platform)))
-ifeq ($(STATIC_LINKING),1)
-	CFLAGS += -MT
-	CXXFLAGS += -MT
-else
-	CFLAGS += -MD
-	CXXFLAGS += -MD
+   CFLAGS   += -MT
+   CXXFLAGS += -MT
+   # Enable C++ unwind semantics for the STL. Without this, every MSVC
+   # translation unit that pulls in <string>/<ostream>/<map> emits a
+   # storm of C4530 warnings ("C++ exception handler used, but unwind
+   # semantics are not enabled"). -EHsc turns those off by actually
+   # enabling the unwinding the STL assumes. (msvc2017 already sets its
+   # own -EHsc in MSVC2017CompileFlags; this covers 2003/2005/2010.)
+   CXXFLAGS += -EHsc
 endif
-
-CFLAGS += -O2 -DNDEBUG
-CXXFLAGS += -O2 -DNDEBUG
-else
-	CFLAGS += -O3 -DNDEBUG
-	CXXFLAGS += -O3 -DNDEBUG
-endif
+   CFLAGS   += -O2 -DNDEBUG
+   CXXFLAGS += -O2 -DNDEBUG
 endif
 
 ifeq (,$(findstring msvc,$(platform)))
-FLAGS += -ffast-math
+FLAGS +=
+else
+FLAGS += -D_CRT_SECURE_NO_DEPRECATE
 endif
 
 LDFLAGS += $(fpic) $(SHARED)
@@ -578,8 +677,8 @@ endif
 
 FLAGS += -D__LIBRETRO__ $(WARNINGS)
 
-CXXFLAGS += $(FLAGS) -DTHUMB_SUPPORT -DSOUND_SUPPORT
-CFLAGS += $(FLAGS)   -DTHUMB_SUPPORT -DSOUND_SUPPORT
+CXXFLAGS += $(FLAGS) -DTHUMB_SUPPORT
+CFLAGS   += $(FLAGS) -DTHUMB_SUPPORT
 
 OBJOUT   = -o
 LINKOUT  = -o

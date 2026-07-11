@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll
-//  SS  SS   tt           ll   ll
-//  SS     tttttt  eeee   ll   ll   aaaa
+//   SSSS    tt          lll  lll       
+//  SS  SS   tt           ll   ll        
+//  SS     tttttt  eeee   ll   ll   aaaa 
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -24,15 +24,12 @@ class System;
 
 #include "bspf.hxx"
 #include "Cart.hxx"
-#ifdef DEBUGGER_SUPPORT
-  #include "Cart4A50Widget.hxx"
-#endif
 
 /**
   Bankswitching method as defined/created by John Payson (aka Supercat),
   documented at http://www.casperkitty.com/stella/cartfmt.htm.
 
-  In this bankswitching scheme the 2600's 4K cartridge address space
+  In this bankswitching scheme the 2600's 4K cartridge address space 
   is broken into four segments.  The first 2K segment accesses any 2K
   region of RAM, or of the first 32K of ROM.  The second 1.5K segment
   accesses the first 1.5K of any 2K region of RAM, or of the last 32K
@@ -61,8 +58,8 @@ class Cartridge4A50 : public Cartridge
       @param size      The size of the ROM image
       @param settings  A reference to the various settings (read-only)
     */
-    Cartridge4A50(const uInt8* image, uInt32 size, const Settings& settings);
-
+    Cartridge4A50(const uint8_t* image, uint32_t size, const Settings& settings);
+ 
     /**
       Destructor
     */
@@ -87,17 +84,17 @@ class Cartridge4A50 : public Cartridge
 
       @param bank The bank that should be installed in the system
     */
-    bool bank(uInt16 bank);
+    bool bank(uint16_t bank);
 
     /**
       Get the current bank.
     */
-    uInt16 bank() const;
+    uint16_t bank() const;
 
     /**
       Query the number of banks supported by the cartridge.
     */
-    uInt16 bankCount() const;
+    uint16_t bankCount() const;
 
     /**
       Patch the cartridge ROM.
@@ -106,7 +103,7 @@ class Cartridge4A50 : public Cartridge
       @param value    The value to place into the address
       @return    Success or failure of the patch operation
     */
-    bool patch(uInt16 address, uInt8 value);
+    bool patch(uint16_t address, uint8_t value);
 
     /**
       Access the internal ROM image for this cartridge.
@@ -114,7 +111,7 @@ class Cartridge4A50 : public Cartridge
       @param size  Set to the size of the internal ROM image data
       @return  A pointer to the internal ROM image data
     */
-    const uInt8* getImage(int& size) const;
+    const uint8_t* getImage(int& size) const;
 
     /**
       Save the current state of this cart to the given Serializer.
@@ -139,25 +136,13 @@ class Cartridge4A50 : public Cartridge
     */
     string name() const { return "Cartridge4A50"; }
 
-  #ifdef DEBUGGER_SUPPORT
-    /**
-      Get debugger widget responsible for accessing the inner workings
-      of the cart.
-    */
-    CartDebugWidget* debugWidget(GuiObject* boss, const GUI::Font& lfont,
-        const GUI::Font& nfont, int x, int y, int w, int h)
-    {
-      return new Cartridge4A50Widget(boss, lfont, nfont, x, y, w, h, *this);
-    }
-  #endif
-
   public:
     /**
       Get the byte at the specified address.
 
       @return The byte at the specified address
     */
-    uInt8 peek(uInt16 address);
+    uint8_t peek(uint16_t address);
 
     /**
       Change the byte at the specified address to the given value
@@ -166,62 +151,53 @@ class Cartridge4A50 : public Cartridge
       @param value The value to be stored at the address
       @return  True if the poke changed the device address space, else false
     */
-    bool poke(uInt16 address, uInt8 value);
+    bool poke(uint16_t address, uint8_t value);
 
   private:
     /**
-      Query/change the given address type to use the given disassembly flags
-
-      @param address The address to modify
-      @param flags A bitfield of DisasmType directives for the given address
-    */
-    uInt8 getAccessFlags(uInt16 address);
-    void setAccessFlags(uInt16 address, uInt8 flags);
-
-    /**
       Check all possible hotspots
     */
-    void checkBankSwitch(uInt16 address, uInt8 value);
+    void checkBankSwitch(uint16_t address, uint8_t value);
 
     /**
       Methods to perform all the ways that banks can be switched
     */
-    inline void bankROMLower(uInt16 value)
+    inline void bankROMLower(uint16_t value)
     {
       myIsRomLow = true;
       mySliceLow = value << 11;
       myBankChanged = true;
     }
 
-    inline void bankRAMLower(uInt16 value)
+    inline void bankRAMLower(uint16_t value)
     {
       myIsRomLow = false;
       mySliceLow = value << 11;
       myBankChanged = true;
     }
 
-    inline void bankROMMiddle(uInt16 value)
+    inline void bankROMMiddle(uint16_t value)
     {
       myIsRomMiddle = true;
       mySliceMiddle = value << 11;
       myBankChanged = true;
     }
 
-    inline void bankRAMMiddle(uInt16 value)
+    inline void bankRAMMiddle(uint16_t value)
     {
       myIsRomMiddle = false;
       mySliceMiddle = value << 11;
       myBankChanged = true;
     }
 
-    inline void bankROMHigh(uInt16 value)
+    inline void bankROMHigh(uint16_t value)
     {
       myIsRomHigh = true;
       mySliceHigh = value << 8;
       myBankChanged = true;
     }
 
-    inline void bankRAMHigh(uInt16 value)
+    inline void bankRAMHigh(uint16_t value)
     {
       myIsRomHigh = false;
       mySliceHigh = value << 8;
@@ -230,18 +206,18 @@ class Cartridge4A50 : public Cartridge
 
   private:
     // The 128K ROM image of the cartridge
-    uInt8 myImage[131072];
+    uint8_t myImage[131072];
 
     // The 32K of RAM on the cartridge
-    uInt8 myRAM[32768];
+    uint8_t myRAM[32768];
 
     // (Actual) Size of the ROM image
-    uInt32 mySize;
+    uint32_t mySize;
 
     // Indicates the slice mapped into each of the three segments
-    uInt16 mySliceLow;     /* index pointer for $1000-$17ff slice */
-    uInt16 mySliceMiddle;  /* index pointer for $1800-$1dff slice */
-    uInt16 mySliceHigh;    /* index pointer for $1e00-$1eff slice */
+    uint16_t mySliceLow;     /* index pointer for $1000-$17ff slice */
+    uint16_t mySliceMiddle;  /* index pointer for $1800-$1dff slice */
+    uint16_t mySliceHigh;    /* index pointer for $1e00-$1eff slice */
 
     // Indicates whether the given slice is mapped to ROM or RAM
     bool myIsRomLow;       /* true = ROM -- false = RAM at $1000-$17ff */
@@ -249,8 +225,8 @@ class Cartridge4A50 : public Cartridge
     bool myIsRomHigh;      /* true = ROM -- false = RAM at $1e00-$1eFF */
 
     // The previous address and data values (from peek and poke)
-    uInt16 myLastAddress;
-    uInt8 myLastData;
+    uint16_t myLastAddress;
+    uint8_t myLastData;
 };
 
 #endif

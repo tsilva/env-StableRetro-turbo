@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll
-//  SS  SS   tt           ll   ll
-//  SS     tttttt  eeee   ll   ll   aaaa
+//   SSSS    tt          lll  lll       
+//  SS  SS   tt           ll   ll        
+//  SS     tttttt  eeee   ll   ll   aaaa 
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -24,13 +24,10 @@ class System;
 
 #include "bspf.hxx"
 #include "Cart.hxx"
-#ifdef DEBUGGER_SUPPORT
-  #include "CartMCWidget.hxx"
-#endif
 
 /**
-  This is the cartridge class for Chris Wilkson's Megacart.  It does not
-  handle battery-backed RAM at this time and the code could use some serious
+  This is the cartridge class for Chris Wilkson's Megacart.  It does not 
+  handle battery-backed RAM at this time and the code could use some serious 
   speed improvements.  It is based on the following Megacart specification:
 
 
@@ -75,7 +72,7 @@ class System;
 
   Special Case - RAM
   -------------------
-
+  
   RAM blocks differ from ROM blocks in that one of the console's address lines,
   A9 in this case, must be used as a read/write select.  Because of this, RAM
   blocks are limited to 512 bytes each, yet still occupy an entire 1K slot.
@@ -115,9 +112,9 @@ class System;
 			...
   $1FFDD	BOOT	SEI		; disable interrupts
   $1FFDE		CLD		; set hexadecimal arithmetic mode
-  $1FFDF		LDX	#$FF	;
+  $1FFDF		LDX	#$FF	; 
   $1FFE1		TXS		; set stack pointer to $ff
-  $1FFE2 		LDA	#$00
+  $1FFE2 		LDA	#$00 
   $1FFE4	ZERO	STA	00,X	; clear RIOT and TIA -BEFORE- setting
   $1FFE6		DEX		; up banks
   $1FFE7		BNE	ZERO
@@ -128,7 +125,7 @@ class System;
   $1FFF1		LDA	#$FD	; rom block $fd ($1f400-$1f7ff)
   $1FFF3		STA	SLOT2	; slot 2 points to rom block $fd
   $1FFF5		LDA	#$83	; rom block $83 ($00C00-$01000)
-  $1FFF7		STA	SLOT3	; slot 3 points to bootcode
+  $1FFF7		STA	SLOT3	; slot 3 points to bootcode 
 					; (rom block $ff)
  	 				; until jumping out of slot 3
   $1FFF9		JMP	$F800	; jump to slot 2
@@ -153,8 +150,8 @@ class CartridgeMC : public Cartridge
       @param size      The size of the ROM image
       @param settings  A reference to the various settings (read-only)
     */
-    CartridgeMC(const uInt8* image, uInt32 size, const Settings& settings);
-
+    CartridgeMC(const uint8_t* image, uint32_t size, const Settings& settings);
+ 
     /**
       Destructor
     */
@@ -179,17 +176,17 @@ class CartridgeMC : public Cartridge
 
       @param bank The bank that should be installed in the system
     */
-    bool bank(uInt16 bank);
+    bool bank(uint16_t bank);
 
     /**
       Get the current bank.
     */
-    uInt16 bank() const;
+    uint16_t bank() const;
 
     /**
       Query the number of banks supported by the cartridge.
     */
-    uInt16 bankCount() const;
+    uint16_t bankCount() const;
 
     /**
       Patch the cartridge ROM.
@@ -198,7 +195,7 @@ class CartridgeMC : public Cartridge
       @param value    The value to place into the address
       @return    Success or failure of the patch operation
     */
-    bool patch(uInt16 address, uInt8 value);
+    bool patch(uint16_t address, uint8_t value);
 
     /**
       Access the internal ROM image for this cartridge.
@@ -206,7 +203,7 @@ class CartridgeMC : public Cartridge
       @param size  Set to the size of the internal ROM image data
       @return  A pointer to the internal ROM image data
     */
-    const uInt8* getImage(int& size) const;
+    const uint8_t* getImage(int& size) const;
 
     /**
       Save the current state of this cart to the given Serializer.
@@ -231,25 +228,13 @@ class CartridgeMC : public Cartridge
     */
     string name() const { return "CartridgeMC"; }
 
-  #ifdef DEBUGGER_SUPPORT
-    /**
-      Get debugger widget responsible for accessing the inner workings
-      of the cart.
-    */
-    CartDebugWidget* debugWidget(GuiObject* boss, const GUI::Font& lfont,
-        const GUI::Font& nfont, int x, int y, int w, int h)
-    {
-      return new CartridgeMCWidget(boss, lfont, nfont, x, y, w, h, *this);
-    }
-  #endif
-
   public:
     /**
       Get the byte at the specified address
 
       @return The byte at the specified address
     */
-    uInt8 peek(uInt16 address);
+    uint8_t peek(uint16_t address);
 
     /**
       Change the byte at the specified address to the given value
@@ -258,17 +243,17 @@ class CartridgeMC : public Cartridge
       @param value The value to be stored at the address
       @return  True if the poke changed the device address space, else false
     */
-    bool poke(uInt16 address, uInt8 value);
+    bool poke(uint16_t address, uint8_t value);
 
   private:
     // The 128K ROM image for the cartridge
-    uInt8 myImage[131072];
+    uint8_t myImage[131072];
 
     // The 32K of RAM for the cartridge
-    uInt8 myRAM[32768];
+    uint8_t myRAM[32768];
 
     // Indicates which block is currently active for the four segments
-    uInt8 myCurrentBlock[4];
+    uint8_t myCurrentBlock[4];
 
     // Indicates if slot 3 is locked to block $FF or not
     bool mySlot3Locked;

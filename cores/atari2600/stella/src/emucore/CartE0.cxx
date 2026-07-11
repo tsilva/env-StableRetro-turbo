@@ -13,23 +13,17 @@
 //
 // See the file "License.txt" for information on usage and redistribution of
 // this file, and for a DISCLAIMER OF ALL WARRANTIES.
-//
-// $Id: CartE0.cxx 2838 2014-01-17 23:34:03Z stephena $
 //============================================================================
-
-#include <cassert>
-#include <cstring>
 
 #include "System.hxx"
 #include "CartE0.hxx"
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-CartridgeE0::CartridgeE0(const uInt8* image, uInt32 size, const Settings& settings)
-  : Cartridge(settings)
+CartridgeE0::CartridgeE0(const uint8_t* image, uint32_t size,
+                         const Settings& settings)
+  : CartridgeEnhanced(image, size, settings, 8192)
 {
-  // Copy the ROM image into my buffer
-  memcpy(myImage, image, MIN(8192u, size));
-  createCodeAccessBase(8192);
+  myBankShift = BANK_SHIFT_E0;   // 1K segments -> four slices
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -40,227 +34,48 @@ CartridgeE0::~CartridgeE0()
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void CartridgeE0::reset()
 {
-  // Setup segments to some default slices
-  segmentZero(4);
-  segmentOne(5);
-  segmentTwo(6);
+  // Slice 3 is fixed to the last segment (7); CartridgeEnhanced::install()
+  // has already pointed it there. On real hardware the three switchable
+  // slices power up at indeterminate segments, so when power-up
+  // randomization is enabled we pick random start segments (matching the
+  // standalone core and Stella 7), consuming the emulated RNG in the same
+  // order; otherwise we fall back to the fixed 4/5/6 the core has always
+  // used. This must mirror the old CartE0 exactly for bit-identical output.
+  if(mySettings.getBool("ramrandom"))
+  {
+    bank(mySystem->randGenerator().next() % 8, 0);
+    bank(mySystem->randGenerator().next() % 8, 1);
+    bank(mySystem->randGenerator().next() % 8, 2);
+  }
+  else
+  {
+    bank(4, 0);
+    bank(5, 1);
+    bank(6, 2);
+  }
 
   myBankChanged = true;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void CartridgeE0::install(System& system)
+bool CartridgeE0::checkSwitchBank(uint16_t address, uint8_t)
 {
-  mySystem = &system;
-  uInt16 shift = mySystem->pageShift();
-  uInt16 mask = mySystem->pageMask();
+  address &= ROM_MASK;
 
-  // Make sure the system we're being installed in has a page size that'll work
-  assert(((0x1000 & mask) == 0) && ((0x1400 & mask) == 0) &&
-      ((0x1800 & mask) == 0) && ((0x1C00 & mask) == 0));
-
-  System::PageAccess access(0, 0, 0, this, System::PA_READ);
-
-  // Set the page acessing methods for the first part of the last segment
-  for(uInt32 i = 0x1C00; i < (0x1FE0U & ~mask); i += (1 << shift))
+  if(address >= 0x0FE0 && address <= 0x0FE7)
   {
-    access.directPeekBase = &myImage[7168 + (i & 0x03FF)];
-    access.codeAccessBase = &myCodeAccessBase[7168 + (i & 0x03FF)];
-    mySystem->setPageAccess(i >> shift, access);
+    bank(address & 0x0007, 0);
+    return true;
   }
-  myCurrentSlice[3] = 7;
-
-  // Set the page accessing methods for the hot spots in the last segment
-  access.directPeekBase = 0;
-  access.codeAccessBase = &myCodeAccessBase[8128];
-  access.type = System::PA_READ;
-  for(uInt32 j = (0x1FE0 & ~mask); j < 0x2000; j += (1 << shift))
-    mySystem->setPageAccess(j >> shift, access);
-
-  // Install some default slices for the other segments
-  segmentZero(4);
-  segmentOne(5);
-  segmentTwo(6);
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt8 CartridgeE0::peek(uInt16 address)
-{
-  address &= 0x0FFF;
-
-  // Switch banks if necessary
-  if((address >= 0x0FE0) && (address <= 0x0FE7))
+  else if(address >= 0x0FE8 && address <= 0x0FEF)
   {
-    segmentZero(address & 0x0007);
+    bank(address & 0x0007, 1);
+    return true;
   }
-  else if((address >= 0x0FE8) && (address <= 0x0FEF))
+  else if(address >= 0x0FF0 && address <= 0x0FF7)
   {
-    segmentOne(address & 0x0007);
-  }
-  else if((address >= 0x0FF0) && (address <= 0x0FF7))
-  {
-    segmentTwo(address & 0x0007);
-  }
-
-  return myImage[(myCurrentSlice[address >> 10] << 10) + (address & 0x03FF)];
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeE0::poke(uInt16 address, uInt8)
-{
-  address &= 0x0FFF;
-
-  // Switch banks if necessary
-  if((address >= 0x0FE0) && (address <= 0x0FE7))
-  {
-    segmentZero(address & 0x0007);
-  }
-  else if((address >= 0x0FE8) && (address <= 0x0FEF))
-  {
-    segmentOne(address & 0x0007);
-  }
-  else if((address >= 0x0FF0) && (address <= 0x0FF7))
-  {
-    segmentTwo(address & 0x0007);
+    bank(address & 0x0007, 2);
+    return true;
   }
   return false;
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void CartridgeE0::segmentZero(uInt16 slice)
-{
-  if(bankLocked()) return;
-
-  // Remember the new slice
-  myCurrentSlice[0] = slice;
-  uInt16 offset = slice << 10;
-  uInt16 shift = mySystem->pageShift();
-
-  // Setup the page access methods for the current bank
-  System::PageAccess access(0, 0, 0, this, System::PA_READ);
-
-  for(uInt32 address = 0x1000; address < 0x1400; address += (1 << shift))
-  {
-    access.directPeekBase = &myImage[offset + (address & 0x03FF)];
-    access.codeAccessBase = &myCodeAccessBase[offset + (address & 0x03FF)];
-    mySystem->setPageAccess(address >> shift, access);
-  }
-  myBankChanged = true;
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void CartridgeE0::segmentOne(uInt16 slice)
-{
-  if(bankLocked()) return;
-
-  // Remember the new slice
-  myCurrentSlice[1] = slice;
-  uInt16 offset = slice << 10;
-  uInt16 shift = mySystem->pageShift();
-
-  // Setup the page access methods for the current bank
-  System::PageAccess access(0, 0, 0, this, System::PA_READ);
-
-  for(uInt32 address = 0x1400; address < 0x1800; address += (1 << shift))
-  {
-    access.directPeekBase = &myImage[offset + (address & 0x03FF)];
-    access.codeAccessBase = &myCodeAccessBase[offset + (address & 0x03FF)];
-    mySystem->setPageAccess(address >> shift, access);
-  }
-  myBankChanged = true;
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void CartridgeE0::segmentTwo(uInt16 slice)
-{
-  if(bankLocked()) return;
-
-  // Remember the new slice
-  myCurrentSlice[2] = slice;
-  uInt16 offset = slice << 10;
-  uInt16 shift = mySystem->pageShift();
-
-  // Setup the page access methods for the current bank
-  System::PageAccess access(0, 0, 0, this, System::PA_READ);
-
-  for(uInt32 address = 0x1800; address < 0x1C00; address += (1 << shift))
-  {
-    access.directPeekBase = &myImage[offset + (address & 0x03FF)];
-    access.codeAccessBase = &myCodeAccessBase[offset + (address & 0x03FF)];
-    mySystem->setPageAccess(address >> shift, access);
-  }
-  myBankChanged = true;
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeE0::bank(uInt16)
-{
-  // Doesn't support bankswitching in the normal sense
-  return false;
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt16 CartridgeE0::bank() const
-{
-  // Doesn't support bankswitching in the normal sense
-  return 0;
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt16 CartridgeE0::bankCount() const
-{
-  // Doesn't support bankswitching in the normal sense
-  // There is one 'virtual' bank that can change in many different ways
-  return 1;
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeE0::patch(uInt16 address, uInt8 value)
-{
-  address &= 0x0FFF;
-  myImage[(myCurrentSlice[address >> 10] << 10) + (address & 0x03FF)] = value;
-  return true;
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-const uInt8* CartridgeE0::getImage(int& size) const
-{
-  size = 8192;
-  return myImage;
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeE0::save(Serializer& out) const
-{
-  try
-  {
-    out.putString(name());
-    out.putShortArray(myCurrentSlice, 4);
-  }
-  catch(...)
-  {
-    cerr << "ERROR: CartridgeE0::save" << endl;
-    return false;
-  }
-
-  return true;
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeE0::load(Serializer& in)
-{
-  try
-  {
-    if(in.getString() != name())
-      return false;
-
-    in.getShortArray(myCurrentSlice, 4);
-  }
-  catch(...)
-  {
-    cerr << "ERROR: CartridgeE0::load" << endl;
-    return false;
-  }
-
-  return true;
 }

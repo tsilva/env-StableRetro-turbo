@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll
-//  SS  SS   tt           ll   ll
-//  SS     tttttt  eeee   ll   ll   aaaa
+//   SSSS    tt          lll  lll       
+//  SS  SS   tt           ll   ll        
+//  SS     tttttt  eeee   ll   ll   aaaa 
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -16,8 +16,6 @@
 //
 // $Id: Paddles.cxx 2838 2014-01-17 23:34:03Z stephena $
 //============================================================================
-
-#include <cassert>
 
 #include "Event.hxx"
 #include "Paddles.hxx"
@@ -198,8 +196,9 @@ Paddles::Paddles(Jack jack, const Event& event, const System& system,
 
   // The following are independent of whether or not the port
   // is left or right
-  _MOUSE_SENSITIVITY = swapdir ? -abs(_MOUSE_SENSITIVITY) :
-                                  abs(_MOUSE_SENSITIVITY);
+  _MOUSE_DIRECTION   = swapdir ? -1 : 1;
+  _MOUSE_SENSITIVITY = _MOUSE_DIRECTION * abs(_MOUSE_SENSITIVITY);
+
   if(!swapaxis)
   {
     myAxisMouseMotion = Event::MouseAxisXValue;
@@ -224,10 +223,6 @@ Paddles::Paddles(Jack jack, const Event& event, const System& system,
 
   myCharge[0] = myCharge[1] = TRIGRANGE / 2;
   myLastCharge[0] = myLastCharge[1] = 0;
-
-  // Paranoid mode: defaults for the global variables should be set
-  // before the first instance of this class is instantiated
-  assert(_DIGITAL_SENSITIVITY != -1 && _MOUSE_SENSITIVITY != -1);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -269,14 +264,14 @@ void Paddles::update()
   int sa_yaxis = myEvent.get(myP1AxisValue);
   if(abs(myLastAxisX - sa_xaxis) > 10)
   {
-    myAnalogPinValue[Nine] = (Int32)(1400000 *
-        (float)(32767 - (Int16)sa_xaxis) / 65536.0);
+    myAnalogPinValue[Nine] = (int32_t)
+        (((int64_t)1400000 * (32767 - (int16_t)sa_xaxis)) / 65536);
     sa_changed = true;
   }
   if(abs(myLastAxisY - sa_yaxis) > 10)
   {
-    myAnalogPinValue[Five] = (Int32)(1400000 *
-        (float)(32767 - (Int16)sa_yaxis) / 65536.0);
+    myAnalogPinValue[Five] = (int32_t)
+        (((int64_t)1400000 * (32767 - (int16_t)sa_yaxis)) / 65536);
     sa_changed = true;
   }
   myLastAxisX = sa_xaxis;
@@ -373,10 +368,10 @@ void Paddles::update()
   // Only change state if the charge has actually changed
   if(myCharge[1] != myLastCharge[1])
     myAnalogPinValue[Five] =
-        (Int32)(1400000 * (myCharge[1] / float(TRIGRANGE)));
+        (int32_t)(((int64_t)1400000 * myCharge[1]) / TRIGRANGE);
   if(myCharge[0] != myLastCharge[0])
     myAnalogPinValue[Nine] =
-        (Int32)(1400000 * (myCharge[0] / float(TRIGRANGE)));
+        (int32_t)(((int64_t)1400000 * myCharge[0]) / TRIGRANGE);
 
   myLastCharge[1] = myCharge[1];
   myLastCharge[0] = myCharge[0];
@@ -419,11 +414,14 @@ bool Paddles::setMouseControl(
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void Paddles::setDigitalSensitivity(int sensitivity)
 {
-  if(sensitivity < 1)       sensitivity = 1;
-  else if(sensitivity > 10) sensitivity = 10;
+  if(sensitivity < 10)       sensitivity = 10;
+  else if(sensitivity > 100) sensitivity = 100;
 
-  _DIGITAL_SENSITIVITY = sensitivity;
-  _DIGITAL_DISTANCE = 20 + (sensitivity << 3);
+  _DIGITAL_SENSITIVITY = sensitivity / 10;
+
+  /* Distance has a quadratic response:
+   * (s/100)^2 * 100 rounded = (s*s + 50) / 100 in exact integers */
+  _DIGITAL_DISTANCE = (sensitivity * sensitivity + 50) / 100;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -432,13 +430,14 @@ void Paddles::setMouseSensitivity(int sensitivity)
   if(sensitivity < 1)       sensitivity = 1;
   else if(sensitivity > 15) sensitivity = 15;
 
-  _MOUSE_SENSITIVITY = sensitivity;
+  _MOUSE_SENSITIVITY = _MOUSE_DIRECTION * sensitivity;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 int Paddles::_DIGITAL_SENSITIVITY = -1;
 int Paddles::_DIGITAL_DISTANCE = -1;
 int Paddles::_MOUSE_SENSITIVITY = -1;
+int Paddles::_MOUSE_DIRECTION = 1;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 const Controller::DigitalPin Paddles::ourButtonPin[2] = { Four, Three };

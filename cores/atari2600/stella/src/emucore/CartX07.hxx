@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll
-//  SS  SS   tt           ll   ll
-//  SS     tttttt  eeee   ll   ll   aaaa
+//   SSSS    tt          lll  lll       
+//  SS  SS   tt           ll   ll        
+//  SS     tttttt  eeee   ll   ll   aaaa 
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -24,9 +24,6 @@ class System;
 
 #include "bspf.hxx"
 #include "Cart.hxx"
-#ifdef DEBUGGER_SUPPORT
-  #include "CartX07Widget.hxx"
-#endif
 
 /**
   Bankswitching method as defined/created by John Payson (aka Supercat)
@@ -35,11 +32,11 @@ class System;
   This bankswitching method has 16 4K banks that can be accessed at
   addresses $1000 to $1FFF. The bankswitching hotspots are all below
   $1000. X07 uses two types of hotspots:
-
+  
   0 1xxx nnnn 1101 -- Switch to bank nnnn
   0 0xxx 0nxx xxxx -- If in bank 111x, switch to bank 111n.
                       In any other bank, do not switch.
-
+ 
   Note that the latter will hit on almost any TIA access.
 
   @author  Eckhard Stolberg
@@ -57,8 +54,8 @@ class CartridgeX07 : public Cartridge
       @param size      The size of the ROM image
       @param settings  A reference to the various settings (read-only)
     */
-    CartridgeX07(const uInt8* image, uInt32 size, const Settings& settings);
-
+    CartridgeX07(const uint8_t* image, uint32_t size, const Settings& settings);
+ 
     /**
       Destructor
     */
@@ -83,17 +80,17 @@ class CartridgeX07 : public Cartridge
 
       @param bank The bank that should be installed in the system
     */
-    bool bank(uInt16 bank);
+    bool bank(uint16_t bank);
 
     /**
       Get the current bank.
     */
-    uInt16 bank() const;
+    uint16_t bank() const;
 
     /**
       Query the number of banks supported by the cartridge.
     */
-    uInt16 bankCount() const;
+    uint16_t bankCount() const;
 
     /**
       Patch the cartridge ROM.
@@ -102,7 +99,7 @@ class CartridgeX07 : public Cartridge
       @param value    The value to place into the address
       @return    Success or failure of the patch operation
     */
-    bool patch(uInt16 address, uInt8 value);
+    bool patch(uint16_t address, uint8_t value);
 
     /**
       Access the internal ROM image for this cartridge.
@@ -110,7 +107,7 @@ class CartridgeX07 : public Cartridge
       @param size  Set to the size of the internal ROM image data
       @return  A pointer to the internal ROM image data
     */
-    const uInt8* getImage(int& size) const;
+    const uint8_t* getImage(int& size) const;
 
     /**
       Save the current state of this cart to the given Serializer.
@@ -135,25 +132,13 @@ class CartridgeX07 : public Cartridge
     */
     string name() const { return "CartridgeX07"; }
 
-  #ifdef DEBUGGER_SUPPORT
-    /**
-      Get debugger widget responsible for accessing the inner workings
-      of the cart.
-    */
-    CartDebugWidget* debugWidget(GuiObject* boss, const GUI::Font& lfont,
-        const GUI::Font& nfont, int x, int y, int w, int h)
-    {
-      return new CartridgeX07Widget(boss, lfont, nfont, x, y, w, h, *this);
-    }
-  #endif
-
   public:
     /**
       Get the byte at the specified address.
 
       @return The byte at the specified address
     */
-    uInt8 peek(uInt16 address);
+    uint8_t peek(uint16_t address);
 
     /**
       Change the byte at the specified address to the given value
@@ -162,14 +147,14 @@ class CartridgeX07 : public Cartridge
       @param value The value to be stored at the address
       @return  True if the poke changed the device address space, else false
     */
-    bool poke(uInt16 address, uInt8 value);
+    bool poke(uint16_t address, uint8_t value);
 
   private:
     // Indicates which bank is currently active
-    uInt16 myCurrentBank;
+    uint16_t myCurrentBank;
 
     // The 64K ROM image of the cartridge
-    uInt8 myImage[65536];
+    uint8_t myImage[65536];
 };
 
 #endif

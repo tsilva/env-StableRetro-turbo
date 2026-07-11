@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll
-//  SS  SS   tt           ll   ll
-//  SS     tttttt  eeee   ll   ll   aaaa
+//   SSSS    tt          lll  lll       
+//  SS  SS   tt           ll   ll        
+//  SS     tttttt  eeee   ll   ll   aaaa 
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -28,8 +28,8 @@
 RamCheat::RamCheat(OSystem* os, const string& name, const string& code)
   : Cheat(os, name, code)
 {
-  address = (uInt16) unhex(myCode.substr(0, 2));
-  value   = (uInt8) unhex(myCode.substr(2, 2));
+  address = (uint16_t) unhex(myCode.substr(0, 2));
+  value   = (uint8_t) unhex(myCode.substr(2, 2));
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -

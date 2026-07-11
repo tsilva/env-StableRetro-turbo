@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll
-//  SS  SS   tt           ll   ll
-//  SS     tttttt  eeee   ll   ll   aaaa
+//   SSSS    tt          lll  lll       
+//  SS  SS   tt           ll   ll        
+//  SS     tttttt  eeee   ll   ll   aaaa 
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -33,7 +33,7 @@
     http://www.atarimuseum.com/videogames/consoles/2600/mindlink.html
 
   This code was heavily borrowed from z26, and uses conventions defined
-  there.  Specifically, IOPortA is treated as a complete uInt8, whereas
+  there.  Specifically, IOPortA is treated as a complete uint8_t, whereas
   the Stella core actually stores this information in boolean arrays
   addressable by DigitalPin number.
 
@@ -73,7 +73,7 @@ class MindLink : public Controller
 
       @param value  The entire contents of the SWCHA register
     */
-    void controlWrite(uInt8) { nextMindlinkBit(); }
+    void controlWrite(uint8_t) { nextMindlinkBit(); }
 
     /**
       Update the entire digital and analog pin state according to the
@@ -105,14 +105,14 @@ class MindLink : public Controller
 
   private:
     // Position value in Mindlink controller
-    // Gets transferred bitwise (16 bits)
+    // Gets transferred bitwise (16 bits) 
     int myMindlinkPos;
 
     // Which bit to transfer next
     int myMindlinkShift;
 
     // Whether to use the mouse to emulate this controller
-    int myMouseEnabled;
+    int myMouseEnabled;  
 };
 
 #endif

@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll
-//  SS  SS   tt           ll   ll
-//  SS     tttttt  eeee   ll   ll   aaaa
+//   SSSS    tt          lll  lll       
+//  SS  SS   tt           ll   ll        
+//  SS     tttttt  eeee   ll   ll   aaaa 
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -28,8 +28,8 @@ class System;
 #include "bspf.hxx"
 
 /**
-  A controller is a device that plugs into either the left or right
-  controller jack of the Video Computer System (VCS).  The pins of
+  A controller is a device that plugs into either the left or right 
+  controller jack of the Video Computer System (VCS).  The pins of 
   the controller jacks are mapped as follows:
 
                            -------------
@@ -92,7 +92,7 @@ class Controller : public Serializable
     {
       BoosterGrip, Driving, Keyboard, Paddles, Joystick,
       TrackBall22, TrackBall80, AmigaMouse, AtariVox, SaveKey,
-      KidVid, Genesis, MindLink, CompuMate
+      KidVid, Genesis, MindLink, CompuMate, QuadTari
     };
 
   public:
@@ -106,7 +106,7 @@ class Controller : public Serializable
     */
     Controller(Jack jack, const Event& event, const System& system,
                Type type);
-
+ 
     /**
       Destructor
     */
@@ -128,7 +128,7 @@ class Controller : public Serializable
 
       @return The state of all digital pins
     */
-    virtual uInt8 read();
+    virtual uint8_t read();
 
     /**
       Read the value of the specified digital pin for this controller.
@@ -139,17 +139,17 @@ class Controller : public Serializable
     virtual bool read(DigitalPin pin);
 
     /**
-      Read the resistance at the specified analog pin for this controller.
+      Read the resistance at the specified analog pin for this controller.  
       The returned value is the resistance measured in ohms.
 
       @param pin The pin of the controller jack to read
       @return The resistance at the specified pin
     */
-    virtual Int32 read(AnalogPin pin);
+    virtual int32_t read(AnalogPin pin);
 
     /**
-      Write the given value to the specified digital pin for this
-      controller.  Writing is only allowed to the pins associated
+      Write the given value to the specified digital pin for this 
+      controller.  Writing is only allowed to the pins associated 
       with the PIA.  Therefore you cannot write to pin six.
 
       @param pin The pin of the controller jack to write to
@@ -163,7 +163,7 @@ class Controller : public Serializable
 
       @param value  The entire contents of the SWCHA register
     */
-    virtual void controlWrite(uInt8 value) { };
+    virtual void controlWrite(uint8_t value) { };
 
     /**
       Update the entire digital and analog pin state according to the
@@ -173,7 +173,7 @@ class Controller : public Serializable
 
     /**
       Notification method invoked by the system right before the
-      system resets its cycle counter to zero.  It may be necessary
+      system resets its cycle counter to zero.  It may be necessary 
       to override this method for controllers that remember cycle counts.
     */
     virtual void systemCyclesReset() { };
@@ -218,7 +218,7 @@ class Controller : public Serializable
       @param value The value to set on the pin
     */
     void set(DigitalPin pin, bool value);
-    void set(AnalogPin pin, Int32 value);
+    void set(AnalogPin pin, int32_t value);
 
     /**
       Saves the current state of this controller to the given Serializer.
@@ -238,10 +238,10 @@ class Controller : public Serializable
 
   public:
     /// Constant which represents maximum resistance for analog pins
-    static const Int32 maximumResistance;
+    static const int32_t maximumResistance;
 
     /// Constant which represents minimum resistance for analog pins
-    static const Int32 minimumResistance;
+    static const int32_t minimumResistance;
 
   protected:
     /// Specifies which jack the controller is plugged in
@@ -263,7 +263,7 @@ class Controller : public Serializable
     bool myDigitalPinState[5];
 
     /// The analog value on each analog pin
-    Int32 myAnalogPinValue[2];
+    int32_t myAnalogPinValue[2];
 
   protected:
     // Copy constructor isn't supported by controllers so make it private

@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll
-//  SS  SS   tt           ll   ll
-//  SS     tttttt  eeee   ll   ll   aaaa
+//   SSSS    tt          lll  lll       
+//  SS  SS   tt           ll   ll        
+//  SS     tttttt  eeee   ll   ll   aaaa 
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -43,7 +43,7 @@ class MT24LC256
       @param system   The system using the controller of this device
     */
     MT24LC256(const string& filename, const System& system);
-
+ 
     /**
       Destructor
     */
@@ -59,7 +59,7 @@ class MT24LC256
 
     /**
       Notification method invoked by the system right before the
-      system resets its cycle counter to zero.  It may be necessary
+      system resets its cycle counter to zero.  It may be necessary 
       to override this method for devices that remember cycle counts.
     */
     void systemCyclesReset();
@@ -80,7 +80,7 @@ class MT24LC256
     const System& mySystem;
 
     // The EEPROM data
-    uInt8 myData[32768];
+    uint8_t myData[32768];
 
     // Cached state of the SDA and SCL pins on the last write
     bool mySDA, mySCL;
@@ -89,10 +89,10 @@ class MT24LC256
     bool myTimerActive;
 
     // Indicates when the timer was set
-    uInt32 myCyclesWhenTimerSet;
+    uint32_t myCyclesWhenTimerSet;
 
     // Indicates when the SDA and SCL pins were set/written
-    uInt32 myCyclesWhenSDASet, myCyclesWhenSCLSet;
+    uint32_t myCyclesWhenSDASet, myCyclesWhenSCLSet;
 
     // The file containing the EEPROM data
     string myDataFile;
@@ -108,12 +108,12 @@ class MT24LC256
     int jpee_sizemask, jpee_pagemask, jpee_smallmode, jpee_logmode;
     int jpee_pptr, jpee_state, jpee_nb;
     unsigned int jpee_address, jpee_ad_known;
-    uInt8 jpee_packet[70];
+    uint8_t jpee_packet[70];
 
   private:
     // Copy constructor isn't supported by this class so make it private
     MT24LC256(const MT24LC256&);
-
+ 
     // Assignment operator isn't supported by this class so make it private
     MT24LC256& operator = (const MT24LC256&);
 };

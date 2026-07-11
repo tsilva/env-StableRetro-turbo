@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll
-//  SS  SS   tt           ll   ll
-//  SS     tttttt  eeee   ll   ll   aaaa
+//   SSSS    tt          lll  lll       
+//  SS  SS   tt           ll   ll        
+//  SS     tttttt  eeee   ll   ll   aaaa 
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -54,31 +54,9 @@ class Base
     };
 
   public:
-    /** Get/set the number base when parsing numeric values */
-    static void setFormat(Base::Format base) { myDefaultBase = base; }
-    static Base::Format format()             { return myDefaultBase; }
-
-    /** Get/set HEX output to be upper/lower case */
-    static void setHexUppercase(bool enable);
-    static bool hexUppercase() { return myHexflags & std::ios_base::uppercase; }
-
-    /** Output HEX digits in 1/2/4 byte format */
-    static inline std::ostream& HEX2(std::ostream& os) {
-      os.flags(myHexflags);
-      return os << std::setw(2) << std::setfill('0');
-    }
-    static inline std::ostream& HEX4(std::ostream& os) {
-      os.flags(myHexflags);
-      return os << std::setw(4) << std::setfill('0');
-    }
-    static inline std::ostream& HEX8(std::ostream& os) {
-      os.flags(myHexflags);
-      return os << std::setw(8) << std::setfill('0');
-    }
-
     /** Convert integer to a string in the given base format */
     static string toString(int value,
-      Common::Base::Format outputBase = Common::Base::F_DEFAULT);
+      Common::Base::Format outputBase);
 
   private:      // Make sure this class is never instantiated
     Base() { }
@@ -87,13 +65,9 @@ class Base
     // Default format to use when none is specified
     static Format myDefaultBase;
 
-    // Upper or lower case for HEX digits
-    static std::ios_base::fmtflags myHexflags;
-
     // Format specifiers to use for sprintf (eventually we may convert
     // to C++ streams
     static const char* myLowerFmt[4];
-    static const char* myUpperFmt[4];
     static const char** myFmt;
 };
 

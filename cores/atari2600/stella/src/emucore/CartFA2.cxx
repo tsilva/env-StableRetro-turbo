@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll
-//  SS  SS   tt           ll   ll
-//  SS     tttttt  eeee   ll   ll   aaaa
+//   SSSS    tt          lll  lll       
+//  SS  SS   tt           ll   ll        
+//  SS     tttttt  eeee   ll   ll   aaaa 
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -17,7 +17,6 @@
 // $Id: CartFA2.cxx 2838 2014-01-17 23:34:03Z stephena $
 //============================================================================
 
-#include <cassert>
 #include <cstring>
 
 #include "OSystem.hxx"
@@ -26,7 +25,7 @@
 #include "CartFA2.hxx"
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-CartridgeFA2::CartridgeFA2(const uInt8* image, uInt32 size, const OSystem& osystem)
+CartridgeFA2::CartridgeFA2(const uint8_t* image, uint32_t size, const OSystem& osystem)
   : Cartridge(osystem.settings()),
     myOSystem(osystem),
     myRamAccessTimeout(0),
@@ -36,11 +35,11 @@ CartridgeFA2::CartridgeFA2(const uInt8* image, uInt32 size, const OSystem& osyst
   if(size >= 29 * 1024)
   {
     image += 1024;
-    mySize = 28 * 1024;
+    mySize = 28 * 1024; 
   }
 
   // Allocate array for the ROM image
-  myImage = new uInt8[mySize];
+  myImage = new uint8_t[mySize];
 
   // Copy the ROM image into my buffer
   memcpy(myImage, image, mySize);
@@ -52,7 +51,7 @@ CartridgeFA2::CartridgeFA2(const uInt8* image, uInt32 size, const OSystem& osyst
   // Remember startup bank
   myStartBank = 0;
 }
-
+ 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 CartridgeFA2::~CartridgeFA2()
 {
@@ -64,7 +63,7 @@ void CartridgeFA2::reset()
 {
   // Initialize RAM
   if(mySettings.getBool("ramrandom"))
-    for(uInt32 i = 0; i < 256; ++i)
+    for(uint32_t i = 0; i < 256; ++i)
       myRAM[i] = mySystem->randGenerator().next();
   else
     memset(myRAM, 0, 256);
@@ -76,28 +75,24 @@ void CartridgeFA2::reset()
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void CartridgeFA2::install(System& system)
 {
-  mySystem = &system;
-  uInt16 shift = mySystem->pageShift();
-  uInt16 mask = mySystem->pageMask();
-
-  // Make sure the system we're being installed in has a page size that'll work
-  assert(((0x1100 & mask) == 0) && ((0x1200 & mask) == 0));
+  mySystem     = &system;
+  uint16_t shift = mySystem->pageShift();
 
   System::PageAccess access(0, 0, 0, this, System::PA_READ);
 
   // Set the page accessing method for the RAM writing pages
   access.type = System::PA_WRITE;
-  for(uInt32 j = 0x1000; j < 0x1100; j += (1 << shift))
+  for(uint32_t j = 0x1000; j < 0x1100; j += (1 << shift))
   {
     access.directPokeBase = &myRAM[j & 0x00FF];
     access.codeAccessBase = &myCodeAccessBase[j & 0x00FF];
     mySystem->setPageAccess(j >> shift, access);
   }
-
+ 
   // Set the page accessing method for the RAM reading pages
   access.directPokeBase = 0;
   access.type = System::PA_READ;
-  for(uInt32 k = 0x1100; k < 0x1200; k += (1 << shift))
+  for(uint32_t k = 0x1100; k < 0x1200; k += (1 << shift))
   {
     access.directPeekBase = &myRAM[k & 0x00FF];
     access.codeAccessBase = &myCodeAccessBase[0x100 + (k & 0x00FF)];
@@ -109,9 +104,9 @@ void CartridgeFA2::install(System& system)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt8 CartridgeFA2::peek(uInt16 address)
+uint8_t CartridgeFA2::peek(uint16_t address)
 {
-  uInt16 peekAddress = address;
+  uint16_t peekAddress = address;
   address &= 0x0FFF;
 
   // Switch banks if necessary
@@ -137,7 +132,7 @@ uInt8 CartridgeFA2::peek(uInt16 address)
       // Set the current bank to the third 4k bank
       bank(2);
       break;
-
+  
     case 0x0FF8:
       // Set the current bank to the fourth 4k bank
       bank(3);
@@ -166,7 +161,7 @@ uInt8 CartridgeFA2::peek(uInt16 address)
   if(address < 0x0100)  // Write port is at 0xF000 - 0xF100 (256 bytes)
   {
     // Reading from the write port triggers an unwanted write
-    uInt8 value = mySystem->getDataBusState(0xFF);
+    uint8_t value = mySystem->getDataBusState(0xFF);
 
     if(bankLocked())
       return value;
@@ -175,13 +170,13 @@ uInt8 CartridgeFA2::peek(uInt16 address)
       triggerReadFromWritePort(peekAddress);
       return myRAM[address] = value;
     }
-  }
+  }  
   else
     return myImage[(myCurrentBank << 12) + address];
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeFA2::poke(uInt16 address, uInt8)
+bool CartridgeFA2::poke(uint16_t address, uint8_t)
 {
   address &= 0x0FFF;
 
@@ -208,7 +203,7 @@ bool CartridgeFA2::poke(uInt16 address, uInt8)
       // Set the current bank to the third 4k bank
       bank(2);
       break;
-
+  
     case 0x0FF8:
       // Set the current bank to the fourth 4k bank
       bank(3);
@@ -241,27 +236,27 @@ bool CartridgeFA2::poke(uInt16 address, uInt8)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeFA2::bank(uInt16 bank)
+bool CartridgeFA2::bank(uint16_t bank)
 {
   if(bankLocked()) return false;
 
   // Remember what bank we're in
   myCurrentBank = bank;
-  uInt16 offset = myCurrentBank << 12;
-  uInt16 shift = mySystem->pageShift();
-  uInt16 mask = mySystem->pageMask();
+  uint16_t offset = myCurrentBank << 12;
+  uint16_t shift = mySystem->pageShift();
+  uint16_t mask = mySystem->pageMask();
 
   System::PageAccess access(0, 0, 0, this, System::PA_READ);
 
   // Set the page accessing methods for the hot spots
-  for(uInt32 i = (0x1FF4 & ~mask); i < 0x2000; i += (1 << shift))
+  for(uint32_t i = (0x1FF4 & ~mask); i < 0x2000; i += (1 << shift))
   {
     access.codeAccessBase = &myCodeAccessBase[offset + (i & 0x0FFF)];
     mySystem->setPageAccess(i >> shift, access);
   }
 
   // Setup the page access methods for the current bank
-  for(uInt32 address = 0x1200; address < (0x1FF4U & ~mask);
+  for(uint32_t address = 0x1200; address < (0x1FF4U & ~mask);
       address += (1 << shift))
   {
     access.directPeekBase = &myImage[offset + (address & 0x0FFF)];
@@ -272,19 +267,19 @@ bool CartridgeFA2::bank(uInt16 bank)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt16 CartridgeFA2::bank() const
+uint16_t CartridgeFA2::bank() const
 {
   return myCurrentBank;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt16 CartridgeFA2::bankCount() const
+uint16_t CartridgeFA2::bankCount() const
 {
   return (mySize / 4096);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeFA2::patch(uInt16 address, uInt8 value)
+bool CartridgeFA2::patch(uint16_t address, uint8_t value)
 {
   address &= 0x0FFF;
 
@@ -299,10 +294,10 @@ bool CartridgeFA2::patch(uInt16 address, uInt8 value)
     myImage[(myCurrentBank << 12) + address] = value;
 
   return myBankChanged = true;
-}
+} 
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-const uInt8* CartridgeFA2::getImage(int& size) const
+const uint8_t* CartridgeFA2::getImage(int& size) const
 {
   size = mySize;
   return myImage;
@@ -311,17 +306,9 @@ const uInt8* CartridgeFA2::getImage(int& size) const
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 bool CartridgeFA2::save(Serializer& out) const
 {
-  try
-  {
-    out.putString(name());
-    out.putShort(myCurrentBank);
-    out.putByteArray(myRAM, 256);
-  }
-  catch(...)
-  {
-    cerr << "ERROR: CartridgeFA2::save" << endl;
-    return false;
-  }
+  out.putString(name());
+  out.putShort(myCurrentBank);
+  out.putByteArray(myRAM, 256);
 
   return true;
 }
@@ -329,19 +316,11 @@ bool CartridgeFA2::save(Serializer& out) const
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 bool CartridgeFA2::load(Serializer& in)
 {
-  try
-  {
-    if(in.getString() != name())
-      return false;
-
-    myCurrentBank = in.getShort();
-    in.getByteArray(myRAM, 256);
-  }
-  catch(...)
-  {
-    cerr << "ERROR: CartridgeFA2::load" << endl;
+  if(in.getString() != name())
     return false;
-  }
+
+  myCurrentBank = in.getShort();
+  in.getByteArray(myRAM, 256);
 
   // Remember what bank we were in
   bank(myCurrentBank);
@@ -356,7 +335,7 @@ void CartridgeFA2::setRomName(const string& name)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt8 CartridgeFA2::ramReadWrite()
+uint8_t CartridgeFA2::ramReadWrite()
 {
   /* The following algorithm implements accessing Harmony cart flash
 
@@ -379,8 +358,15 @@ uInt8 CartridgeFA2::ramReadWrite()
   // First access sets the timer
   if(myRamAccessTimeout == 0)
   {
-    // Remember when the first access was made
-    myRamAccessTimeout = myOSystem.getTicks();
+    // Remember (as an emulated-cycle deadline) when the access completes.
+    // The real Harmony flash delay is a fixed physical time; expressing it
+    // in 6507 cycles keeps it both deterministic (independent of host
+    // speed) and accurate in the domain the game actually measures -- the
+    // cycles it burns polling the busy bit. NTSC 6507 clock ~1.19 MHz:
+    //   0.5 ms read  ->    597 cycles
+    //   101 ms write -> 120511 cycles
+    // (the <1% NTSC/PAL clock difference is immaterial for a busy-wait).
+    uint32_t delay = 0;
 
     // We go ahead and do the access now, and only return when a sufficient
     // amount of time has passed
@@ -389,37 +375,26 @@ uInt8 CartridgeFA2::ramReadWrite()
     {
       if(myRAM[255] == 1)       // read
       {
-        try
-        {
-          serializer.getByteArray(myRAM, 256);
-        }
-        catch(...)
-        {
-          memset(myRAM, 0, 256);
-        }
-        myRamAccessTimeout += 500;  // Add 0.5 ms delay for read
+        serializer.getByteArray(myRAM, 256);
+        delay = 597;            // 0.5 ms read delay
       }
       else if(myRAM[255] == 2)  // write
       {
-        try
-        {
-          serializer.putByteArray(myRAM, 256);
-        }
-        catch(...)
-        {
-          // Maybe add logging here that save failed?
-          cerr << name() << ": ERROR saving score table" << endl;
-        }
-        myRamAccessTimeout += 101000;  // Add 101 ms delay for write
+        serializer.putByteArray(myRAM, 256);
+        delay = 120511;         // 101 ms write delay
       }
     }
+    myRamAccessTimeout = mySystem->cycles() + delay;
+    if(myRamAccessTimeout == 0)  // keep 0 reserved as the "idle" sentinel
+      myRamAccessTimeout = 1;
     // Bit 6 is 1, busy
     return myImage[(myCurrentBank << 12) + 0xFF4] | 0x40;
   }
   else
   {
-    // Have we reached the timeout value yet?
-    if(myOSystem.getTicks() >= myRamAccessTimeout)
+    // Have we reached the timeout value yet? Signed difference so the
+    // comparison is correct even across the 32-bit cycle-counter wrap.
+    if((int32_t)((uint32_t)mySystem->cycles() - (uint32_t)myRamAccessTimeout) >= 0)
     {
       myRamAccessTimeout = 0;  // Turn off timer
       myRAM[255] = 0;          // Successful operation
@@ -434,45 +409,20 @@ uInt8 CartridgeFA2::ramReadWrite()
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void CartridgeFA2::flash(uInt8 operation)
+void CartridgeFA2::flash(uint8_t operation)
 {
   Serializer serializer(myFlashFile);
   if(serializer.isValid())
   {
     if(operation == 0)       // erase
     {
-      try
-      {
-        uInt8 buf[256];
-        memset(buf, 0, 256);
-        serializer.putByteArray(buf, 256);
-      }
-      catch(...)
-      {
-      }
+      uint8_t buf[256];
+      memset(buf, 0, 256);
+      serializer.putByteArray(buf, 256);
     }
     else if(operation == 1)  // read
-    {
-      try
-      {
-        serializer.getByteArray(myRAM, 256);
-      }
-      catch(...)
-      {
-        memset(myRAM, 0, 256);
-      }
-    }
+      serializer.getByteArray(myRAM, 256);
     else if(operation == 2)  // write
-    {
-      try
-      {
-        serializer.putByteArray(myRAM, 256);
-      }
-      catch(...)
-      {
-        // Maybe add logging here that save failed?
-        cerr << name() << ": ERROR saving score table" << endl;
-      }
-    }
+      serializer.putByteArray(myRAM, 256);
   }
 }

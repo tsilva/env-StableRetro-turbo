@@ -3,9 +3,9 @@
   "profiles": [
     {
       "name": "atari-breakout",
-      "description": "Atari-v1 Breakout profile for direct ALE comparisons.",
+      "description": "Matched Stella and ALE Breakout throughput profile.",
       "game": "Breakout-Atari2600-v0",
-      "state": "State.NONE",
+      "state": "Start",
       "resize": "84x84",
       "grayscale": true,
       "frame_skip": 4,

@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll
-//  SS  SS   tt           ll   ll
-//  SS     tttttt  eeee   ll   ll   aaaa
+//   SSSS    tt          lll  lll       
+//  SS  SS   tt           ll   ll        
+//  SS     tttttt  eeee   ll   ll   aaaa 
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -119,7 +119,7 @@ class CompuMate
 
           @param value  The entire contents of the SWCHA register
         */
-        void controlWrite(uInt8) { myHandler.update(); }
+        void controlWrite(uint8_t) { myHandler.update(); }
 
         /**
           Update the entire digital and analog pin state according to the
@@ -149,7 +149,7 @@ class CompuMate
 
     // System cycle at which the update() method is called
     // Multiple calls at the same cycle should be ignored
-    uInt32 myCycleAtLastUpdate;
+    uint32_t myCycleAtLastUpdate;
 };
 
 #endif

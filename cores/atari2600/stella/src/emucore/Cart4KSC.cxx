@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll
-//  SS  SS   tt           ll   ll
-//  SS     tttttt  eeee   ll   ll   aaaa
+//   SSSS    tt          lll  lll       
+//  SS  SS   tt           ll   ll        
+//  SS     tttttt  eeee   ll   ll   aaaa 
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -17,14 +17,13 @@
 // $Id: Cart4KSC.cxx 2838 2014-01-17 23:34:03Z stephena $
 //============================================================================
 
-#include <cassert>
 #include <cstring>
 
 #include "System.hxx"
 #include "Cart4KSC.hxx"
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-Cartridge4KSC::Cartridge4KSC(const uInt8* image, uInt32 size, const Settings& settings)
+Cartridge4KSC::Cartridge4KSC(const uint8_t* image, uint32_t size, const Settings& settings)
   : Cartridge(settings)
 {
   // Copy the ROM image into my buffer
@@ -45,7 +44,7 @@ void Cartridge4KSC::reset()
 {
   // Initialize RAM
   if(mySettings.getBool("ramrandom"))
-    for(uInt32 i = 0; i < 128; ++i)
+    for(uint32_t i = 0; i < 128; ++i)
       myRAM[i] = mySystem->randGenerator().next();
   else
     memset(myRAM, 0, 128);
@@ -55,18 +54,14 @@ void Cartridge4KSC::reset()
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void Cartridge4KSC::install(System& system)
 {
-  mySystem = &system;
-  uInt16 shift = mySystem->pageShift();
-  uInt16 mask = mySystem->pageMask();
-
-  // Make sure the system we're being installed in has a page size that'll work
-  assert(((0x1080 & mask) == 0) && ((0x1100 & mask) == 0));
+  mySystem     = &system;
+  uint16_t shift = mySystem->pageShift();
 
   System::PageAccess access(0, 0, 0, this, System::PA_READ);
 
   // Set the page accessing method for the RAM writing pages
   access.type = System::PA_WRITE;
-  for(uInt32 j = 0x1000; j < 0x1080; j += (1 << shift))
+  for(uint32_t j = 0x1000; j < 0x1080; j += (1 << shift))
   {
     access.directPokeBase = &myRAM[j & 0x007F];
     access.codeAccessBase = &myCodeAccessBase[j & 0x007F];
@@ -76,7 +71,7 @@ void Cartridge4KSC::install(System& system)
   // Set the page accessing method for the RAM reading pages
   access.directPokeBase = 0;
   access.type = System::PA_READ;
-  for(uInt32 k = 0x1080; k < 0x1100; k += (1 << shift))
+  for(uint32_t k = 0x1080; k < 0x1100; k += (1 << shift))
   {
     access.directPeekBase = &myRAM[k & 0x007F];
     access.codeAccessBase = &myCodeAccessBase[0x80 + (k & 0x007F)];
@@ -84,7 +79,7 @@ void Cartridge4KSC::install(System& system)
   }
 
   // Map ROM image into the system
-  for(uInt32 address = 0x1100; address < 0x2000; address += (1 << shift))
+  for(uint32_t address = 0x1100; address < 0x2000; address += (1 << shift))
   {
     access.directPeekBase = &myImage[address & 0x0FFF];
     access.codeAccessBase = &myCodeAccessBase[address & 0x0FFF];
@@ -93,15 +88,15 @@ void Cartridge4KSC::install(System& system)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt8 Cartridge4KSC::peek(uInt16 address)
+uint8_t Cartridge4KSC::peek(uint16_t address)
 {
-  uInt16 peekAddress = address;
+  uint16_t peekAddress = address;
   address &= 0x0FFF;
 
   if(address < 0x0080)  // Write port is at 0xF000 - 0xF080 (128 bytes)
   {
     // Reading from the write port triggers an unwanted write
-    uInt8 value = mySystem->getDataBusState(0xFF);
+    uint8_t value = mySystem->getDataBusState(0xFF);
 
     if(bankLocked())
       return value;
@@ -110,13 +105,13 @@ uInt8 Cartridge4KSC::peek(uInt16 address)
       triggerReadFromWritePort(peekAddress);
       return myRAM[address] = value;
     }
-  }
+  }  
   else
     return myImage[address & 0x0FFF];
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool Cartridge4KSC::poke(uInt16 address, uInt8)
+bool Cartridge4KSC::poke(uint16_t address, uint8_t)
 {
   // NOTE: This does not handle accessing RAM, however, this function
   // should never be called for RAM because of the way page accessing
@@ -125,26 +120,26 @@ bool Cartridge4KSC::poke(uInt16 address, uInt8)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool Cartridge4KSC::bank(uInt16 bank)
-{
+bool Cartridge4KSC::bank(uint16_t bank)
+{ 
   // Doesn't support bankswitching
   return false;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt16 Cartridge4KSC::bank() const
+uint16_t Cartridge4KSC::bank() const
 {
   return 0;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt16 Cartridge4KSC::bankCount() const
+uint16_t Cartridge4KSC::bankCount() const
 {
   return 1;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool Cartridge4KSC::patch(uInt16 address, uInt8 value)
+bool Cartridge4KSC::patch(uint16_t address, uint8_t value)
 {
   address &= 0x0FFF;
 
@@ -159,10 +154,10 @@ bool Cartridge4KSC::patch(uInt16 address, uInt8 value)
     myImage[address & 0xFFF] = value;
 
   return myBankChanged = true;
-}
+} 
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-const uInt8* Cartridge4KSC::getImage(int& size) const
+const uint8_t* Cartridge4KSC::getImage(int& size) const
 {
   size = 4096;
   return myImage;

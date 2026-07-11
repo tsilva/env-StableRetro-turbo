@@ -1,10 +1,24 @@
 #!/usr/bin/env python
+import gzip
 import json
 import os
 import sys
 import zipfile
 
 import stable_retro.data
+
+
+def _refresh_atari_start_state(game, game_path, rom_path):
+    """Write a Stella-version-compatible reset state for imported Atari ROMs."""
+    if not game.endswith("-Atari2600-v0"):
+        return
+    import stable_retro
+
+    emulator = stable_retro.RetroEmulator(rom_path)
+    state = gzip.compress(emulator.get_state(), compresslevel=9, mtime=0)
+    del emulator
+    with open(os.path.join(game_path, "Start.state"), "wb") as state_file:
+        state_file.write(state)
 
 
 def _check_zipfile(f, process_f):
@@ -37,6 +51,7 @@ def main():
             rom_path = os.path.join(game_path, "rom%s" % ext)
             with open(rom_path, "wb") as f:
                 f.write(data)
+            _refresh_atari_start_state(game, game_path, rom_path)
 
             metadata_path = os.path.join(game_path, "metadata.json")
             if os.path.exists(metadata_path):

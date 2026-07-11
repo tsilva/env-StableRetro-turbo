@@ -50,11 +50,6 @@ class RetroEnv(gym.Env, EzPickle):
         reward_clip=False,
     ):
         """Initialize a Retro environment for a specific game/state configuration."""
-        if retro.data._game_platform(game) == "Atari2600":
-            raise ValueError(
-                "The libretro Atari backend has been removed; use AtariVecEnv "
-                "with state=State.NONE",
-            )
         if inttype is retro.data.Integrations.DEFAULT or isinstance(
             inttype,
             retro.data.DefaultIntegrations,
@@ -177,6 +172,17 @@ class RetroEnv(gym.Env, EzPickle):
         self.em = retro.RetroEmulator(rom_path)
         self.em.configure_data(self.data)
         self.em.step()
+
+        # Stella save states are core-version-specific. Integrations that have
+        # not yet been re-imported may still contain the legacy 3.9.1 header;
+        # start them from the current core's deterministic reset state instead
+        # of failing during reset. New imports write the current format.
+        if (
+            self.system == "Atari2600"
+            and self.initial_state
+            and b"03090101state" not in self.initial_state[:32]
+        ):
+            self.initial_state = self.em.get_state()
 
         core = retro.get_system_info(self.system)
         self.buttons = core["buttons"]

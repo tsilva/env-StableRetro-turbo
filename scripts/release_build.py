@@ -29,15 +29,18 @@ PUBLIC_CORES = (
     "fceumm",
     "snes9x",
     "genesis_plus_gx",
+    "stella",
     "mgba",
     "picodrive",
     "mednafen_saturn",
     "melonds",
 )
-PUBLIC_DATA_PLATFORMS = "GameBoy,Nes,Snes,Genesis,Sms,SCD,GbAdvance,32x,Saturn,NintendoDs"
+PUBLIC_DATA_PLATFORMS = (
+    "GameBoy,Nes,Snes,Genesis,Sms,SCD,Atari2600,GbAdvance,32x,Saturn,NintendoDs"
+)
 MACOS_CMAKE_ARGS = (
     "-DCMAKE_BUILD_TYPE=Release "
-    "-DBUILD_CORES=gb;nes;snes;genesis;gba;32x;saturn;ds "
+    "-DBUILD_CORES=gb;nes;snes;genesis;atari2600;gba;32x;saturn;ds "
     "-DBUILD_TESTS=OFF "
     "-DENABLE_CAPNPROTO=OFF "
     "-DSTABLE_RETRO_USE_SYSTEM_LIBZIP=OFF"
@@ -45,7 +48,7 @@ MACOS_CMAKE_ARGS = (
 LINUX_CMAKE_ARGS = (
     "-DCMAKE_BUILD_TYPE=Release "
     "-DBUILD_MANYLINUX=ON "
-    "-DBUILD_CORES=gb;nes;snes;genesis;gba;32x;saturn;ds "
+    "-DBUILD_CORES=gb;nes;snes;genesis;atari2600;gba;32x;saturn;ds "
     "-DBUILD_TESTS=OFF "
     "-DENABLE_CAPNPROTO=OFF "
     "-DBUILD_N64=OFF"

@@ -13,155 +13,53 @@
 //
 // See the file "License.txt" for information on usage and redistribution of
 // this file, and for a DISCLAIMER OF ALL WARRANTIES.
-//
-// $Id: CartF8.hxx 2838 2014-01-17 23:34:03Z stephena $
 //============================================================================
 
 #ifndef CARTRIDGEF8_HXX
 #define CARTRIDGEF8_HXX
 
-class System;
-
 #include "bspf.hxx"
-#include "Cart.hxx"
-#ifdef DEBUGGER_SUPPORT
-  #include "CartF8Widget.hxx"
-#endif
+#include "CartEnhanced.hxx"
 
 /**
-  Cartridge class used for Atari's 8K bankswitched games.  There
-  are two 4K banks.
+  Cartridge class used for Atari's 8K bankswitched games. There are two 4K
+  banks, selected by accessing hotspots $1FF8 (bank 0) and $1FF9 (bank 1).
+
+  Reimplemented as a thin CartridgeEnhanced subclass (the base class provides
+  the segment banking, page installation and (de)serialization); F8 only has
+  to describe its two hotspots and its startup-bank selection.
 
   @author  Bradford W. Mott
-  @version $Id: CartF8.hxx 2838 2014-01-17 23:34:03Z stephena $
 */
-class CartridgeF8 : public Cartridge
+class CartridgeF8 : public CartridgeEnhanced
 {
   friend class CartridgeF8Widget;
 
   public:
-    /**
-      Create a new cartridge using the specified image
-
-      @param image     Pointer to the ROM image
-      @param size      The size of the ROM image
-      @param md5       MD5sum of the ROM image
-      @param settings  A reference to the various settings (read-only)
-    */
-    CartridgeF8(const uInt8* image, uInt32 size, const string& md5,
+    CartridgeF8(const uint8_t* image, uint32_t size, const string& md5,
                 const Settings& settings);
-
-    /**
-      Destructor
-    */
     virtual ~CartridgeF8();
 
   public:
-    /**
-      Reset device to its power-on state
-    */
-    void reset();
-
-    /**
-      Install cartridge in the specified system.  Invoked by the system
-      when the cartridge is attached to it.
-
-      @param system The system the device should install itself in
-    */
-    void install(System& system);
-
-    /**
-      Install pages for the specified bank in the system.
-
-      @param bank The bank that should be installed in the system
-    */
-    bool bank(uInt16 bank);
-
-    /**
-      Get the current bank.
-    */
-    uInt16 bank() const;
-
-    /**
-      Query the number of banks supported by the cartridge.
-    */
-    uInt16 bankCount() const;
-
-    /**
-      Patch the cartridge ROM.
-
-      @param address  The ROM address to patch
-      @param value    The value to place into the address
-      @return    Success or failure of the patch operation
-    */
-    bool patch(uInt16 address, uInt8 value);
-
-    /**
-      Access the internal ROM image for this cartridge.
-
-      @param size  Set to the size of the internal ROM image data
-      @return  A pointer to the internal ROM image data
-    */
-    const uInt8* getImage(int& size) const;
-
-    /**
-      Save the current state of this cart to the given Serializer.
-
-      @param out  The Serializer object to use
-      @return  False on any errors, else true
-    */
-    bool save(Serializer& out) const;
-
-    /**
-      Load the current state of this cart from the given Serializer.
-
-      @param in  The Serializer object to use
-      @return  False on any errors, else true
-    */
-    bool load(Serializer& in);
-
-    /**
-      Get a descriptor for the device name (used in error checking).
-
-      @return The name of the object
-    */
     string name() const { return "CartridgeF8"; }
 
-  #ifdef DEBUGGER_SUPPORT
-    /**
-      Get debugger widget responsible for accessing the inner workings
-      of the cart.
-    */
-    CartDebugWidget* debugWidget(GuiObject* boss, const GUI::Font& lfont,
-        const GUI::Font& nfont, int x, int y, int w, int h)
-    {
-      return new CartridgeF8Widget(boss, lfont, nfont, x, y, w, h, *this);
-    }
-  #endif
+  protected:
+    bool checkSwitchBank(uint16_t address, uint8_t value);
 
-  public:
-    /**
-      Get the byte at the specified address.
+    uint16_t hotspot() const { return 0x1FF8; }
 
-      @return The byte at the specified address
-    */
-    uInt8 peek(uInt16 address);
-
-    /**
-      Change the byte at the specified address to the given value
-
-      @param address The address where the value should be stored
-      @param value The value to be stored at the address
-      @return  True if the poke changed the device address space, else false
-    */
-    bool poke(uInt16 address, uInt8 value);
+    uint16_t getStartBank() const { return myStartBankF8; }
 
   private:
-    // Indicates which bank is currently active
-    uInt16 myCurrentBank;
+    // The power-on bank, determined from the ROM's md5 in the constructor.
+    // Most F8 games start in bank 1; a handful need bank 0.
+    uint16_t myStartBankF8;
 
-    // The 8K ROM image of the cartridge
-    uInt8 myImage[8192];
+  private:
+    // Following constructors and assignment operators not supported
+    CartridgeF8();
+    CartridgeF8(const CartridgeF8&);
+    CartridgeF8& operator=(const CartridgeF8&);
 };
 
 #endif

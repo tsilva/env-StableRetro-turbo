@@ -46,5 +46,6 @@ def test_dry_run_uses_atari_profile_defaults(capsys):
     assert bench.main(["--dry-run"]) == 0
     output = capsys.readouterr().out
     assert "profile=atari-breakout" in output
+    assert "stella_state=Start" in output
     assert "ale_game=breakout" in output
     assert "envs=32 threads=16" in output

@@ -13,26 +13,15 @@
 //
 // See the file "License.txt" for information on usage and redistribution of
 // this file, and for a DISCLAIMER OF ALL WARRANTIES.
-//
-// $Id: CartF6.cxx 2838 2014-01-17 23:34:03Z stephena $
 //============================================================================
 
-#include <cassert>
-#include <cstring>
-
-#include "System.hxx"
 #include "CartF6.hxx"
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-CartridgeF6::CartridgeF6(const uInt8* image, uInt32 size, const Settings& settings)
-  : Cartridge(settings)
+CartridgeF6::CartridgeF6(const uint8_t* image, uint32_t size,
+                         const Settings& settings)
+  : CartridgeEnhanced(image, size, settings, 16384)
 {
-  // Copy the ROM image into my buffer
-  memcpy(myImage, image, MIN(16384u, size));
-  createCodeAccessBase(16384);
-
-  // Remember startup bank
-  myStartBank = 0;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -41,169 +30,12 @@ CartridgeF6::~CartridgeF6()
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void CartridgeF6::reset()
+bool CartridgeF6::checkSwitchBank(uint16_t address, uint8_t)
 {
-  // Upon reset we switch to the startup bank
-  bank(myStartBank);
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void CartridgeF6::install(System& system)
-{
-  mySystem = &system;
-
-  // Make sure the system we're being installed in has a page size that'll work
-  assert((0x1000 & mySystem->pageMask()) == 0);
-
-  // Upon install we'll setup the startup bank
-  bank(myStartBank);
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt8 CartridgeF6::peek(uInt16 address)
-{
-  address &= 0x0FFF;
-
-  // Switch banks if necessary
-  switch(address)
+  if(address >= 0x1FF6 && address <= 0x1FF9)
   {
-    case 0x0FF6:
-      // Set the current bank to the first 4k bank
-      bank(0);
-      break;
-
-    case 0x0FF7:
-      // Set the current bank to the second 4k bank
-      bank(1);
-      break;
-
-    case 0x0FF8:
-      // Set the current bank to the third 4k bank
-      bank(2);
-      break;
-
-    case 0x0FF9:
-      // Set the current bank to the forth 4k bank
-      bank(3);
-      break;
-
-    default:
-      break;
-  }
-
-  return myImage[(myCurrentBank << 12) + address];
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeF6::poke(uInt16 address, uInt8)
-{
-  address &= 0x0FFF;
-
-  // Switch banks if necessary
-  switch(address)
-  {
-    case 0x0FF6:
-      // Set the current bank to the first 4k bank
-      bank(0);
-      break;
-
-    case 0x0FF7:
-      // Set the current bank to the second 4k bank
-      bank(1);
-      break;
-
-    case 0x0FF8:
-      // Set the current bank to the third 4k bank
-      bank(2);
-      break;
-
-    case 0x0FF9:
-      // Set the current bank to the forth 4k bank
-      bank(3);
-      break;
-
-    default:
-      break;
+    bank(address - 0x1FF6);
+    return true;
   }
   return false;
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeF6::bank(uInt16 bank)
-{
-  if(bankLocked()) return false;
-
-  // Remember what bank we're in
-  myCurrentBank = bank;
-  uInt16 offset = myCurrentBank << 12;
-  uInt16 shift = mySystem->pageShift();
-  uInt16 mask = mySystem->pageMask();
-
-  System::PageAccess access(0, 0, 0, this, System::PA_READ);
-
-  // Set the page accessing methods for the hot spots
-  for(uInt32 i = (0x1FF6 & ~mask); i < 0x2000; i += (1 << shift))
-  {
-    access.codeAccessBase = &myCodeAccessBase[offset + (i & 0x0FFF)];
-    mySystem->setPageAccess(i >> shift, access);
-  }
-
-  // Setup the page access methods for the current bank
-  for(uInt32 address = 0x1000; address < (0x1FF6U & ~mask);
-      address += (1 << shift))
-  {
-    access.directPeekBase = &myImage[offset + (address & 0x0FFF)];
-    access.codeAccessBase = &myCodeAccessBase[offset + (address & 0x0FFF)];
-    mySystem->setPageAccess(address >> shift, access);
-  }
-  return myBankChanged = true;
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt16 CartridgeF6::bank() const
-{
-  return myCurrentBank;
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt16 CartridgeF6::bankCount() const
-{
-  return 4;
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeF6::patch(uInt16 address, uInt8 value)
-{
-  myImage[(myCurrentBank << 12) + (address & 0x0FFF)] = value;
-  return myBankChanged = true;
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-const uInt8* CartridgeF6::getImage(int& size) const
-{
-  size = 16384;
-  return myImage;
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeF6::save(Serializer& out) const
-{
-   out.putString(name());
-   out.putShort(myCurrentBank);
-
-   return true;
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeF6::load(Serializer& in)
-{
-   if(in.getString() != name())
-      return false;
-
-   myCurrentBank = in.getShort();
-
-   // Remember what bank we were in
-   bank(myCurrentBank);
-
-   return true;
 }

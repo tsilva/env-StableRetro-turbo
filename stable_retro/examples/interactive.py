@@ -12,6 +12,10 @@ import time
 
 import numpy as np
 import pyglet
+
+# Importing the CLI must not require an active display. The real OpenGL context
+# is created when Interactive opens its visible window.
+pyglet.options["shadow_window"] = False
 from pyglet import gl
 from pyglet.window import key as keycodes
 

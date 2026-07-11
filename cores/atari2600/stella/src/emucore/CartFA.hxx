@@ -13,156 +13,48 @@
 //
 // See the file "License.txt" for information on usage and redistribution of
 // this file, and for a DISCLAIMER OF ALL WARRANTIES.
-//
-// $Id: CartFA.hxx 2838 2014-01-17 23:34:03Z stephena $
 //============================================================================
 
 #ifndef CARTRIDGEFA_HXX
 #define CARTRIDGEFA_HXX
 
-class System;
-
 #include "bspf.hxx"
-#include "Cart.hxx"
-#ifdef DEBUGGER_SUPPORT
-  #include "CartFAWidget.hxx"
-#endif
+#include "CartEnhanced.hxx"
 
 /**
-  Cartridge class used for CBS' RAM Plus cartridges.  There are
-  three 4K banks and 256 bytes of RAM.
+  Cartridge class used for CBS' RAM Plus games. There are three 4K banks,
+  selected via hotspots $1FF8/$1FF9/$1FFA, plus 256 bytes of RAM: the write
+  port is $1000-$10FF and the read port is $1100-$11FF.
+
+  Reimplemented as a thin CartridgeEnhanced subclass: the base class provides
+  the banking and the RAM read/write ports; FA only describes its three
+  hotspots, its 256-byte RAM and its power-on bank (2).
 
   @author  Bradford W. Mott
-  @version $Id: CartFA.hxx 2838 2014-01-17 23:34:03Z stephena $
 */
-class CartridgeFA : public Cartridge
+class CartridgeFA : public CartridgeEnhanced
 {
   friend class CartridgeFAWidget;
 
   public:
-    /**
-      Create a new cartridge using the specified image
-
-      @param image     Pointer to the ROM image
-      @param size      The size of the ROM image
-      @param settings  A reference to the various settings (read-only)
-    */
-    CartridgeFA(const uInt8* image, uInt32 size, const Settings& settings);
-
-    /**
-      Destructor
-    */
+    CartridgeFA(const uint8_t* image, uint32_t size, const Settings& settings);
     virtual ~CartridgeFA();
 
   public:
-    /**
-      Reset device to its power-on state
-    */
-    void reset();
-
-    /**
-      Install cartridge in the specified system.  Invoked by the system
-      when the cartridge is attached to it.
-
-      @param system The system the device should install itself in
-    */
-    void install(System& system);
-
-    /**
-      Install pages for the specified bank in the system.
-
-      @param bank The bank that should be installed in the system
-    */
-    bool bank(uInt16 bank);
-
-    /**
-      Get the current bank.
-    */
-    uInt16 bank() const;
-
-    /**
-      Query the number of banks supported by the cartridge.
-    */
-    uInt16 bankCount() const;
-
-    /**
-      Patch the cartridge ROM.
-
-      @param address  The ROM address to patch
-      @param value    The value to place into the address
-      @return    Success or failure of the patch operation
-    */
-    bool patch(uInt16 address, uInt8 value);
-
-    /**
-      Access the internal ROM image for this cartridge.
-
-      @param size  Set to the size of the internal ROM image data
-      @return  A pointer to the internal ROM image data
-    */
-    const uInt8* getImage(int& size) const;
-
-    /**
-      Save the current state of this cart to the given Serializer.
-
-      @param out  The Serializer object to use
-      @return  False on any errors, else true
-    */
-    bool save(Serializer& out) const;
-
-    /**
-      Load the current state of this cart from the given Serializer.
-
-      @param in  The Serializer object to use
-      @return  False on any errors, else true
-    */
-    bool load(Serializer& in);
-
-    /**
-      Get a descriptor for the device name (used in error checking).
-
-      @return The name of the object
-    */
     string name() const { return "CartridgeFA"; }
 
-  #ifdef DEBUGGER_SUPPORT
-    /**
-      Get debugger widget responsible for accessing the inner workings
-      of the cart.
-    */
-    CartDebugWidget* debugWidget(GuiObject* boss, const GUI::Font& lfont,
-        const GUI::Font& nfont, int x, int y, int w, int h)
-    {
-      return new CartridgeFAWidget(boss, lfont, nfont, x, y, w, h, *this);
-    }
-  #endif
+  protected:
+    bool checkSwitchBank(uint16_t address, uint8_t value);
 
-  public:
-    /**
-      Get the byte at the specified address.
+    uint16_t hotspot() const { return 0x1FF8; }
 
-      @return The byte at the specified address
-    */
-    uInt8 peek(uInt16 address);
-
-    /**
-      Change the byte at the specified address to the given value
-
-      @param address The address where the value should be stored
-      @param value The value to be stored at the address
-      @return  True if the poke changed the device address space, else false
-    */
-    bool poke(uInt16 address, uInt8 value);
+    uint16_t getStartBank() const { return 2; }
 
   private:
-    // Indicates which bank is currently active
-    uInt16 myCurrentBank;
-
-    // The 12K ROM image of the cartridge
-    uInt8 myImage[12288];
-
-    // The 256 bytes of RAM on the cartridge
-    uInt8 myRAM[256];
+    // Following constructors and assignment operators not supported
+    CartridgeFA();
+    CartridgeFA(const CartridgeFA&);
+    CartridgeFA& operator=(const CartridgeFA&);
 };
 
 #endif

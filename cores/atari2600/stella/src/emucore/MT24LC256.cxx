@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll
-//  SS  SS   tt           ll   ll
-//  SS     tttttt  eeee   ll   ll   aaaa
+//   SSSS    tt          lll  lll       
+//  SS  SS   tt           ll   ll        
+//  SS     tttttt  eeee   ll   ll   aaaa 
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -17,26 +17,15 @@
 // $Id: MT24LC256.cxx 2838 2014-01-17 23:34:03Z stephena $
 //============================================================================
 
-#include <cassert>
-#include <cstdio>
 #include <cstring>
 #include <fstream>
 
 #include "System.hxx"
 #include "MT24LC256.hxx"
 
-#define DEBUG_EEPROM 0
-
-#if DEBUG_EEPROM
-  char jpee_msg[256];
-  #define JPEE_LOG0(msg) jpee_logproc(msg)
-  #define JPEE_LOG1(msg,arg1) sprintf(jpee_msg,(msg),(arg1)), jpee_logproc(jpee_msg)
-  #define JPEE_LOG2(msg,arg1,arg2) sprintf(jpee_msg,(msg),(arg1),(arg2)), jpee_logproc(jpee_msg)
-#else
-  #define JPEE_LOG0(msg) { }
-  #define JPEE_LOG1(msg,arg1) { }
-  #define JPEE_LOG2(msg,arg1,arg2) { }
-#endif
+#define JPEE_LOG0(msg) { }
+#define JPEE_LOG1(msg,arg1) { }
+#define JPEE_LOG2(msg,arg1,arg2) { }
 
 /*
   State values for I2C:
@@ -81,7 +70,7 @@ MT24LC256::MT24LC256(const string& filename, const System& system)
   // Then initialize the I2C state
   jpee_init();
 }
-
+ 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 MT24LC256::~MT24LC256()
 {
@@ -139,10 +128,6 @@ void MT24LC256::update()
   // we only do the write when they have the same 'timestamp'
   if(myCyclesWhenSDASet == myCyclesWhenSCLSet)
   {
-#if DEBUG_EEPROM
-    cerr << endl << "  I2C_PIN_WRITE(SCL = " << mySCL
-         << ", SDA = " << mySDA << ")" << " @ " << mySystem.cycles() << endl;
-#endif
     jpee_clock(mySCL);
     jpee_data(mySDA);
   }
@@ -153,7 +138,7 @@ void MT24LC256::systemCyclesReset()
 {
   // System cycles are being reset to zero so we need to adjust
   // the cycle counts we remembered
-  uInt32 cycles = mySystem.cycles();
+  uint32_t cycles = mySystem.cycles();
   myCyclesWhenSDASet -= cycles;
   myCyclesWhenSCLSet -= cycles;
   myCyclesWhenTimerSet -= cycles;
@@ -364,8 +349,8 @@ bool MT24LC256::jpee_timercheck(int mode)
   {
     if(myTimerActive)
     {
-      uInt32 elapsed = mySystem.cycles() - myCyclesWhenTimerSet;
-      myTimerActive = elapsed < (uInt32)(5000000.0 / 838.0);
+      uint32_t elapsed = mySystem.cycles() - myCyclesWhenTimerSet;
+      myTimerActive = elapsed < (uint32_t)(5000000.0 / 838.0);
     }
     return myTimerActive;
   }
@@ -374,7 +359,6 @@ bool MT24LC256::jpee_timercheck(int mode)
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 int MT24LC256::jpee_logproc(char const *st)
 {
-  cerr << "    " << st << endl;
   return 0;
 }
 
@@ -383,12 +367,10 @@ MT24LC256::MT24LC256(const MT24LC256& c)
   : mySystem(c.mySystem),
     myDataFile(c.myDataFile)
 {
-  assert(false);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 MT24LC256& MT24LC256::operator = (const MT24LC256&)
 {
-  assert(false);
   return *this;
 }

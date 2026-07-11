@@ -28,8 +28,8 @@ class System;
 /**
   Class that represents a "null" device.  The basic idea is that a
   null device is installed in a 6502 based system anywhere there are
-  holes in the address space (i.e. no real device attached).
-
+  holes in the address space (i.e. no real device attached). 
+ 
   @author  Bradford W. Mott
   @version $Id: NullDev.hxx 2838 2014-01-17 23:34:03Z stephena $
 */
@@ -89,7 +89,7 @@ class NullDevice : public Device
 
       @return The byte at the specified address
     */
-    uInt8 peek(uInt16 address);
+    uint8_t peek(uint16_t address);
 
     /**
       Change the byte at the specified address to the given value
@@ -99,7 +99,7 @@ class NullDevice : public Device
 
       @return  True if the poke changed the device address space, else false
     */
-    bool poke(uInt16 address, uInt8 value);
+    bool poke(uint16_t address, uint8_t value);
 };
 
 #endif

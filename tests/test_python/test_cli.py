@@ -16,6 +16,23 @@ def test_resolve_platform_prefers_curated_game(monkeypatch):
     assert cli.resolve_target("mega-drive") == [("Genesis", "Airstriker-Genesis-v0")]
 
 
+def test_resolve_atari_prefers_breakout(monkeypatch):
+    monkeypatch.setattr(
+        cli,
+        "installed_games_by_platform",
+        lambda: {"Atari2600": ["AirRaid-Atari2600-v0", "Breakout-Atari2600-v0"]},
+    )
+    monkeypatch.setattr(
+        cli.retro.data,
+        "list_games",
+        lambda: ["AirRaid-Atari2600-v0", "Breakout-Atari2600-v0"],
+    )
+
+    assert cli.resolve_target("atari2600") == [
+        ("Atari2600", "Breakout-Atari2600-v0")
+    ]
+
+
 def test_resolve_game_id_is_case_insensitive(monkeypatch):
     monkeypatch.setattr(cli, "installed_games_by_platform", lambda: {})
     monkeypatch.setattr(cli.retro.data, "list_games", lambda: ["SuperMarioBros-Nes-v0"])

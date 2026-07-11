@@ -6,7 +6,7 @@ LIBRETRO_DIR := $(ROOT_DIR)
 
 include $(ROOT_DIR)/Makefile.common
 
-COREFLAGS := -D__LIBRETRO__ -DSOUND_SUPPORT $(INCFLAGS)
+COREFLAGS := -D__LIBRETRO__ $(INCFLAGS)
 
 GIT_VERSION := " $(shell git rev-parse --short HEAD || echo unknown)"
 ifneq ($(GIT_VERSION)," unknown")
@@ -15,7 +15,8 @@ endif
 
 include $(CLEAR_VARS)
 LOCAL_MODULE       := retro
-LOCAL_SRC_FILES    := $(SOURCES_CXX)
+LOCAL_SRC_FILES    := $(SOURCES_CXX) $(SOURCES_C)
+LOCAL_CFLAGS       := $(COREFLAGS)
 LOCAL_CXXFLAGS     := $(COREFLAGS)
 LOCAL_LDFLAGS      := -Wl,-version-script=$(LIBRETRO_DIR)/link.T
 LOCAL_CPP_FEATURES := exceptions

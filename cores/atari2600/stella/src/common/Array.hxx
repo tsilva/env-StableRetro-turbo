@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll
-//  SS  SS   tt           ll   ll
-//  SS     tttttt  eeee   ll   ll   aaaa
+//   SSSS    tt          lll  lll       
+//  SS  SS   tt           ll   ll        
+//  SS     tttttt  eeee   ll   ll   aaaa 
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -23,8 +23,6 @@
 #ifndef ARRAY_HXX
 #define ARRAY_HXX
 
-#include <cassert>
-
 #include "bspf.hxx"
 
 namespace Common {
@@ -33,8 +31,8 @@ template <class T>
 class Array
 {
   protected:
-    uInt32 _capacity;
-    uInt32 _size;
+    uint32_t _capacity;
+    uint32_t _size;
     T *_data;
 
   public:
@@ -42,23 +40,23 @@ class Array
     typedef const T *const_iterator;
 
   public:
-    Array<T>() : _capacity(0), _size(0), _data(0) {}
-    Array<T>(const Array<T>& array) : _capacity(0), _size(0), _data(0)
+    Array() : _capacity(0), _size(0), _data(0) {}
+    Array(const Array<T>& array) : _capacity(0), _size(0), _data(0)
     {
       _size = array._size;
       _capacity = _size + 128;
       _data = new T[_capacity];
-      for(uInt32 i = 0; i < _size; i++)
+      for(uint32_t i = 0; i < _size; i++)
         _data[i] = array._data[i];
     }
 
-    ~Array<T>()
+    ~Array()
     {
       if (_data)
         delete [] _data;
     }
 
-    void reserve(uInt32 capacity)
+    void reserve(uint32_t capacity)
     {
       if(capacity <= _capacity)
         return;
@@ -74,45 +72,41 @@ class Array
     void push_back(const Array<T>& array)
     {
       ensureCapacity(_size + array._size);
-      for(uInt32 i = 0; i < array._size; i++)
+      for(uint32_t i = 0; i < array._size; i++)
         _data[_size++] = array._data[i];
     }
 
-    void insert_at(uInt32 idx, const T& element)
+    void insert_at(uint32_t idx, const T& element)
     {
-      assert(idx >= 0 && idx <= _size);
       ensureCapacity(_size + 1);
       // The following loop is not efficient if you can just memcpy things around.
       // e.g. if you have a list of ints. But for real objects (String...), memcpy
       // usually isn't correct (specifically, for any class which has a non-default
       // copy behaviour. E.g. the String class uses a refCounter which has to be
       // updated whenever a String is copied.
-      for(uInt32 i = _size; i > idx; i--)
+      for(uint32_t i = _size; i > idx; i--)
         _data[i] = _data[i-1];
 
       _data[idx] = element;
       _size++;
     }
 
-    T remove_at(uInt32 idx)
+    T remove_at(uint32_t idx)
     {
-      assert(idx >= 0 && idx < _size);
       T tmp = _data[idx];
-      for(uInt32 i = idx; i < _size - 1; i++)
+      for(uint32_t i = idx; i < _size - 1; i++)
         _data[i] = _data[i+1];
       _size--;
       return tmp;
     }
 
-    T& operator [](uInt32 idx)
+    T& operator [](uint32_t idx)
     {
-      assert(idx >= 0 && idx < _size);
       return _data[idx];
     }
 
-    const T& operator [](uInt32 idx) const
+    const T& operator [](uint32_t idx) const
     {
-      assert(idx >= 0 && idx < _size);
       return _data[idx];
     }
 
@@ -123,14 +117,14 @@ class Array
       _size = array._size;
       _capacity = _size + 128;
       _data = new T[_capacity];
-      for(uInt32 i = 0; i < _size; i++)
+      for(uint32_t i = 0; i < _size; i++)
         _data[i] = array._data[i];
 
       return *this;
     }
 
-    uInt32 size() const     { return _size;     }
-    uInt32 capacity() const { return _capacity; }
+    uint32_t size() const     { return _size;     }
+    uint32_t capacity() const { return _capacity; }
 
     void clear(bool fullerase = true)
     {
@@ -145,7 +139,7 @@ class Array
       }
       _size = 0;
     }
-
+	
     bool isEmpty() const
     {
       return (_size == 0);
@@ -172,7 +166,7 @@ class Array
     }
 
   protected:
-    void ensureCapacity(uInt32 new_len)
+    void ensureCapacity(uint32_t new_len)
     {
       if (new_len <= _capacity)
         return;
@@ -184,7 +178,7 @@ class Array
       if (old_data)
       {
         // Copy old data
-        for (uInt32 i = 0; i < _size; i++)
+        for (uint32_t i = 0; i < _size; i++)
           _data[i] = old_data[i];
         delete [] old_data;
       }
@@ -195,6 +189,6 @@ class Array
 
 typedef Common::Array<int>   IntArray;
 typedef Common::Array<bool>  BoolArray;
-typedef Common::Array<uInt8> ByteArray;
+typedef Common::Array<uint8_t> ByteArray;
 
 #endif

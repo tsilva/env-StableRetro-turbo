@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll
-//  SS  SS   tt           ll   ll
-//  SS     tttttt  eeee   ll   ll   aaaa
+//   SSSS    tt          lll  lll       
+//  SS  SS   tt           ll   ll        
+//  SS     tttttt  eeee   ll   ll   aaaa 
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -17,9 +17,6 @@
 // $Id: M6532.cxx 2838 2014-01-17 23:34:03Z stephena $
 //============================================================================
 
-#include <cassert>
-#include <iostream>
-
 #include "Console.hxx"
 #include "Settings.hxx"
 #include "Switches.hxx"
@@ -33,18 +30,18 @@ M6532::M6532(const Console& console, const Settings& settings)
     mySettings(settings)
 {
 }
-
+ 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 M6532::~M6532()
 {
 }
-
+ 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void M6532::reset()
 {
   // Initialize the 128 bytes of memory
   if(mySettings.getBool("ramrandom"))
-    for(uInt32 t = 0; t < 128; ++t)
+    for(uint32_t t = 0; t < 128; ++t)
       myRAM[t] = mySystem->randGenerator().next();
   else
     memset(myRAM, 0, 128);
@@ -114,13 +111,8 @@ void M6532::install(System& system)
 void M6532::install(System& system, Device& device)
 {
   // Remember which system I'm installed in
-  mySystem = &system;
-
-  uInt16 shift = mySystem->pageShift();
-  uInt16 mask = mySystem->pageMask();
-
-  // Make sure the system we're being installed in has a page size that'll work
-  assert((0x1080 & mask) == 0);
+  mySystem     = &system;
+  uint16_t shift = mySystem->pageShift();
 
   // All accesses are to the given device
   System::PageAccess access(0, 0, 0, &device, System::PA_READWRITE);
@@ -132,7 +124,7 @@ void M6532::install(System& system, Device& device)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt8 M6532::peek(uInt16 addr)
+uint8_t M6532::peek(uint16_t addr)
 {
   // Access RAM directly.  Originally, accesses to RAM could bypass
   // this method and its pages could be installed directly into the
@@ -147,7 +139,7 @@ uInt8 M6532::peek(uInt16 addr)
   {
     case 0x00:    // SWCHA - Port A I/O Register (Joystick)
     {
-      uInt8 value = (myConsole.controller(Controller::Left).read() << 4) |
+      uint8_t value = (myConsole.controller(Controller::Left).read() << 4) |
                      myConsole.controller(Controller::Right).read();
 
       // Each pin is high (1) by default and will only go low (0) if either
@@ -157,7 +149,7 @@ uInt8 M6532::peek(uInt16 addr)
       return (myOutA | ~myDDRA) & value;
     }
 
-    case 0x01:    // SWACNT - Port A Data Direction Register
+    case 0x01:    // SWACNT - Port A Data Direction Register 
     {
       return myDDRA;
     }
@@ -179,7 +171,7 @@ uInt8 M6532::peek(uInt16 addr)
       myInterruptFlag &= ~TimerBit;
 
       // Get number of clocks since timer was set
-      Int32 timer = timerClocks();
+      int32_t timer = timerClocks();
 
       // Note that this constant comes from z26, and corresponds to
       // 256 intervals of T1024T (ie, the maximum that the timer should hold)
@@ -193,7 +185,7 @@ uInt8 M6532::peek(uInt16 addr)
       else
       {
         // Return at 'divide by 1' rate
-        uInt8 divByOne = timer & 0xff;
+        uint8_t divByOne = timer & 0xff;
 
         // Timer flag has been updated; don't update it again on TIMINT read
         if(divByOne != 0 && divByOne != 255)
@@ -213,23 +205,20 @@ uInt8 M6532::peek(uInt16 addr)
         myTimerFlagValid = true;
       }
       // PA7 Flag is always cleared after accessing TIMINT
-      uInt8 result = myInterruptFlag;
+      uint8_t result = myInterruptFlag;
       myInterruptFlag &= ~PA7Bit;
       return result;
     }
 
     default:
-    {
-#ifdef DEBUG_ACCESSES
-      cerr << "BAD M6532 Peek: " << hex << addr << endl;
-#endif
+    {    
       return 0;
     }
   }
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool M6532::poke(uInt16 addr, uInt8 value)
+bool M6532::poke(uint16_t addr, uint8_t value)
 {
   // Access RAM directly.  Originally, accesses to RAM could bypass
   // this method and its pages could be installed directly into the
@@ -264,7 +253,7 @@ bool M6532::poke(uInt16 addr, uInt8 value)
         break;
       }
 
-      case 1:     // SWACNT - Port A Data Direction Register
+      case 1:     // SWACNT - Port A Data Direction Register 
       {
         myDDRA = value;
         setPinState(false);
@@ -277,7 +266,7 @@ bool M6532::poke(uInt16 addr, uInt8 value)
         break;
       }
 
-      case 3:     // SWBCNT - Port B Data Direction Register
+      case 3:     // SWBCNT - Port B Data Direction Register 
       {
         myDDRB = value;
         break;
@@ -288,9 +277,9 @@ bool M6532::poke(uInt16 addr, uInt8 value)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void M6532::setTimerRegister(uInt8 value, uInt8 interval)
+void M6532::setTimerRegister(uint8_t value, uint8_t interval)
 {
-  static const uInt8 shift[] = { 0, 3, 6, 10 };
+  static const uint8_t shift[] = { 0, 3, 6, 10 };
 
   myIntervalShift = shift[interval];
   myOutTimer[interval] = value;
@@ -318,7 +307,7 @@ void M6532::setPinState(bool swcha)
   Controller& port0 = myConsole.controller(Controller::Left);
   Controller& port1 = myConsole.controller(Controller::Right);
 
-  uInt8 ioport = myOutA | ~myDDRA;
+  uint8_t ioport = myOutA | ~myDDRA;
 
   port0.write(Controller::One,   ioport & 0x10);
   port0.write(Controller::Two,   ioport & 0x20);
@@ -339,7 +328,6 @@ void M6532::setPinState(bool swcha)
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 bool M6532::save(Serializer& out) const
 {
-  try
   {
     out.putString(name());
 
@@ -359,11 +347,6 @@ bool M6532::save(Serializer& out) const
     out.putBool(myEdgeDetectPositive);
     out.putByteArray(myOutTimer, 4);
   }
-  catch(...)
-  {
-    cerr << "ERROR: M6532::save" << endl;
-    return false;
-  }
 
   return true;
 }
@@ -371,7 +354,6 @@ bool M6532::save(Serializer& out) const
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 bool M6532::load(Serializer& in)
 {
-  try
   {
     if(in.getString() != name())
       return false;
@@ -392,23 +374,18 @@ bool M6532::load(Serializer& in)
     myEdgeDetectPositive = in.getBool();
     in.getByteArray(myOutTimer, 4);
   }
-  catch(...)
-  {
-    cerr << "ERROR: M6532::load" << endl;
-    return false;
-  }
 
   return true;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt8 M6532::intim() const
+uint8_t M6532::intim() const
 {
   // This method is documented in ::peek(0x284), and exists so that the
   // debugger can read INTIM without changing the state of the system
 
   // Get number of clocks since timer was set
-  Int32 timer = timerClocks();
+  int32_t timer = timerClocks();  
   if(!(timer & 0x40000))
     return (timer >> myIntervalShift) & 0xff;
   else
@@ -416,13 +393,13 @@ uInt8 M6532::intim() const
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt8 M6532::timint() const
+uint8_t M6532::timint() const
 {
   // This method is documented in ::peek(0x285), and exists so that the
   // debugger can read TIMINT without changing the state of the system
 
   // Update timer flag if it is invalid and timer has expired
-  uInt8 interrupt = myInterruptFlag;
+  uint8_t interrupt = myInterruptFlag;
   if(timerClocks() < 0)
     interrupt |= TimerBit;
 
@@ -430,14 +407,14 @@ uInt8 M6532::timint() const
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-Int32 M6532::intimClocks() const
+int32_t M6532::intimClocks() const
 {
   // This method is similar to intim(), except instead of giving the actual
   // INTIM value, it will give the current number of clocks between one
   // INTIM value and the next
 
   // Get number of clocks since timer was set
-  Int32 timer = timerClocks();
+  int32_t timer = timerClocks();  
   if(!(timer & 0x40000))
     return timerClocks() & ((1 << myIntervalShift) - 1);
   else
@@ -449,12 +426,10 @@ M6532::M6532(const M6532& c)
   : myConsole(c.myConsole),
     mySettings(c.mySettings)
 {
-  assert(false);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 M6532& M6532::operator = (const M6532&)
 {
-  assert(false);
   return *this;
 }

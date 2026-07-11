@@ -1,4 +1,8 @@
-"""The shared-core Atari vector environment."""
+"""Shared-core Atari vector environment.
+
+This ALE-backed path intentionally does not consume libretro/Stella save states;
+those remain owned by :class:`RetroVecEnv`.
+"""
 
 from __future__ import annotations
 
@@ -49,9 +53,9 @@ def _power_on_state(state) -> bool:
 class AtariVecEnv(_AleAtariVectorEnv):
     """High-throughput Atari vector environment.
 
-    This is the sole supported Atari backend. It shares reentrant emulator code
-    across lanes and uses native discrete Atari actions. Stable Retro ``.state``
-    files belong to the removed libretro backend and are unsupported.
+    Unlike ``RetroVecEnv``, this backend shares reentrant emulator code across
+    lanes and uses native discrete Atari actions. Stable Retro ``.state`` files
+    remain available through the Stella-backed ``RetroVecEnv``.
     """
 
     backend = "atari-v1"
@@ -83,7 +87,7 @@ class AtariVecEnv(_AleAtariVectorEnv):
         if not _power_on_state(state):
             raise ValueError(
                 "AtariVecEnv does not support Stable Retro save states; "
-                "use state=State.NONE",
+                "use state=State.NONE or use RetroVecEnv for the Stella state contract",
             )
         if obs_resize is None:
             obs_resize = (84, 84)

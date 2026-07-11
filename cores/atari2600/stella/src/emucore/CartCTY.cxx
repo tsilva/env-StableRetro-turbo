@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll
-//  SS  SS   tt           ll   ll
-//  SS     tttttt  eeee   ll   ll   aaaa
+//   SSSS    tt          lll  lll       
+//  SS  SS   tt           ll   ll        
+//  SS     tttttt  eeee   ll   ll   aaaa 
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -17,7 +17,6 @@
 // $Id: CartCTY.cxx 2838 2014-01-17 23:34:03Z stephena $
 //============================================================================
 
-#include <cassert>
 #include <cstring>
 
 #include "OSystem.hxx"
@@ -27,7 +26,7 @@
 #include "CartCTY.hxx"
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-CartridgeCTY::CartridgeCTY(const uInt8* image, uInt32 size, const OSystem& osystem)
+CartridgeCTY::CartridgeCTY(const uint8_t* image, uint32_t size, const OSystem& osystem)
   : Cartridge(osystem.settings()),
     myOSystem(osystem),
     myOperationType(0),
@@ -36,7 +35,9 @@ CartridgeCTY::CartridgeCTY(const uInt8* image, uInt32 size, const OSystem& osyst
     myRandomNumber(0x2B435044),
     myRamAccessTimeout(0),
     mySystemCycles(0),
-    myFractionalClocks(0.0)
+    myFractionalClocks(0),
+    myDpcClockNum(12000),   // default to NTSC until the console sets the format
+    myDpcClockDen(715909)
 {
   // Copy the ROM image into my buffer
   memcpy(myImage, image, MIN(32768u, size));
@@ -62,7 +63,7 @@ void CartridgeCTY::reset()
 {
   // Initialize RAM
   if(mySettings.getBool("ramrandom"))
-    for(uInt32 i = 0; i < 64; ++i)
+    for(uint32_t i = 0; i < 64; ++i)
       myRAM[i] = mySystem->randGenerator().next();
   else
     memset(myRAM, 0, 64);
@@ -71,7 +72,7 @@ void CartridgeCTY::reset()
 
   // Update cycles to the current system cycles
   mySystemCycles = mySystem->cycles();
-  myFractionalClocks = 0.0;
+  myFractionalClocks = 0;
 
   // Upon reset we switch to the startup bank
   bank(myStartBank);
@@ -87,16 +88,12 @@ void CartridgeCTY::systemCyclesReset()
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void CartridgeCTY::install(System& system)
 {
-  mySystem = &system;
-  uInt16 mask = mySystem->pageMask();
-  uInt16 shift = mySystem->pageShift();
-
-  // Make sure the system we're being installed in has a page size that'll work
-  assert(((0x1000 & mask) == 0) && ((0x1080 & mask) == 0));
+  mySystem     = &system;
+  uint16_t shift = mySystem->pageShift();
 
   // Map all RAM accesses to call peek and poke
   System::PageAccess access(0, 0, 0, this, System::PA_READ);
-  for(uInt32 i = 0x1000; i < 0x1080; i += (1 << shift))
+  for(uint32_t i = 0x1000; i < 0x1080; i += (1 << shift))
     mySystem->setPageAccess(i >> shift, access);
 
   // Install pages for the startup bank
@@ -104,11 +101,11 @@ void CartridgeCTY::install(System& system)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt8 CartridgeCTY::peek(uInt16 address)
+uint8_t CartridgeCTY::peek(uint16_t address)
 {
-  uInt16 peekAddress = address;
+  uint16_t peekAddress = address;
   address &= 0x0FFF;
-  uInt8 peekValue = myImage[myCurrentBank + address];
+  uint8_t peekValue = myImage[myCurrentBank + address];
 
   // In debugger/bank-locked mode, we ignore all hotspots and in general
   // anything that can change the internal state of the cart
@@ -126,10 +123,10 @@ uInt8 CartridgeCTY::peek(uInt16 address)
 #if 0
     // using myDisplayImage[] instead of myProgramImage[] because waveforms
     // can be modified during runtime.
-    uInt32 i = myDisplayImage[(myMusicWaveforms[0] << 5) + (myMusicCounters[0] >> 27)] +
+    uint32_t i = myDisplayImage[(myMusicWaveforms[0] << 5) + (myMusicCounters[0] >> 27)] +
                myDisplayImage[(myMusicWaveforms[1] << 5) + (myMusicCounters[1] >> 27)] +
                myDisplayImage[(myMusicWaveforms[2] << 5) + (myMusicCounters[2] >> 27)];
-    return = (uInt8)i;
+    return = (uint8_t)i;
 #endif
     return 0xF2;  // FIXME - return frequency value here
   }
@@ -139,7 +136,7 @@ uInt8 CartridgeCTY::peek(uInt16 address)
   if(address < 0x0040)  // Write port is at $1000 - $103F (64 bytes)
   {
     // Reading from the write port triggers an unwanted write
-    uInt8 value = mySystem->getDataBusState(0xFF);
+    uint8_t value = mySystem->getDataBusState(0xFF);
 
     if(bankLocked())
       return value;
@@ -197,11 +194,10 @@ uInt8 CartridgeCTY::peek(uInt16 address)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeCTY::poke(uInt16 address, uInt8 value)
+bool CartridgeCTY::poke(uint16_t address, uint8_t value)
 {
   address &= 0x0FFF;
 
-//cerr << "POKE: address=" << HEX4 << address << ", value=" << HEX2 << value << endl;
   if(address < 0x0040)  // Write port is at $1000 - $103F (64 bytes)
   {
     switch(address)  // FIXME for functionality
@@ -249,17 +245,17 @@ bool CartridgeCTY::poke(uInt16 address, uInt8 value)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeCTY::bank(uInt16 bank)
-{
+bool CartridgeCTY::bank(uint16_t bank)
+{ 
   if(bankLocked()) return false;
 
   // Remember what bank we're in
   myCurrentBank = bank << 12;
-  uInt16 shift = mySystem->pageShift();
+  uint16_t shift = mySystem->pageShift();
 
   // Setup the page access methods for the current bank
   System::PageAccess access(0, 0, 0, this, System::PA_READ);
-  for(uInt32 address = 0x1080; address < 0x2000; address += (1 << shift))
+  for(uint32_t address = 0x1080; address < 0x2000; address += (1 << shift))
   {
     access.codeAccessBase = &myCodeAccessBase[myCurrentBank + (address & 0x0FFF)];
     mySystem->setPageAccess(address >> shift, access);
@@ -268,19 +264,19 @@ bool CartridgeCTY::bank(uInt16 bank)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt16 CartridgeCTY::bank() const
+uint16_t CartridgeCTY::bank() const
 {
   return myCurrentBank >> 12;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt16 CartridgeCTY::bankCount() const
+uint16_t CartridgeCTY::bankCount() const
 {
   return 8;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeCTY::patch(uInt16 address, uInt8 value)
+bool CartridgeCTY::patch(uint16_t address, uint8_t value)
 {
   address &= 0x0FFF;
 
@@ -295,10 +291,10 @@ bool CartridgeCTY::patch(uInt16 address, uInt8 value)
     myImage[myCurrentBank + address] = value;
 
   return myBankChanged = true;
-}
+} 
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-const uInt8* CartridgeCTY::getImage(int& size) const
+const uint8_t* CartridgeCTY::getImage(int& size) const
 {
   size = 32768;
   return myImage;
@@ -316,7 +312,7 @@ bool CartridgeCTY::save(Serializer& out) const
    out.putBool(myLDAimmediate);
    out.putInt(myRandomNumber);
    out.putInt(mySystemCycles);
-   out.putInt((uInt32)(myFractionalClocks * 100000000.0));
+   out.putInt(myFractionalClocks);
 
    return true;
 }
@@ -335,8 +331,8 @@ bool CartridgeCTY::load(Serializer& in)
    myCounter = in.getShort();
    myLDAimmediate = in.getBool();
    myRandomNumber = in.getInt();
-   mySystemCycles = (Int32)in.getInt();
-   myFractionalClocks = (double)in.getInt() / 100000000.0;
+   mySystemCycles = (int32_t)in.getInt();
+   myFractionalClocks = in.getInt();
 
    return true;
 }
@@ -348,7 +344,7 @@ void CartridgeCTY::setRomName(const string& name)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt8 CartridgeCTY::ramReadWrite()
+uint8_t CartridgeCTY::ramReadWrite()
 {
   /* The following algorithm implements accessing Harmony cart EEPROM
 
@@ -374,14 +370,15 @@ uInt8 CartridgeCTY::ramReadWrite()
   {
     // Opcode and value in form of XXXXYYYY (from myOperationType), where:
     //    XXXX = index and YYYY = operation
-    uInt8 index = myOperationType >> 4;
+    uint8_t index = myOperationType >> 4;
     switch(myOperationType & 0xf)
     {
       case 1:  // Load tune (index = tune)
         if(index < 7)
         {
-          // Add 0.5 s delay for read
-          myRamAccessTimeout = myOSystem.getTicks() + 500000;
+          // 0.5 s read delay, as emulated 6507 cycles (NTSC ~1.19 MHz):
+          //   0.5 s -> 596591 cycles. Deterministic and host-independent.
+          myRamAccessTimeout = mySystem->cycles() + 596591;
           loadTune(index);
         }
         break;
@@ -389,31 +386,35 @@ uInt8 CartridgeCTY::ramReadWrite()
         if(index < 4)
         {
           // Add 0.5 s delay for read
-          myRamAccessTimeout = myOSystem.getTicks() + 500000;
+          myRamAccessTimeout = mySystem->cycles() + 596591;
           loadScore(index);
         }
         break;
       case 3:  // Save score table (index = table)
         if(index < 4)
         {
-          // Add 1 s delay for write
-          myRamAccessTimeout = myOSystem.getTicks() + 1000000;
+          // 1 s write delay -> 1193182 cycles
+          myRamAccessTimeout = mySystem->cycles() + 1193182;
           saveScore(index);
         }
         break;
       case 4:  // Wipe all score tables
         // Add 1 s delay for write
-        myRamAccessTimeout = myOSystem.getTicks() + 1000000;
+        myRamAccessTimeout = mySystem->cycles() + 1193182;
         wipeAllScores();
         break;
     }
+    // keep 0 reserved as the "idle" sentinel across the cycle-counter wrap
+    if(myRamAccessTimeout == 0)
+      myRamAccessTimeout = 1;
     // Bit 6 is 1, busy
     return myImage[myCurrentBank + 0xFF4] | 0x40;
   }
   else
   {
-    // Have we reached the timeout value yet?
-    if(myOSystem.getTicks() >= myRamAccessTimeout)
+    // Have we reached the timeout value yet? Signed difference so the
+    // comparison is correct even across the 32-bit cycle-counter wrap.
+    if((int32_t)((uint32_t)mySystem->cycles() - (uint32_t)myRamAccessTimeout) >= 0)
     {
       myRamAccessTimeout = 0;  // Turn off timer
       myRAM[0] = 0;            // Successful operation
@@ -428,7 +429,7 @@ uInt8 CartridgeCTY::ramReadWrite()
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void CartridgeCTY::loadTune(uInt8 index)
+void CartridgeCTY::loadTune(uint8_t index)
 {
   // Each tune is offset by 4096 bytes
   // Instead of copying non-modifiable data around (as would happen on the
@@ -440,56 +441,34 @@ void CartridgeCTY::loadTune(uInt8 index)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void CartridgeCTY::loadScore(uInt8 index)
+void CartridgeCTY::loadScore(uint8_t index)
 {
   Serializer serializer(myEEPROMFile, true);
   if(serializer.isValid())
   {
-    uInt8 scoreRAM[256];
-    try
-    {
-      serializer.getByteArray(scoreRAM, 256);
-    }
-    catch(...)
-    {
-      memset(scoreRAM, 0, 256);
-    }
+    uint8_t scoreRAM[256];
+    serializer.getByteArray(scoreRAM, 256);
     // Grab 60B slice @ given index (first 4 bytes are ignored)
     memcpy(myRAM+4, scoreRAM + (index << 6) + 4, 60);
   }
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void CartridgeCTY::saveScore(uInt8 index)
+void CartridgeCTY::saveScore(uint8_t index)
 {
   Serializer serializer(myEEPROMFile);
   if(serializer.isValid())
   {
     // Load score RAM
-    uInt8 scoreRAM[256];
-    try
-    {
-      serializer.getByteArray(scoreRAM, 256);
-    }
-    catch(...)
-    {
-      memset(scoreRAM, 0, 256);
-    }
+    uint8_t scoreRAM[256];
+    serializer.getByteArray(scoreRAM, 256);
 
     // Add 60B RAM to score table @ given index (first 4 bytes are ignored)
     memcpy(scoreRAM + (index << 6) + 4, myRAM+4, 60);
 
     // Save score RAM
     serializer.reset();
-    try
-    {
-      serializer.putByteArray(scoreRAM, 256);
-    }
-    catch(...)
-    {
-      // Maybe add logging here that save failed?
-      cerr << name() << ": ERROR saving score table " << (int)index << endl;
-    }
+    serializer.putByteArray(scoreRAM, 256);
   }
 }
 
@@ -500,17 +479,9 @@ void CartridgeCTY::wipeAllScores()
   if(serializer.isValid())
   {
     // Erase score RAM
-    uInt8 scoreRAM[256];
+    uint8_t scoreRAM[256];
     memset(scoreRAM, 0, 256);
-    try
-    {
-      serializer.putByteArray(scoreRAM, 256);
-    }
-    catch(...)
-    {
-      // Maybe add logging here that save failed?
-      cerr << name() << ": ERROR wiping score tables" << endl;
-    }
+    serializer.putByteArray(scoreRAM, 256);
   }
 }
 
@@ -518,13 +489,23 @@ void CartridgeCTY::wipeAllScores()
 inline void CartridgeCTY::updateMusicModeDataFetchers()
 {
   // Calculate the number of cycles since the last update
-  Int32 cycles = mySystem->cycles() - mySystemCycles;
+  int32_t cycles = mySystem->cycles() - mySystemCycles;
   mySystemCycles = mySystem->cycles();
 
   // Calculate the number of DPC OSC clocks since the last update
-  double clocks = ((20000.0 * cycles) / 1193191.66666667) + myFractionalClocks;
-  Int32 wholeClocks = (Int32)clocks;
-  myFractionalClocks = clocks - (double)wholeClocks;
+  // The DPC music oscillator is an on-chip RC circuit (560K ohm resistor,
+  // 5% tolerance, plus an on-die capacitor), so its frequency varies from
+  // cartridge to cartridge; ~20 KHz is the accepted nominal model (Stella
+  // uses 20 KHz, UnoCart uses 21 KHz on real hardware). Against the NTSC
+  // CPU clock of 3579545/3 Hz this is exactly 20000/(3579545/3) =
+  // OSC clocks per CPU cycle as the exact rational myDpcClockNum/Den,
+  // selected from the console's TV format (NTSC 12000/715909, PAL
+  // 10000/591149, SECAM 8/475). The fraction is carried as an integer
+  // remainder (units of 1/den clock) so the arithmetic is
+  // exact and bit-for-bit deterministic on every platform.
+  uint64_t acc = (uint64_t)(uint32_t)cycles * myDpcClockNum + myFractionalClocks;
+  int32_t wholeClocks = (int32_t)(acc / myDpcClockDen);
+  myFractionalClocks = (uint32_t)(acc % myDpcClockDen);
 
   if(wholeClocks <= 0)
     return;
@@ -533,5 +514,15 @@ inline void CartridgeCTY::updateMusicModeDataFetchers()
   for(int x = 0; x <= 2; ++x)
   {
 //    myMusicCounters[x] += myMusicFrequencies[x];
+  }
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+void CartridgeCTY::setDpcClockRate(uint32_t num, uint32_t den)
+{
+  if(den != 0)
+  {
+    myDpcClockNum = num;
+    myDpcClockDen = den;
   }
 }

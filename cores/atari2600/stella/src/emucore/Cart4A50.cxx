@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll
-//  SS  SS   tt           ll   ll
-//  SS     tttttt  eeee   ll   ll   aaaa
+//   SSSS    tt          lll  lll       
+//  SS  SS   tt           ll   ll        
+//  SS     tttttt  eeee   ll   ll   aaaa 
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -17,7 +17,6 @@
 // $Id: Cart4A50.cxx 2838 2014-01-17 23:34:03Z stephena $
 //============================================================================
 
-#include <cassert>
 #include <cstring>
 
 #include "System.hxx"
@@ -26,7 +25,7 @@
 #include "Cart4A50.hxx"
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-Cartridge4A50::Cartridge4A50(const uInt8* image, uInt32 size,
+Cartridge4A50::Cartridge4A50(const uint8_t* image, uint32_t size,
                              const Settings& settings)
   : Cartridge(settings),
     mySize(size)
@@ -36,7 +35,7 @@ Cartridge4A50::Cartridge4A50(const uInt8* image, uInt32 size,
   if(size < 65536)        size = 32768;
   else if(size < 131072)  size = 65536;
   else                    size = 131072;
-  for(uInt32 slice = 0; slice < 131072 / size; ++slice)
+  for(uint32_t slice = 0; slice < 131072 / size; ++slice)
     memcpy(myImage + (slice*size), image, size);
 
   // We use System::PageAccess.codeAccessBase, but don't allow its use
@@ -44,8 +43,6 @@ Cartridge4A50::Cartridge4A50(const uInt8* image, uInt32 size,
   // at the instruction level, and PageAccess is normally defined at an
   // interval of 64 bytes
   //
-  // Instead, access will be through the getAccessFlags and setAccessFlags
-  // methods below
   createCodeAccessBase(131072 + 32768);
 }
 
@@ -59,7 +56,7 @@ void Cartridge4A50::reset()
 {
   // Initialize RAM
   if(mySettings.getBool("ramrandom"))
-    for(uInt32 i = 0; i < 32768; ++i)
+    for(uint32_t i = 0; i < 32768; ++i)
       myRAM[i] = mySystem->randGenerator().next();
   else
     memset(myRAM, 0, 32768);
@@ -76,17 +73,13 @@ void Cartridge4A50::reset()
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void Cartridge4A50::install(System& system)
 {
-  mySystem = &system;
-  uInt16 shift = mySystem->pageShift();
-  uInt16 mask = mySystem->pageMask();
-
-  // Make sure the system we're being installed in has a page size that'll work
-  assert((0x1000 & mask) == 0);
+  mySystem     = &system;
+  uint16_t shift = mySystem->pageShift();
 
   // Map all of the accesses to call peek and poke (We don't yet indicate RAM areas)
   System::PageAccess access(0, 0, 0, this, System::PA_READ);
 
-  for(uInt32 i = 0x1000; i < 0x2000; i += (1 << shift))
+  for(uint32_t i = 0x1000; i < 0x2000; i += (1 << shift))
     mySystem->setPageAccess(i >> shift, access);
 
   // Mirror all access in TIA and RIOT; by doing so we're taking responsibility
@@ -96,14 +89,14 @@ void Cartridge4A50::install(System& system)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt8 Cartridge4A50::peek(uInt16 address)
+uint8_t Cartridge4A50::peek(uint16_t address)
 {
-  uInt8 value = 0;
+  uint8_t value = 0;
 
   if(!(address & 0x1000))                      // Hotspots below 0x1000
   {
     // Check for RAM or TIA mirroring
-    uInt16 lowAddress = address & 0x3ff;
+    uint16_t lowAddress = address & 0x3ff;
     if(lowAddress & 0x80)
       value = mySystem->m6532().peek(address);
     else if(!(lowAddress & 0x200))
@@ -145,12 +138,12 @@ uInt8 Cartridge4A50::peek(uInt16 address)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool Cartridge4A50::poke(uInt16 address, uInt8 value)
+bool Cartridge4A50::poke(uint16_t address, uint8_t value)
 {
   if(!(address & 0x1000))                      // Hotspots below 0x1000
   {
     // Check for RAM or TIA mirroring
-    uInt16 lowAddress = address & 0x3ff;
+    uint16_t lowAddress = address & 0x3ff;
     if(lowAddress & 0x80)
       mySystem->m6532().poke(address, value);
     else if(!(lowAddress & 0x200))
@@ -200,73 +193,10 @@ bool Cartridge4A50::poke(uInt16 address, uInt8 value)
   myLastAddress = address & 0x1fff;
 
   return myBankChanged;
-}
+} 
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt8 Cartridge4A50::getAccessFlags(uInt16 address)
-{
-  if((address & 0x1800) == 0x1000)           // 2K region from 0x1000 - 0x17ff
-  {
-    if(myIsRomLow)
-      return myCodeAccessBase[(address & 0x7ff) + mySliceLow];
-    else
-      return myCodeAccessBase[131072 + (address & 0x7ff) + mySliceLow];
-  }
-  else if(((address & 0x1fff) >= 0x1800) &&  // 1.5K region from 0x1800 - 0x1dff
-          ((address & 0x1fff) <= 0x1dff))
-  {
-    if(myIsRomMiddle)
-      return myCodeAccessBase[(address & 0x7ff) + mySliceMiddle + 0x10000];
-    else
-      return myCodeAccessBase[131072 + (address & 0x7ff) + mySliceMiddle];
-  }
-  else if((address & 0x1f00) == 0x1e00)      // 256B region from 0x1e00 - 0x1eff
-  {
-    if(myIsRomHigh)
-      return myCodeAccessBase[(address & 0xff) + mySliceHigh + 0x10000];
-    else
-      return myCodeAccessBase[131072 + (address & 0xff) + mySliceHigh];
-  }
-  else if((address & 0x1f00) == 0x1f00)      // 256B region from 0x1f00 - 0x1fff
-  {
-    return myCodeAccessBase[(address & 0xff) + 0x1ff00];
-  }
-  return 0;
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void Cartridge4A50::setAccessFlags(uInt16 address, uInt8 flags)
-{
-  if((address & 0x1800) == 0x1000)           // 2K region from 0x1000 - 0x17ff
-  {
-    if(myIsRomLow)
-      myCodeAccessBase[(address & 0x7ff) + mySliceLow] |= flags;
-    else
-      myCodeAccessBase[131072 + (address & 0x7ff) + mySliceLow] |= flags;
-  }
-  else if(((address & 0x1fff) >= 0x1800) &&  // 1.5K region from 0x1800 - 0x1dff
-          ((address & 0x1fff) <= 0x1dff))
-  {
-    if(myIsRomMiddle)
-      myCodeAccessBase[(address & 0x7ff) + mySliceMiddle + 0x10000] |= flags;
-    else
-      myCodeAccessBase[131072 + (address & 0x7ff) + mySliceMiddle] |= flags;
-  }
-  else if((address & 0x1f00) == 0x1e00)      // 256B region from 0x1e00 - 0x1eff
-  {
-    if(myIsRomHigh)
-      myCodeAccessBase[(address & 0xff) + mySliceHigh + 0x10000] |= flags;
-    else
-      myCodeAccessBase[131072 + (address & 0xff) + mySliceHigh] |= flags;
-  }
-  else if((address & 0x1f00) == 0x1f00)      // 256B region from 0x1f00 - 0x1fff
-  {
-    myCodeAccessBase[(address & 0xff) + 0x1ff00] |= flags;
-  }
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void Cartridge4A50::checkBankSwitch(uInt16 address, uInt8 value)
+void Cartridge4A50::checkBankSwitch(uint16_t address, uint8_t value)
 {
   if(bankLocked()) return;
 
@@ -337,21 +267,21 @@ void Cartridge4A50::checkBankSwitch(uInt16 address, uInt8 value)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool Cartridge4A50::bank(uInt16)
+bool Cartridge4A50::bank(uint16_t)
 {
   // Doesn't support bankswitching in the normal sense
   return false;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt16 Cartridge4A50::bank() const
+uint16_t Cartridge4A50::bank() const
 {
   // Doesn't support bankswitching in the normal sense
   return 0;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt16 Cartridge4A50::bankCount() const
+uint16_t Cartridge4A50::bankCount() const
 {
   // Doesn't support bankswitching in the normal sense
   // There is one 'virtual' bank that can change in many different ways
@@ -359,7 +289,7 @@ uInt16 Cartridge4A50::bankCount() const
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool Cartridge4A50::patch(uInt16 address, uInt8 value)
+bool Cartridge4A50::patch(uint16_t address, uint8_t value)
 {
   if((address & 0x1800) == 0x1000)           // 2K region from 0x1000 - 0x17ff
   {
@@ -388,10 +318,10 @@ bool Cartridge4A50::patch(uInt16 address, uInt8 value)
     myImage[(address & 0xff) + 0x1ff00] = value;
   }
   return myBankChanged = true;
-}
+} 
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-const uInt8* Cartridge4A50::getImage(int& size) const
+const uint8_t* Cartridge4A50::getImage(int& size) const
 {
   size = mySize;
   return myImage;

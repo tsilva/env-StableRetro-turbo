@@ -92,11 +92,6 @@ class RetroVecEnv(VectorEnv):
         import stable_retro as retro
         from stable_retro import _retro
 
-        if retro_data._game_platform(game) == "Atari2600":
-            raise ValueError(
-                "The libretro Atari backend has been removed; use AtariVecEnv "
-                "with state=State.NONE",
-            )
         num_envs = RetroEnv._normalize_positive_int(num_envs, "num_envs")
         if num_threads is not None:
             num_threads = RetroEnv._normalize_positive_int(num_threads, "num_threads")

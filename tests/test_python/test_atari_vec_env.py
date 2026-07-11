@@ -33,19 +33,6 @@ def test_atari_vec_env_rejects_legacy_states():
         retro.AtariVecEnv("Breakout-Atari2600-v0", state=retro.State.DEFAULT)
 
 
-def test_legacy_atari_envs_are_rejected():
-    import stable_retro as retro
-    from stable_retro.vec_env import RetroVecEnv
-
-    message = "libretro Atari backend has been removed"
-    with pytest.raises(ValueError, match=message):
-        retro.make("Breakout-Atari2600-v0")
-    with pytest.raises(ValueError, match=message):
-        retro.RetroEnv("Breakout-Atari2600-v0")
-    with pytest.raises(ValueError, match=message):
-        RetroVecEnv("Breakout-Atari2600-v0")
-
-
 def test_atari_vec_env_matches_direct_alepy_trace():
     import stable_retro as retro
     from ale_py import AtariVectorEnv

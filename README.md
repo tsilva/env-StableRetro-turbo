@@ -120,8 +120,8 @@ env.close()  # Release native emulator resources.
 
 ### Atari shared-core backend
 
-Atari support is included in the standard install. Use `AtariVecEnv` for Atari
-training runs:
+Atari support is included in the standard install. Stella remains available
+through `RetroEnv` and `RetroVecEnv`; use `AtariVecEnv` for the ALE-backed path:
 
 ```bash
 pip install stable-retro-turbo
@@ -147,9 +147,10 @@ obs, rewards, terminations, truncations, infos = env.step(
 env.close()
 ```
 
-`AtariVecEnv` is the sole supported Atari backend. It shares reentrant emulator
-code across lanes and uses native discrete Atari actions. The old libretro/Stella
-backend and its Stable Retro `.state` and button-mask contracts are unsupported.
+`AtariVecEnv` shares reentrant emulator code across lanes and uses native
+discrete Atari actions. The libretro/Stella backend remains available through
+`RetroEnv` and `RetroVecEnv`, including Stable Retro `.state` files and the
+button-mask action contract.
 
 ## RetroVecEnv Parameters
 
@@ -292,7 +293,7 @@ selected lanes.
 uv run python scripts/benchmark_vec_env.py --list-profiles                         # show saved benchmark profiles
 uv run python scripts/benchmark_vec_env.py --profile supermario-level1-1 --dry-run # print resolved env benchmark config
 uv run python scripts/benchmark_vec_env.py --profile supermario-level1-1           # run native/classic rollout benchmark
-uv run python scripts/benchmark_atari_alepy.py --dry-run                           # compare AtariVecEnv with direct ale-py
+uv run python scripts/benchmark_atari_alepy.py --dry-run                           # compare Stella, AtariVecEnv, and direct ale-py
 make benchmark-local BENCHMARK_ARGS=--dry-run GAME=MegaMan PLATFORM=Nes STATE=Level1
 make benchmark GAME=SuperMarioBros PLATFORM=Nes STATE=Level1-1
 uv run pytest tests/test_python/test_vec_env.py                                    # run focused RetroVecEnv tests
@@ -310,8 +311,8 @@ two-frame max-pool, `32` envs, and `16` native threads.
 
 Use real saved states for user-facing `RetroVecEnv` throughput numbers.
 `State.NONE` is reserved for explicit direct-ROM hot-path diagnostics and
-requires `--allow-state-none`. The Atari/ALE comparison uses the power-on-reset
-AtariVecEnv contract exclusively.
+requires `--allow-state-none`. The Atari/ALE comparison reports both the Stella
+saved-state contract and the power-on-reset AtariVecEnv contract.
 
 `make benchmark` refreshes the local extension through `setup.py build_ext --inplace`
 only when native/build inputs changed, then runs the same benchmark entrypoint
@@ -355,7 +356,7 @@ Modal runs: full env benchmark
 
 - The import package is `stable_retro`; `retro` remains as a compatibility shim.
 - `RetroVecEnv` is the turbo-specific Gymnasium vector environment.
-- `AtariVecEnv` is the shared-core Atari vector environment and the only supported Atari backend.
+- `AtariVecEnv` is the ALE-backed shared-core Atari vector environment; Stella remains available through `RetroEnv` and `RetroVecEnv`.
 - `RetroVectorEnv` is not exposed; `RetroVecEnv` is the public native vector API.
 - Source builds and CI cover Python `3.11` through `3.14`; the repo-local
   deterministic release helper publishes `cp311`, `cp312`, `cp313`, and `cp314`

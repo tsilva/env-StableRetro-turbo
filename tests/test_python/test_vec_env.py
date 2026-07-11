@@ -1,3 +1,4 @@
+import gzip
 import hashlib
 import inspect
 import os
@@ -2129,6 +2130,100 @@ def test_retro_vec_env_nes_render_skip_matches_full_render(
     )
 
     _assert_native_traces_equal(baseline, render_skip)
+
+
+def _has_stella_core():
+    root = Path(__file__).resolve().parents[2]
+    return (root / "stable_retro" / "cores" / "stella.json").exists() and any(
+        (root / "stable_retro" / "cores").glob("stella_libretro.*"),
+    )
+
+
+def _native_atari_render_skip_trace(tmp_path, *, disable_render_skip, state_path):
+    import stable_retro as retro
+    from stable_retro.vec_env import RetroVecEnv
+
+    if disable_render_skip:
+        os.environ["STABLE_RETRO_DISABLE_RENDER_SKIP"] = "1"
+    else:
+        os.environ.pop("STABLE_RETRO_DISABLE_RENDER_SKIP", None)
+
+    root = Path(__file__).resolve().parents[1]
+    rom_path = root / "roms" / "automaton.a26"
+    empty_info = _empty_info_path(tmp_path)
+    env = RetroVecEnv(
+        "Breakout-Atari2600-v0",
+        state=str(state_path),
+        num_envs=2,
+        rom_path=str(rom_path),
+        info=str(empty_info),
+        scenario=str(empty_info),
+        obs_resize=(84, 84),
+        obs_grayscale=True,
+        obs_resize_algorithm="area",
+        frame_skip=4,
+        frame_stack=4,
+        maxpool_last_two=True,
+        num_threads=2,
+        obs_copy="copy",
+        info_filter="all",
+    )
+    try:
+        env.seed(20260709)
+        obs = env.reset()[0]
+        trace = [(_sha(obs), None, None, None)]
+        actions = np.zeros((env.num_envs, env.num_buttons), dtype=np.uint8)
+        for _ in range(12):
+            obs, rewards, dones, infos = _step(env, actions)
+            trace.append(
+                (
+                    _sha(obs),
+                    rewards.copy(),
+                    dones.copy(),
+                    _normalize_infos(infos),
+                ),
+            )
+        return trace
+    finally:
+        env.close()
+        os.environ.pop("STABLE_RETRO_DISABLE_RENDER_SKIP", None)
+
+
+def test_retro_vec_env_atari_render_skip_preserves_control_trace(tmp_path):
+    if not _has_stella_core():
+        pytest.skip("stella core is not built")
+
+    import stable_retro as retro
+
+    root = Path(__file__).resolve().parents[1]
+    rom_path = root / "roms" / "automaton.a26"
+    emulator = retro.RetroEmulator(str(rom_path))
+    state_path = tmp_path / "Start.state"
+    state_path.write_bytes(gzip.compress(emulator.get_state(), mtime=0))
+    del emulator
+
+    baseline = _native_atari_render_skip_trace(
+        tmp_path,
+        disable_render_skip=True,
+        state_path=state_path,
+    )
+    render_skip = _native_atari_render_skip_trace(
+        tmp_path,
+        disable_render_skip=False,
+        state_path=state_path,
+    )
+
+    # automaton.a26 intentionally does not render a game frame, so its initial
+    # framebuffer is not a meaningful pixel oracle for Stella. Rewards,
+    # termination, and info must still be identical across the fast path.
+    assert len(baseline) == len(render_skip)
+    for left, right in zip(baseline, render_skip):
+        _, left_rewards, left_dones, left_infos = left
+        _, right_rewards, right_dones, right_infos = right
+        if left_rewards is not None:
+            np.testing.assert_array_equal(left_rewards, right_rewards)
+            np.testing.assert_array_equal(left_dones, right_dones)
+            assert left_infos == right_infos
 
 
 def _as_hwc_observation(obs, obs_layout):

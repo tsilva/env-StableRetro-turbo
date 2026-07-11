@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll
-//  SS  SS   tt           ll   ll
-//  SS     tttttt  eeee   ll   ll   aaaa
+//   SSSS    tt          lll  lll       
+//  SS  SS   tt           ll   ll        
+//  SS     tttttt  eeee   ll   ll   aaaa 
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -24,14 +24,11 @@ class System;
 
 #include "bspf.hxx"
 #include "Cart.hxx"
-#ifdef DEBUGGER_SUPPORT
-  #include "CartCMWidget.hxx"
-#endif
 
 /**
   Cartridge class used for SpectraVideo CompuMate bankswitched games.
 
-  This is more than just a cartridge mapper - it's also a "computer" add-on.
+  This is more than just a cartridge mapper - it's also a "computer" add-on.  
   There's two 8K EPROMs soldered on top of each other.  There's two short
   wires with DB-9's on them which you plug into the two controller ports.
   A 42 or so key membrane keyboard with audio in and audio out, and 2K of RAM.
@@ -76,24 +73,24 @@ class System;
     0     1     2     3     4     5     6     7     8     9
   +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+
   | 7 | | 6 | | 8 | | 2 | | 3 | | 0 | | 9 | | 5 | | 1 | | 4 |  0
-  +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+
-  +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+
+  +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ 
+  +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ 
   | U | | Y | | I | | W | | E | | P | | O | | T | | Q | | R |  1
   +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+     Row
   +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+
   | J | | H | | K | | S | | D | |ent| | L | | G | | A | | F |  2
-  +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+
+  +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ 
   +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+
   | M | | N | | < | | X | | C | |spc| | > | | B | | Z | | V |  3
-  +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+
+  +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ +---+ 
 
   Function and Shift are separate keys that are read by 2 of the paddle inputs.
   These two buttons pull the specific paddle input low when pressed.
 
-  Because the inputs are inverted, a low indicates a pressed button, and a high
+  Because the inputs are inverted, a low indicates a pressed button, and a high 
   is an unpressed one.
 
-  The audio input/output are designed to drive a tape player.  The audio output is
+  The audio input/output are designed to drive a tape player.  The audio output is 
   buffered through an inverter and 2 resistors and a capacitor to reduce the level
   to feed it into the tape player.
 
@@ -118,8 +115,8 @@ class CartridgeCM : public Cartridge
       @param size      The size of the ROM image
       @param settings  A reference to the various settings (read-only)
     */
-    CartridgeCM(const uInt8* image, uInt32 size, const Settings& settings);
-
+    CartridgeCM(const uint8_t* image, uint32_t size, const Settings& settings);
+ 
     /**
       Destructor
     */
@@ -144,17 +141,17 @@ class CartridgeCM : public Cartridge
 
       @param bank The bank that should be installed in the system
     */
-    bool bank(uInt16 bank);
+    bool bank(uint16_t bank);
 
     /**
       Get the current bank.
     */
-    uInt16 bank() const;
+    uint16_t bank() const;
 
     /**
       Query the number of banks supported by the cartridge.
     */
-    uInt16 bankCount() const;
+    uint16_t bankCount() const;
 
     /**
       Patch the cartridge ROM.
@@ -163,7 +160,7 @@ class CartridgeCM : public Cartridge
       @param value    The value to place into the address
       @return    Success or failure of the patch operation
     */
-    bool patch(uInt16 address, uInt8 value);
+    bool patch(uint16_t address, uint8_t value);
 
     /**
       Access the internal ROM image for this cartridge.
@@ -171,7 +168,7 @@ class CartridgeCM : public Cartridge
       @param size  Set to the size of the internal ROM image data
       @return  A pointer to the internal ROM image data
     */
-    const uInt8* getImage(int& size) const;
+    const uint8_t* getImage(int& size) const;
 
     /**
       Save the current state of this cart to the given Serializer.
@@ -196,25 +193,13 @@ class CartridgeCM : public Cartridge
     */
     string name() const { return "CartridgeCM"; }
 
-  #ifdef DEBUGGER_SUPPORT
-    /**
-      Get debugger widget responsible for accessing the inner workings
-      of the cart.
-    */
-    CartDebugWidget* debugWidget(GuiObject* boss, const GUI::Font& lfont,
-        const GUI::Font& nfont, int x, int y, int w, int h)
-    {
-      return new CartridgeCMWidget(boss, lfont, nfont, x, y, w, h, *this);
-    }
-  #endif
-
   public:
     /**
       Get the byte at the specified address.
 
       @return The byte at the specified address
     */
-    uInt8 peek(uInt16 address);
+    uint8_t peek(uint16_t address);
 
     /**
       Change the byte at the specified address to the given value
@@ -223,30 +208,30 @@ class CartridgeCM : public Cartridge
       @param value The value to be stored at the address
       @return  True if the poke changed the device address space, else false
     */
-    bool poke(uInt16 address, uInt8 value);
+    bool poke(uint16_t address, uint8_t value);
 
     /**
       Get the current keybord column
 
       @return The column referenced by SWCHA D6 and D5
     */
-    uInt8 column() const { return myColumn; }
+    uint8_t column() const { return myColumn; }
 
   private:
     // Indicates which bank is currently active
-    uInt16 myCurrentBank;
+    uint16_t myCurrentBank;
 
     // The 16K ROM image of the cartridge
-    uInt8 myImage[16384];
+    uint8_t myImage[16384];
 
     // The 2K of RAM
-    uInt8 myRAM[2048];
+    uint8_t myRAM[2048];
 
     // Current copy of SWCHA (controls ROM/RAM accesses)
-    uInt8 mySWCHA;
+    uint8_t mySWCHA;
 
     // Column currently active
-    uInt8 myColumn;
+    uint8_t myColumn;
 };
 
 #endif

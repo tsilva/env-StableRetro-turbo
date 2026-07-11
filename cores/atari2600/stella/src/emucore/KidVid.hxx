@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll
-//  SS  SS   tt           ll   ll
-//  SS     tttttt  eeee   ll   ll   aaaa
+//   SSSS    tt          lll  lll       
+//  SS  SS   tt           ll   ll        
+//  SS     tttttt  eeee   ll   ll   aaaa 
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -20,7 +20,7 @@
 #ifndef KIDVID_HXX
 #define KIDVID_HXX
 
-#include <cstdio>
+#include <streams/file_stream.h>
 
 #include "bspf.hxx"
 #include "Control.hxx"
@@ -49,7 +49,7 @@ class KidVid : public Controller
       @param system The system using this controller
       @param md5sum The md5 of the ROM using this controller
     */
-    KidVid(Jack jack, const Event& event, const System& system,
+    KidVid(Jack jack, const Event& event, const System& system, 
            const string& md5sum);
 
     /**
@@ -89,7 +89,7 @@ class KidVid : public Controller
     bool myEnabled;
 
     // The file handles for the WAV files
-    FILE *mySampleFile, *mySharedSampleFile;
+    RFILE *mySampleFile, *mySharedSampleFile;
 
     // Indicates if sample files have been successfully opened
     bool myFileOpened;
@@ -97,18 +97,18 @@ class KidVid : public Controller
     // Is the tape currently 'busy' / in use?
     bool myTapeBusy;
 
-    uInt32 myFilePointer, mySongCounter;
+    uint32_t myFilePointer, mySongCounter;
     bool myBeep, mySharedData;
-    uInt8 mySampleByte;
-    uInt32 myGame, myTape;
-    uInt32 myIdx, myBlock, myBlockIdx;
+    uint8_t mySampleByte;
+    uint32_t myGame, myTape;
+    uint32_t myIdx, myBlock, myBlockIdx;
 
     // Number of blocks and data on tape
-    static const uInt8 ourKVBlocks[6];
-    static const uInt8 ourKVData[6*8];
+    static const uint8_t ourKVBlocks[6];
+    static const uint8_t ourKVData[6*8];
 
-    static const uInt8 ourSongPositions[44+38+42+62+80+62];
-    static const uInt32 ourSongStart[104];
+    static const uint8_t ourSongPositions[44+38+42+62+80+62];
+    static const uint32_t ourSongStart[104];
 };
 
 #endif

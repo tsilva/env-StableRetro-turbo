@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll
-//  SS  SS   tt           ll   ll
-//  SS     tttttt  eeee   ll   ll   aaaa
+//   SSSS    tt          lll  lll       
+//  SS  SS   tt           ll   ll        
+//  SS     tttttt  eeee   ll   ll   aaaa 
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -17,15 +17,10 @@
 // $Id: TIA.cxx 2838 2014-01-17 23:34:03Z stephena $
 //============================================================================
 
-#include <cassert>
 #include <cstdlib>
 #include <cstring>
 
 #include "bspf.hxx"
-
-#ifdef DEBUGGER_SUPPORT
-  #include "CartDebug.hxx"
-#endif
 
 #include "Console.hxx"
 #include "Control.hxx"
@@ -58,11 +53,11 @@ TIA::TIA(Console& console, Sound& sound, Settings& settings)
     myPALFrameCounter(0),
     myBitsEnabled(true),
     myCollisionsEnabled(true)
-
+   
 {
   // Allocate buffers for two frame buffers
-  myCurrentFrameBuffer = new uInt8[160 * 320];
-  myPreviousFrameBuffer = new uInt8[160 * 320];
+  myCurrentFrameBuffer = new uint8_t[160 * 320];
+  myPreviousFrameBuffer = new uint8_t[160 * 320];
 
   // Make sure all TIA bits are enabled
   enableBits(true);
@@ -168,11 +163,10 @@ void TIA::frameReset()
   // framebuffer that is exposed outside the class actually starts at 'ystart'
   myFramePointerOffset = 160 * myFrameYStart;
 
-  //myAutoFrameEnabled = (mySettings.getFloat("framerate") <= 0);
   myAutoFrameEnabled = false;
-  myFramerate = myConsole.getFramerate();
 
-  if(myFramerate > 55.0)  // NTSC
+  // NTSC iff framerate > 55 fps, i.e. num/den > 55, i.e. num > 55*den
+  if(myConsole.getFramerateNum() > 55u * myConsole.getFramerateDen())  // NTSC
   {
     myFixedColor[P0Color]     = 0x30;
     myFixedColor[P1Color]     = 0x16;
@@ -202,7 +196,7 @@ void TIA::frameReset()
   // NTSC screens will process at least 262 scanlines,
   // while PAL will have at least 312
   // In any event, at most 320 lines can be processed
-  uInt32 scanlines = myFrameYStart + myFrameHeight;
+  uint32_t scanlines = myFrameYStart + myFrameHeight;
   if(myMaximumNumberOfScanlines == 290)
     scanlines = MAX(scanlines, 262u);  // NTSC
   else
@@ -219,10 +213,19 @@ void TIA::frameReset()
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+void TIA::enableColorLoss(bool mode)
+{
+  // PAL only: framerate num/den <= 55
+  myColorLossEnabled =
+      (myConsole.getFramerateNum() <= 55u * myConsole.getFramerateDen())
+      ? mode : false;
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void TIA::systemCyclesReset()
 {
   // Get the current system cycle
-  uInt32 cycles = mySystem->cycles();
+  uint32_t cycles = mySystem->cycles();
 
   // Adjust the sound cycle indicator
   mySound.adjustCycleCounter(-1 * cycles);
@@ -231,7 +234,7 @@ void TIA::systemCyclesReset()
   myDumpDisabledCycle -= cycles;
 
   // Get the current color clock the system is using
-  uInt32 clocks = cycles * 3;
+  uint32_t clocks = cycles * 3;
 
   // Adjust the clocks by this amount since we're reseting the clock to zero
   myClockWhenFrameStarted -= clocks;
@@ -240,7 +243,7 @@ void TIA::systemCyclesReset()
   myClockAtLastUpdate -= clocks;
   myVSYNCFinishClock -= clocks;
 }
-
+ 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void TIA::install(System& system)
 {
@@ -253,14 +256,14 @@ void TIA::install(System& system, Device& device)
   // Remember which system I'm installed in
   mySystem = &system;
 
-  uInt16 shift = mySystem->pageShift();
+  uint16_t shift = mySystem->pageShift();
   mySystem->resetCycles();
 
   // All accesses are to the given device
   System::PageAccess access(0, 0, 0, &device, System::PA_READWRITE);
 
   // We're installing in a 2600 system
-  for(uInt32 i = 0; i < 8192; i += (1 << shift))
+  for(uint32_t i = 0; i < 8192; i += (1 << shift))
     if((i & 0x1080) == 0x0000)
       mySystem->setPageAccess(i >> shift, access);
 }
@@ -270,8 +273,6 @@ bool TIA::save(Serializer& out) const
 {
   const string& device = name();
 
-  try
-  {
     out.putString(device);
 
     out.putInt(myClockWhenFrameStarted);
@@ -358,12 +359,6 @@ bool TIA::save(Serializer& out) const
 
     // Save the sound sample stuff ...
     mySound.save(out);
-  }
-  catch(...)
-  {
-    cerr << "ERROR: TIA::save" << endl;
-    return false;
-  }
 
   return true;
 }
@@ -373,18 +368,16 @@ bool TIA::load(Serializer& in)
 {
   const string& device = name();
 
-  try
-  {
     if(in.getString() != device)
       return false;
 
-    myClockWhenFrameStarted = (Int32) in.getInt();
-    myClockStartDisplay = (Int32) in.getInt();
-    myClockStopDisplay = (Int32) in.getInt();
-    myClockAtLastUpdate = (Int32) in.getInt();
-    myClocksToEndOfScanLine = (Int32) in.getInt();
+    myClockWhenFrameStarted = (int32_t) in.getInt();
+    myClockStartDisplay = (int32_t) in.getInt();
+    myClockStopDisplay = (int32_t) in.getInt();
+    myClockAtLastUpdate = (int32_t) in.getInt();
+    myClocksToEndOfScanLine = (int32_t) in.getInt();
     myScanlineCountForLastFrame = in.getInt();
-    myVSYNCFinishClock = (Int32) in.getInt();
+    myVSYNCFinishClock = (int32_t) in.getInt();
 
     myEnabledObjects = in.getByte();
     myDisabledObjects = in.getByte();
@@ -425,24 +418,24 @@ bool TIA::load(Serializer& in)
     myCurrentGRP1 = in.getByte();
 
     myDumpEnabled = in.getBool();
-    myDumpDisabledCycle = (Int32) in.getInt();
+    myDumpDisabledCycle = (int32_t) in.getInt();
 
-    myPOSP0 = (Int16) in.getShort();
-    myPOSP1 = (Int16) in.getShort();
-    myPOSM0 = (Int16) in.getShort();
-    myPOSM1 = (Int16) in.getShort();
-    myPOSBL = (Int16) in.getShort();
+    myPOSP0 = (int16_t) in.getShort();
+    myPOSP1 = (int16_t) in.getShort();
+    myPOSM0 = (int16_t) in.getShort();
+    myPOSM1 = (int16_t) in.getShort();
+    myPOSBL = (int16_t) in.getShort();
 
-    myMotionClockP0 = (Int32) in.getInt();
-    myMotionClockP1 = (Int32) in.getInt();
-    myMotionClockM0 = (Int32) in.getInt();
-    myMotionClockM1 = (Int32) in.getInt();
-    myMotionClockBL = (Int32) in.getInt();
+    myMotionClockP0 = (int32_t) in.getInt();
+    myMotionClockP1 = (int32_t) in.getInt();
+    myMotionClockM0 = (int32_t) in.getInt();
+    myMotionClockM1 = (int32_t) in.getInt();
+    myMotionClockBL = (int32_t) in.getInt();
 
-    myStartP0 = (Int32) in.getInt();
-    myStartP1 = (Int32) in.getInt();
-    myStartM0 = (Int32) in.getInt();
-    myStartM1 = (Int32) in.getInt();
+    myStartP0 = (int32_t) in.getInt();
+    myStartP1 = (int32_t) in.getInt();
+    myStartM0 = (int32_t) in.getInt();
+    myStartM1 = (int32_t) in.getInt();
 
     mySuppressP0 = in.getByte();
     mySuppressP1 = in.getByte();
@@ -453,8 +446,8 @@ bool TIA::load(Serializer& in)
     myHMM1mmr = in.getBool();
     myHMBLmmr = in.getBool();
 
-    myCurrentHMOVEPos = (Int32) in.getInt();
-    myPreviousHMOVEPos = (Int32) in.getInt();
+    myCurrentHMOVEPos = (int32_t) in.getInt();
+    myPreviousHMOVEPos = (int32_t) in.getInt();
     myHMOVEBlankEnabled = in.getBool();
 
     myFrameCounter = in.getInt();
@@ -467,58 +460,6 @@ bool TIA::load(Serializer& in)
     enableBits(true);
     toggleFixedColors(0);
     myAllowHMOVEBlanks = true;
-  }
-  catch(...)
-  {
-    cerr << "ERROR: TIA::load" << endl;
-    return false;
-  }
-
-  return true;
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool TIA::saveDisplay(Serializer& out) const
-{
-  try
-  {
-    out.putBool(myPartialFrameFlag);
-    out.putInt(myFramePointerClocks);
-    out.putByteArray(myCurrentFrameBuffer, 160*320);
-  }
-  catch(...)
-  {
-    cerr << "ERROR: TIA::saveDisplay" << endl;
-    return false;
-  }
-
-  return true;
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool TIA::loadDisplay(Serializer& in)
-{
-  try
-  {
-    myPartialFrameFlag = in.getBool();
-    myFramePointerClocks = in.getInt();
-
-    // Reset frame buffer pointer and data
-    clearBuffers();
-    myFramePointer = myCurrentFrameBuffer;
-    in.getByteArray(myCurrentFrameBuffer, 160*320);
-    memcpy(myPreviousFrameBuffer, myCurrentFrameBuffer, 160*320);
-
-    // If we're in partial frame mode, make sure to re-create the screen
-    // as it existed when the state was saved
-    if(myPartialFrameFlag)
-      myFramePointer += myFramePointerClocks;
-  }
-  catch(...)
-  {
-    cerr << "ERROR: TIA::loadDisplay" << endl;
-    return false;
-  }
 
   return true;
 }
@@ -547,7 +488,7 @@ void TIA::update()
 inline void TIA::startFrame()
 {
   // This stuff should only happen at the beginning of a new frame.
-  uInt8* tmp = myCurrentFrameBuffer;
+  uint8_t* tmp = myCurrentFrameBuffer;
   myCurrentFrameBuffer = myPreviousFrameBuffer;
   myPreviousFrameBuffer = tmp;
 
@@ -555,7 +496,7 @@ inline void TIA::startFrame()
   // so that we can adjust the frame's starting clock by this amount.  This
   // is necessary since some games position objects during VSYNC and the
   // TIA's internal counters are not reset by VSYNC.
-  uInt32 clocks = ((mySystem->cycles() * 3) - myClockWhenFrameStarted) % 228;
+  uint32_t clocks = ((mySystem->cycles() * 3) - myClockWhenFrameStarted) % 228;
 
   // Ask the system to reset the cycle count so it doesn't overflow
   mySystem->resetCycles();
@@ -607,7 +548,7 @@ inline void TIA::startFrame()
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 inline void TIA::endFrame()
 {
-  uInt32 currentlines = scanlines();
+  uint32_t currentlines = scanlines();
 
   // The TIA may generate frames that are 'invisible' to TV (they complete
   // before the first visible scanline)
@@ -623,7 +564,7 @@ inline void TIA::endFrame()
   }
 
   // Compute the number of scanlines in the frame
-  uInt32 previousCount = myScanlineCountForLastFrame;
+  uint32_t previousCount = myScanlineCountForLastFrame;
   myScanlineCountForLastFrame = currentlines;
 
   // The following handle cases where scanlines either go too high or too
@@ -651,7 +592,7 @@ inline void TIA::endFrame()
   else if(myScanlineCountForLastFrame < previousCount &&
           myScanlineCountForLastFrame < 320 && previousCount < 320)
   {
-    uInt32 offset = myScanlineCountForLastFrame * 160,
+    uint32_t offset = myScanlineCountForLastFrame * 160,
            stride = (previousCount - myScanlineCountForLastFrame) * 160;
     memset(myCurrentFrameBuffer + offset, 0, stride);
     memset(myPreviousFrameBuffer + offset, 1, stride);
@@ -660,21 +601,23 @@ inline void TIA::endFrame()
   // Recalculate framerate. attempting to auto-correct for scanline 'jumps'
   if(myAutoFrameEnabled)
   {
-    myFramerate = (myScanlineCountForLastFrame > 285 ? 15600.0 : 15720.0) /
-                   myScanlineCountForLastFrame;
-    myConsole.setFramerate(myFramerate);
+    // fps = lineRate / scanlines, kept as the exact rational
+    // (15600 or 15720) / scanlineCount
+    myConsole.setFramerate(
+        myScanlineCountForLastFrame > 285 ? 15600 : 15720,
+        myScanlineCountForLastFrame);
 
     // Adjust end-of-frame pointer
     // We always accommodate the highest # of scanlines, up to the maximum
     // size of the buffer (currently, 320 lines)
-    uInt32 offset = 228 * myScanlineCountForLastFrame;
+    uint32_t offset = 228 * myScanlineCountForLastFrame;
     if(offset > myStopDisplayOffset && offset < 228 * 320)
       myStopDisplayOffset = offset;
   }
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool TIA::scanlinePos(uInt16& x, uInt16& y) const
+bool TIA::scanlinePos(uint16_t& x, uint16_t& y) const
 {
   if(myPartialFrameFlag)
   {
@@ -712,7 +655,7 @@ void TIA::enableBits(bool mode)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool TIA::toggleBit(TIABit b, uInt8 mode)
+bool TIA::toggleBit(TIABit b, uint8_t mode)
 {
   // If mode is 0 or 1, use it as a boolean (off or on)
   // Otherwise, flip the state
@@ -743,9 +686,9 @@ void TIA::enableCollisions(bool mode)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool TIA::toggleCollision(TIABit b, uInt8 mode)
+bool TIA::toggleCollision(TIABit b, uint8_t mode)
 {
-  uInt16 enabled = myCollisionEnabledMask >> 16;
+  uint16_t enabled = myCollisionEnabledMask >> 16;
 
   // If mode is 0 or 1, use it as a boolean (off or on)
   // Otherwise, flip the state
@@ -754,7 +697,7 @@ bool TIA::toggleCollision(TIABit b, uInt8 mode)
   else    enabled &= ~b;
 
   // Assume all collisions are on, then selectively turn the desired ones off
-  uInt16 mask = 0xffff;
+  uint16_t mask = 0xffff;
   if(!(enabled & P0Bit))
     mask &= ~(Cx_M0P0 | Cx_M1P0 | Cx_P0PF | Cx_P0BL | Cx_P0P1);
   if(!(enabled & P1Bit))
@@ -790,7 +733,7 @@ bool TIA::toggleHMOVEBlank()
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool TIA::toggleFixedColors(uInt8 mode)
+bool TIA::toggleFixedColors(uint8_t mode)
 {
   // If mode is 0 or 1, use it as a boolean (off or on)
   // Otherwise, flip the state
@@ -802,15 +745,15 @@ bool TIA::toggleFixedColors(uInt8 mode)
   // Set PriorityEncoder
   // This needs to be done here, since toggling debug colours also changes
   // how colours are interpreted in PF 'score' mode
-  for(uInt16 x = 0; x < 2; ++x)
+  for(uint16_t x = 0; x < 2; ++x)
   {
-    for(uInt16 enabled = 0; enabled < 256; ++enabled)
+    for(uint16_t enabled = 0; enabled < 256; ++enabled)
     {
       if(enabled & PriorityBit)
       {
         // Priority from highest to lowest:
         //   PF/BL => P0/M0 => P1/M1 => BK
-        uInt8 color = BKColor;
+        uint8_t color = BKColor;
 
         if((enabled & M1Bit) != 0)
           color = M1Color;
@@ -831,7 +774,7 @@ bool TIA::toggleFixedColors(uInt8 mode)
       {
         // Priority from highest to lowest:
         //   P0/M0 => P1/M1 => PF/BL => BK
-        uInt8 color = BKColor;
+        uint8_t color = BKColor;
 
         if((enabled & BLBit) != 0)
           color = BLColor;
@@ -855,7 +798,7 @@ bool TIA::toggleFixedColors(uInt8 mode)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool TIA::driveUnusedPinsRandom(uInt8 mode)
+bool TIA::driveUnusedPinsRandom(uint8_t mode)
 {
   // If mode is 0 or 1, use it as a boolean (off or on)
   // Otherwise, return the state
@@ -867,75 +810,8 @@ bool TIA::driveUnusedPinsRandom(uInt8 mode)
   return myTIAPinsDriven;
 }
 
-#ifdef DEBUGGER_SUPPORT
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void TIA::updateScanline()
-{
-  // Start a new frame if the old one was finished
-  if(!myPartialFrameFlag)
-    startFrame();
-
-  // true either way:
-  myPartialFrameFlag = true;
-
-  int totalClocks = (mySystem->cycles() * 3) - myClockWhenFrameStarted;
-  int endClock = ((totalClocks + 228) / 228) * 228;
-
-  int clock;
-  do {
-    mySystem->m6502().execute(1);
-    clock = mySystem->cycles() * 3;
-    updateFrame(clock);
-  } while(clock < endClock);
-
-  // if we finished the frame, get ready for the next one
-  if(!myPartialFrameFlag)
-    endFrame();
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void TIA::updateScanlineByStep()
-{
-  // Start a new frame if the old one was finished
-  if(!myPartialFrameFlag)
-    startFrame();
-
-  // true either way:
-  myPartialFrameFlag = true;
-
-  // Update frame by one CPU instruction/color clock
-  mySystem->m6502().execute(1);
-  updateFrame(mySystem->cycles() * 3);
-
-  // if we finished the frame, get ready for the next one
-  if(!myPartialFrameFlag)
-    endFrame();
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void TIA::updateScanlineByTrace(int target)
-{
-  // Start a new frame if the old one was finished
-  if(!myPartialFrameFlag)
-    startFrame();
-
-  // true either way:
-  myPartialFrameFlag = true;
-
-  while(mySystem->m6502().getPC() != target)
-  {
-    mySystem->m6502().execute(1);
-    updateFrame(mySystem->cycles() * 3);
-  }
-
-  // if we finished the frame, get ready for the next one
-  if(!myPartialFrameFlag)
-    endFrame();
-}
-#endif
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void TIA::updateFrame(Int32 clock)
+void TIA::updateFrame(int32_t clock)
 {
   // See if we've already updated this portion of the screen
   if((clock < myClockStartDisplay) ||
@@ -949,11 +825,11 @@ void TIA::updateFrame(Int32 clock)
 
   // Determine how many scanlines to process
   // It's easier to think about this in scanlines rather than color clocks
-  uInt32 startLine = (myClockAtLastUpdate - myClockWhenFrameStarted) / 228;
-  uInt32 endLine = (clock - myClockWhenFrameStarted) / 228;
+  uint32_t startLine = (myClockAtLastUpdate - myClockWhenFrameStarted) / 228;
+  uint32_t endLine = (clock - myClockWhenFrameStarted) / 228;
 
   // Update frame one scanline at a time
-  for(uInt32 line = startLine; line <= endLine; ++line)
+  for(uint32_t line = startLine; line <= endLine; ++line)
   {
     // Only check for inter-line changes after the current scanline
     // The ideas for much of the following code was inspired by MESS
@@ -989,7 +865,7 @@ void TIA::updateFrame(Int32 clock)
       if(myHMM1mmr) { myPOSM1 -= 17;  if(myPOSM1 < 0) myPOSM1 += 160;  posChanged = true; }
       if(myHMBLmmr) { myPOSBL -= 17;  if(myPOSBL < 0) myPOSBL += 160;  posChanged = true; }
 
-      // Scanline change, so reset PF mask based on current CTRLPF reflection state
+      // Scanline change, so reset PF mask based on current CTRLPF reflection state 
       myPFMask = TIATables::PFMask[myCTRLPF & 0x01];
 
       // TODO - handle changes to player timing
@@ -999,10 +875,10 @@ void TIA::updateFrame(Int32 clock)
     }
 
     // Compute the number of clocks we're going to update
-    Int32 clocksToUpdate = 0;
+    int32_t clocksToUpdate = 0;
 
     // Remember how many clocks we are from the left side of the screen
-    Int32 clocksFromStartOfScanLine = 228 - myClocksToEndOfScanLine;
+    int32_t clocksFromStartOfScanLine = 228 - myClocksToEndOfScanLine;
 
     // See if we're updating more than the current scanline
     if(clock > (myClockAtLastUpdate + myClocksToEndOfScanLine))
@@ -1020,12 +896,12 @@ void TIA::updateFrame(Int32 clock)
       myClockAtLastUpdate = clock;
     }
 
-    Int32 startOfScanLine = HBLANK;
+    int32_t startOfScanLine = HBLANK;
 
     // Skip over as many horizontal blank clocks as we can
     if(clocksFromStartOfScanLine < startOfScanLine)
     {
-      uInt32 tmp;
+      uint32_t tmp;
 
       if((startOfScanLine - clocksFromStartOfScanLine) < clocksToUpdate)
         tmp = startOfScanLine - clocksFromStartOfScanLine;
@@ -1037,13 +913,13 @@ void TIA::updateFrame(Int32 clock)
     }
 
     // Remember frame pointer in case HMOVE blanks need to be handled
-    uInt8* oldFramePointer = myFramePointer;
+    uint8_t* oldFramePointer = myFramePointer;
 
     // Update as much of the scanline as we can
     if(clocksToUpdate != 0)
     {
       // Calculate the ending frame pointer value
-      uInt8* ending = myFramePointer + clocksToUpdate;
+      uint8_t* ending = myFramePointer + clocksToUpdate;
       myFramePointerClocks += clocksToUpdate;
 
       // See if we're in the vertical blank region
@@ -1116,11 +992,11 @@ void TIA::updateFrame(Int32 clock)
           myM1Mask = &TIATables::MxMask[myNUSIZ1 & 0x07]
               [(myNUSIZ1 & 0x30) >> 4][160 - (myPOSM1 & 0xFF)];
 
-        uInt8 enabledObjects = myEnabledObjects & myDisabledObjects;
-        uInt32 hpos = clocksFromStartOfScanLine - HBLANK;
+        uint8_t enabledObjects = myEnabledObjects & myDisabledObjects;
+        uint32_t hpos = clocksFromStartOfScanLine - HBLANK;
         for(; myFramePointer < ending; ++myFramePointer, ++hpos)
         {
-          uInt8 enabled = ((enabledObjects & PFBit) &&
+          uint8_t enabled = ((enabledObjects & PFBit) &&
                            (myPF & myPFMask[hpos])) ? PFBit : 0;
 
           if((enabledObjects & BLBit) && myBLMask[hpos])
@@ -1150,7 +1026,7 @@ void TIA::updateFrame(Int32 clock)
     if(myHMOVEBlankEnabled && (startOfScanLine < HBLANK + 8) &&
         (clocksFromStartOfScanLine < (HBLANK + 8)))
     {
-      Int32 blanks = (HBLANK + 8) - clocksFromStartOfScanLine;
+      int32_t blanks = (HBLANK + 8) - clocksFromStartOfScanLine;
       memset(oldFramePointer, myColorPtr[HBLANKColor], blanks);
 
       if((clocksToUpdate + clocksFromStartOfScanLine) >= (HBLANK + 8))
@@ -1174,7 +1050,7 @@ void TIA::updateFrame(Int32 clock)
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 inline void TIA::waitHorizontalSync()
 {
-  uInt32 cyclesToEndOfLine = 76 - ((mySystem->cycles() -
+  uint32_t cyclesToEndOfLine = 76 - ((mySystem->cycles() - 
       (myClockWhenFrameStarted / 3)) % 76);
 
   if(cyclesToEndOfLine < 76)
@@ -1195,7 +1071,7 @@ inline void TIA::waitHorizontalRSync()
   // effect over a proper three line VSYNC. 3*76 = 228 cycles properly needed:
   //
   // ======  SHORT TIME CASE  ======
-  //
+  // 
   //     lda    #3      ;2  @67
   //     sta    VSYNC   ;3  @70      vsync starts
   //     sta    RSYNC   ;3  @73  +3
@@ -1231,7 +1107,7 @@ inline void TIA::waitHorizontalRSync()
   // cycle occurs before the counter warps around to zero. Therefore the positioning
   // code will hit RESPx one cycle sooner after a RSYNC than after a WSYNC.
 
-  uInt32 cyclesToEndOfLine = 76 - ((mySystem->cycles() -
+  uint32_t cyclesToEndOfLine = 76 - ((mySystem->cycles() - 
       (myClockWhenFrameStarted / 3)) % 76);
 
   mySystem->incrementCycles(cyclesToEndOfLine-1);
@@ -1245,7 +1121,44 @@ void TIA::clearBuffers()
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-inline uInt8 TIA::dumpedInputPort(int resistance)
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+// 64-bit division helper, deliberately isolated.
+//
+// The paddle-charge threshold below needs an exact 64-bit division
+// (the numerator reaches ~50 bits, so it cannot be done in 32 bits
+// without changing the result, and this is a determinism-sensitive
+// path that must stay bit-identical). The MSVC 2005 optimizer aborts
+// with a fatal internal compiler error (C1001) during instruction
+// selection for this uint64_t divide under /O2 -- regardless of
+// whether the enclosing function is inlined or how the expression is
+// arranged, because the crash is in the divide's code generation, not
+// in inlining or expression shape.
+//
+// Turning the optimizer off for just this one tiny helper avoids the
+// crash while leaving every other function fully optimized and every
+// other compiler completely unaffected. The result is exact, so
+// behavior and determinism are unchanged.
+#if defined(_MSC_VER)
+  #pragma optimize("", off)
+#endif
+static uint32_t paddleChargeCycles(uint32_t resistance,
+                                   uint32_t scanlines,
+                                   uint32_t framerateNum,
+                                   uint32_t framerateDen)
+{
+  // 1.216e-6 == 76/62500000 == 19/15625000 exactly (reduced by 4)
+  uint64_t numer = (uint64_t)resistance * scanlines;
+  numer *= framerateNum;
+  numer *= 19u;
+  uint64_t denom = (uint64_t)framerateDen * 15625000u;
+  return (uint32_t)(numer / denom);
+}
+#if defined(_MSC_VER)
+  #pragma optimize("", on)
+#endif
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+uint8_t TIA::dumpedInputPort(int resistance)
 {
   if(resistance == Controller::minimumResistance)
   {
@@ -1257,9 +1170,11 @@ inline uInt8 TIA::dumpedInputPort(int resistance)
   }
   else
   {
-    // Constant here is derived from '1.6 * 0.01e-6 * 228 / 3'
-    uInt32 needed = (uInt32)
-      (1.216e-6 * resistance * myScanlineCountForLastFrame * myFramerate);
+    uint32_t needed = paddleChargeCycles(
+        (uint32_t)resistance,
+        myScanlineCountForLastFrame,
+        myConsole.getFramerateNum(),
+        myConsole.getFramerateDen());
     if((mySystem->cycles() - myDumpDisabledCycle) > needed)
       return 0x80;
     else
@@ -1269,7 +1184,7 @@ inline uInt8 TIA::dumpedInputPort(int resistance)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uInt8 TIA::peek(uInt16 addr)
+uint8_t TIA::peek(uint16_t addr)
 {
   // Update frame to current color clock before we look at anything!
   updateFrame(mySystem->cycles() * 3);
@@ -1278,9 +1193,9 @@ uInt8 TIA::peek(uInt16 addr)
   // Otherwise, there is some randomness injected into the mix
   // In either case, we start out with D7 and D6 disabled (the only
   // valid bits in a TIA read), and selectively enable them
-  uInt8 value = 0x3F & (!myTIAPinsDriven ? mySystem->getDataBusState() :
+  uint8_t value = 0x3F & (!myTIAPinsDriven ? mySystem->getDataBusState() :
                         mySystem->getDataBusState(0xFF));
-  uInt16 collision = myCollision & (uInt16)myCollisionEnabledMask;
+  uint16_t collision = myCollision & (uint16_t)myCollisionEnabledMask;
 
   switch(addr & 0x000f)
   {
@@ -1345,7 +1260,7 @@ uInt8 TIA::peek(uInt16 addr)
 
     case INPT4:
     {
-      uInt8 button = (myConsole.controller(Controller::Left).read(Controller::Six) ? 0x80 : 0x00);
+      uint8_t button = (myConsole.controller(Controller::Left).read(Controller::Six) ? 0x80 : 0x00);
       myINPT4 = (myVBLANK & 0x40) ? (myINPT4 & button) : button;
 
       value = (value & 0x7F) | myINPT4;
@@ -1354,7 +1269,7 @@ uInt8 TIA::peek(uInt16 addr)
 
     case INPT5:
     {
-      uInt8 button = (myConsole.controller(Controller::Right).read(Controller::Six) ? 0x80 : 0x00);
+      uint8_t button = (myConsole.controller(Controller::Right).read(Controller::Six) ? 0x80 : 0x00);
       myINPT5 = (myVBLANK & 0x40) ? (myINPT5 & button) : button;
 
       value = (value & 0x7F) | myINPT5;
@@ -1370,18 +1285,18 @@ uInt8 TIA::peek(uInt16 addr)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool TIA::poke(uInt16 addr, uInt8 value)
+bool TIA::poke(uint16_t addr, uint8_t value)
 {
   addr = addr & 0x003f;
 
-  Int32 clock = mySystem->cycles() * 3;
-  Int16 delay = TIATables::PokeDelay[addr];
+  int32_t clock = mySystem->cycles() * 3;
+  int16_t delay = TIATables::PokeDelay[addr];
 
   // See if this is a poke to a PF register
   if(delay == -1)
   {
-    static uInt32 d[4] = {4, 5, 2, 3};
-    Int32 x = ((clock - myClockWhenFrameStarted) % 228);
+    static uint32_t d[4] = {4, 5, 2, 3};
+    int32_t x = ((clock - myClockWhenFrameStarted) % 228);
     delay = d[(x / 3) & 3];
   }
 
@@ -1389,7 +1304,7 @@ bool TIA::poke(uInt16 addr, uInt8 value)
   updateFrame(clock + delay);
 
   // If a VSYNC hasn't been generated in time go ahead and end the frame
-  if(((clock - myClockWhenFrameStarted) / 228) >= (Int32)myMaximumNumberOfScanlines)
+  if(((clock - myClockWhenFrameStarted) / 228) >= (int32_t)myMaximumNumberOfScanlines)
   {
     mySystem->m6502().stop();
     myPartialFrameFlag = false;
@@ -1403,8 +1318,8 @@ bool TIA::poke(uInt16 addr, uInt8 value)
 
       if(myVSYNC & 0x02)
       {
-        // Indicate when VSYNC should be finished.  This should really
-        // be 3 * 228 according to Atari's documentation, however, some
+        // Indicate when VSYNC should be finished.  This should really 
+        // be 3 * 228 according to Atari's documentation, however, some 
         // games don't supply the full 3 scanlines of VSYNC.
         myVSYNCFinishClock = clock + 228;
       }
@@ -1453,7 +1368,7 @@ bool TIA::poke(uInt16 addr, uInt8 value)
       // we test here for follow-on writes which should be ignored as
       // far as halting the processor is concerned.
       //
-      // TODO - 08-30-2006: This halting isn't correct since it's
+      // TODO - 08-30-2006: This halting isn't correct since it's 
       // still halting on the original write.  The 6507 emulation
       // should be expanded to include a READY line.
       if(mySystem->m6502().lastAccessWasRead())
@@ -1494,7 +1409,7 @@ bool TIA::poke(uInt16 addr, uInt8 value)
 
     case COLUP0:  // Color-Luminance Player 0
     {
-      uInt8 color = value & 0xfe;
+      uint8_t color = value & 0xfe;
       if(myColorLossEnabled && (myScanlineCountForLastFrame & 0x01))
         color |= 0x01;
 
@@ -1504,7 +1419,7 @@ bool TIA::poke(uInt16 addr, uInt8 value)
 
     case COLUP1:  // Color-Luminance Player 1
     {
-      uInt8 color = value & 0xfe;
+      uint8_t color = value & 0xfe;
       if(myColorLossEnabled && (myScanlineCountForLastFrame & 0x01))
         color |= 0x01;
 
@@ -1514,7 +1429,7 @@ bool TIA::poke(uInt16 addr, uInt8 value)
 
     case COLUPF:  // Color-Luminance Playfield
     {
-      uInt8 color = value & 0xfe;
+      uint8_t color = value & 0xfe;
       if(myColorLossEnabled && (myScanlineCountForLastFrame & 0x01))
         color |= 0x01;
 
@@ -1524,7 +1439,7 @@ bool TIA::poke(uInt16 addr, uInt8 value)
 
     case COLUBK:  // Color-Luminance Background
     {
-      uInt8 color = value & 0xfe;
+      uint8_t color = value & 0xfe;
       if(myColorLossEnabled && (myScanlineCountForLastFrame & 0x01))
         color |= 0x01;
 
@@ -1537,11 +1452,11 @@ bool TIA::poke(uInt16 addr, uInt8 value)
       myCTRLPF = value;
 
       // The playfield priority and score bits from the control register
-      // are accessed when the frame is being drawn.  We precompute the
+      // are accessed when the frame is being drawn.  We precompute the 
       // necessary value here so we can save time while drawing.
       myPlayfieldPriorityAndScore = ((myCTRLPF & 0x06) << 5);
 
-      // Update the playfield mask based on reflection state if
+      // Update the playfield mask based on reflection state if 
       // we're still on the left hand side of the playfield
       if(((clock - myClockWhenFrameStarted) % 228) < (68 + 79))
         myPFMask = TIATables::PFMask[myCTRLPF & 0x01];
@@ -1580,52 +1495,37 @@ bool TIA::poke(uInt16 addr, uInt8 value)
       else
         myEnabledObjects |= PFBit;
 
-    #ifdef DEBUGGER_SUPPORT
-      uInt16 dataAddr = mySystem->m6502().lastDataAddressForPoke();
-      if(dataAddr)
-        mySystem->setAccessFlags(dataAddr, CartDebug::PGFX);
-    #endif
       break;
     }
 
     case PF1:     // Playfield register byte 1
     {
-      myPF = (myPF & 0x000FF00F) | ((uInt32)value << 4);
+      myPF = (myPF & 0x000FF00F) | ((uint32_t)value << 4);
 
       if(myPF == 0)
         myEnabledObjects &= ~PFBit;
       else
         myEnabledObjects |= PFBit;
 
-    #ifdef DEBUGGER_SUPPORT
-      uInt16 dataAddr = mySystem->m6502().lastDataAddressForPoke();
-      if(dataAddr)
-        mySystem->setAccessFlags(dataAddr, CartDebug::PGFX);
-    #endif
       break;
     }
 
     case PF2:     // Playfield register byte 2
     {
-      myPF = (myPF & 0x00000FFF) | ((uInt32)value << 12);
+      myPF = (myPF & 0x00000FFF) | ((uint32_t)value << 12);
 
       if(myPF == 0)
         myEnabledObjects &= ~PFBit;
       else
         myEnabledObjects |= PFBit;
 
-    #ifdef DEBUGGER_SUPPORT
-      uInt16 dataAddr = mySystem->m6502().lastDataAddressForPoke();
-      if(dataAddr)
-        mySystem->setAccessFlags(dataAddr, CartDebug::PGFX);
-    #endif
       break;
     }
 
     case RESP0:   // Reset Player 0
     {
-      Int32 hpos = (clock - myClockWhenFrameStarted) % 228 - HBLANK;
-      Int16 newx;
+      int32_t hpos = (clock - myClockWhenFrameStarted) % 228 - HBLANK;
+      int16_t newx;
 
       // Check if HMOVE is currently active
       if(myCurrentHMOVEPos != 0x7FFFFFFF)
@@ -1674,8 +1574,8 @@ bool TIA::poke(uInt16 addr, uInt8 value)
 
     case RESP1:   // Reset Player 1
     {
-      Int32 hpos = (clock - myClockWhenFrameStarted) % 228 - HBLANK;
-      Int16 newx;
+      int32_t hpos = (clock - myClockWhenFrameStarted) % 228 - HBLANK;
+      int16_t newx;
 
       // Check if HMOVE is currently active
       if(myCurrentHMOVEPos != 0x7FFFFFFF)
@@ -1724,8 +1624,8 @@ bool TIA::poke(uInt16 addr, uInt8 value)
 
     case RESM0:   // Reset Missle 0
     {
-      Int32 hpos = (clock - myClockWhenFrameStarted) % 228 - HBLANK;
-      Int16 newx;
+      int32_t hpos = (clock - myClockWhenFrameStarted) % 228 - HBLANK;
+      int16_t newx;
 
       // Check if HMOVE is currently active
       if(myCurrentHMOVEPos != 0x7FFFFFFF)
@@ -1748,8 +1648,8 @@ bool TIA::poke(uInt16 addr, uInt8 value)
 
     case RESM1:   // Reset Missle 1
     {
-      Int32 hpos = (clock - myClockWhenFrameStarted) % 228 - HBLANK;
-      Int16 newx;
+      int32_t hpos = (clock - myClockWhenFrameStarted) % 228 - HBLANK;
+      int16_t newx;
 
       // Check if HMOVE is currently active
       if(myCurrentHMOVEPos != 0x7FFFFFFF)
@@ -1772,7 +1672,7 @@ bool TIA::poke(uInt16 addr, uInt8 value)
 
     case RESBL:   // Reset Ball
     {
-      Int32 hpos = (clock - myClockWhenFrameStarted) % 228 - HBLANK;
+      int32_t hpos = (clock - myClockWhenFrameStarted) % 228 - HBLANK;
 
       // Check if HMOVE is currently active
       if(myCurrentHMOVEPos != 0x7FFFFFFF)
@@ -1795,35 +1695,35 @@ bool TIA::poke(uInt16 addr, uInt8 value)
       mySound.set(addr, value, mySystem->cycles());
       break;
     }
-
+  
     case AUDC1:   // Audio control 1
     {
       myAUDC1 = value & 0x0f;
       mySound.set(addr, value, mySystem->cycles());
       break;
     }
-
+  
     case AUDF0:   // Audio frequency 0
     {
       myAUDF0 = value & 0x1f;
       mySound.set(addr, value, mySystem->cycles());
       break;
     }
-
+  
     case AUDF1:   // Audio frequency 1
     {
       myAUDF1 = value & 0x1f;
       mySound.set(addr, value, mySystem->cycles());
       break;
     }
-
+  
     case AUDV0:   // Audio volume 0
     {
       myAUDV0 = value & 0x0f;
       mySound.set(addr, value, mySystem->cycles());
       break;
     }
-
+  
     case AUDV1:   // Audio volume 1
     {
       myAUDV1 = value & 0x0f;
@@ -1840,12 +1740,12 @@ bool TIA::poke(uInt16 addr, uInt8 value)
       myDGRP1 = myGRP1;
 
       // Get the "current" data for GRP0 base on delay register and reflect
-      uInt8 grp0 = myVDELP0 ? myDGRP0 : myGRP0;
-      myCurrentGRP0 = myREFP0 ? TIATables::GRPReflect[grp0] : grp0;
+      uint8_t grp0 = myVDELP0 ? myDGRP0 : myGRP0;
+      myCurrentGRP0 = myREFP0 ? TIATables::GRPReflect[grp0] : grp0; 
 
       // Get the "current" data for GRP1 base on delay register and reflect
-      uInt8 grp1 = myVDELP1 ? myDGRP1 : myGRP1;
-      myCurrentGRP1 = myREFP1 ? TIATables::GRPReflect[grp1] : grp1;
+      uint8_t grp1 = myVDELP1 ? myDGRP1 : myGRP1;
+      myCurrentGRP1 = myREFP1 ? TIATables::GRPReflect[grp1] : grp1; 
 
       // Set enabled object bits
       if(myCurrentGRP0 != 0)
@@ -1858,11 +1758,6 @@ bool TIA::poke(uInt16 addr, uInt8 value)
       else
         myEnabledObjects &= ~P1Bit;
 
-    #ifdef DEBUGGER_SUPPORT
-      uInt16 dataAddr = mySystem->m6502().lastDataAddressForPoke();
-      if(dataAddr)
-        mySystem->setAccessFlags(dataAddr, CartDebug::GFX);
-    #endif
       break;
     }
 
@@ -1878,12 +1773,12 @@ bool TIA::poke(uInt16 addr, uInt8 value)
       myDENABL = myENABL;
 
       // Get the "current" data for GRP0 base on delay register
-      uInt8 grp0 = myVDELP0 ? myDGRP0 : myGRP0;
-      myCurrentGRP0 = myREFP0 ? TIATables::GRPReflect[grp0] : grp0;
+      uint8_t grp0 = myVDELP0 ? myDGRP0 : myGRP0;
+      myCurrentGRP0 = myREFP0 ? TIATables::GRPReflect[grp0] : grp0; 
 
       // Get the "current" data for GRP1 base on delay register
-      uInt8 grp1 = myVDELP1 ? myDGRP1 : myGRP1;
-      myCurrentGRP1 = myREFP1 ? TIATables::GRPReflect[grp1] : grp1;
+      uint8_t grp1 = myVDELP1 ? myDGRP1 : myGRP1;
+      myCurrentGRP1 = myREFP1 ? TIATables::GRPReflect[grp1] : grp1; 
 
       // Set enabled object bits
       if(myCurrentGRP0 != 0)
@@ -1901,11 +1796,6 @@ bool TIA::poke(uInt16 addr, uInt8 value)
       else
         myEnabledObjects &= ~BLBit;
 
-    #ifdef DEBUGGER_SUPPORT
-      uInt16 dataAddr = mySystem->m6502().lastDataAddressForPoke();
-      if(dataAddr)
-        mySystem->setAccessFlags(dataAddr, CartDebug::GFX);
-    #endif
       break;
     }
 
@@ -1977,8 +1867,8 @@ bool TIA::poke(uInt16 addr, uInt8 value)
     {
       myVDELP0 = value & 0x01;
 
-      uInt8 grp0 = myVDELP0 ? myDGRP0 : myGRP0;
-      myCurrentGRP0 = myREFP0 ? TIATables::GRPReflect[grp0] : grp0;
+      uint8_t grp0 = myVDELP0 ? myDGRP0 : myGRP0;
+      myCurrentGRP0 = myREFP0 ? TIATables::GRPReflect[grp0] : grp0; 
 
       if(myCurrentGRP0 != 0)
         myEnabledObjects |= P0Bit;
@@ -1991,8 +1881,8 @@ bool TIA::poke(uInt16 addr, uInt8 value)
     {
       myVDELP1 = value & 0x01;
 
-      uInt8 grp1 = myVDELP1 ? myDGRP1 : myGRP1;
-      myCurrentGRP1 = myREFP1 ? TIATables::GRPReflect[grp1] : grp1;
+      uint8_t grp1 = myVDELP1 ? myDGRP1 : myGRP1;
+      myCurrentGRP1 = myREFP1 ? TIATables::GRPReflect[grp1] : grp1; 
 
       if(myCurrentGRP1 != 0)
         myEnabledObjects |= P1Bit;
@@ -2016,7 +1906,7 @@ bool TIA::poke(uInt16 addr, uInt8 value)
     {
       if(myRESMP0 && !(value & 0x02))
       {
-        uInt16 middle = 4;
+        uint16_t middle = 4;
         switch(myNUSIZ0 & 0x07)
         {
           // 1-pixel delay is taken care of in TIATables::PxMask
@@ -2045,7 +1935,7 @@ bool TIA::poke(uInt16 addr, uInt8 value)
     {
       if(myRESMP1 && !(value & 0x02))
       {
-        uInt16 middle = 4;
+        uint16_t middle = 4;
         switch(myNUSIZ1 & 0x07)
         {
           // 1-pixel delay is taken care of in TIATables::PxMask
@@ -2075,14 +1965,14 @@ bool TIA::poke(uInt16 addr, uInt8 value)
       myCurrentHMOVEPos = hpos;
 
       // See if we need to enable the HMOVE blank bug
-      myHMOVEBlankEnabled = myAllowHMOVEBlanks ?
+      myHMOVEBlankEnabled = myAllowHMOVEBlanks ? 
         TIATables::HMOVEBlankEnableCycles[((clock - myClockWhenFrameStarted) % 228) / 3] : false;
 
       // Do we have to undo some of the already applied cycles from an
       // active graphics latch?
       if(hpos + HBLANK < 17 * 4)
       {
-        Int16 cycle_fix = 17 - ((hpos + HBLANK + 7) / 4);
+        int16_t cycle_fix = 17 - ((hpos + HBLANK + 7) / 4);
         if(myHMP0mmr)  myPOSP0 = (myPOSP0 + cycle_fix) % 160;
         if(myHMP1mmr)  myPOSP1 = (myPOSP1 + cycle_fix) % 160;
         if(myHMM0mmr)  myPOSM0 = (myPOSM0 + cycle_fix) % 160;
@@ -2113,7 +2003,7 @@ bool TIA::poke(uInt16 addr, uInt8 value)
       // Adjust number of graphics motion clocks for active display
       if(hpos >= 97 && hpos < 151)
       {
-        Int16 skip_motclks = (160 - myCurrentHMOVEPos - 6) >> 2;
+        int16_t skip_motclks = (160 - myCurrentHMOVEPos - 6) >> 2;
         myMotionClockP0 -= skip_motclks;
         myMotionClockP1 -= skip_motclks;
         myMotionClockM0 -= skip_motclks;
@@ -2128,7 +2018,7 @@ bool TIA::poke(uInt16 addr, uInt8 value)
 
       if(hpos >= -56 && hpos < -5)
       {
-        Int16 max_motclks = (7 - (myCurrentHMOVEPos + 5)) >> 2;
+        int16_t max_motclks = (7 - (myCurrentHMOVEPos + 5)) >> 2;
         if(myMotionClockP0 > max_motclks)  myMotionClockP0 = max_motclks;
         if(myMotionClockP1 > max_motclks)  myMotionClockP1 = max_motclks;
         if(myMotionClockM0 > max_motclks)  myMotionClockM0 = max_motclks;
@@ -2176,9 +2066,6 @@ bool TIA::poke(uInt16 addr, uInt8 value)
 
     default:
     {
-#ifdef DEBUG_ACCESSES
-      cerr << "BAD TIA Poke: " << hex << addr << endl;
-#endif
       break;
     }
   }
@@ -2211,7 +2098,7 @@ bool TIA::poke(uInt16 addr, uInt8 value)
 // Most of the ideas in these methods come from MESS.
 // (used with permission from Wilbert Pol)
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void TIA::pokeHMP0(uInt8 value, Int32 clock)
+void TIA::pokeHMP0(uint8_t value, int32_t clock)
 {
   value &= 0xF0;
   if(myHMP0 == value)
@@ -2223,7 +2110,7 @@ void TIA::pokeHMP0(uInt8 value, Int32 clock)
   if(myCurrentHMOVEPos != 0x7FFFFFFF &&
      hpos < MIN(myCurrentHMOVEPos + 6 + myMotionClockP0 * 4, 7))
   {
-    Int32 newMotion = (value ^ 0x80) >> 4;
+    int32_t newMotion = (value ^ 0x80) >> 4;
     // Check if new horizontal move can still be applied normally
     if(newMotion > myMotionClockP0 ||
        hpos <= MIN(myCurrentHMOVEPos + 6 + newMotion * 4, 7))
@@ -2245,7 +2132,7 @@ void TIA::pokeHMP0(uInt8 value, Int32 clock)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void TIA::pokeHMP1(uInt8 value, Int32 clock)
+void TIA::pokeHMP1(uint8_t value, int32_t clock)
 {
   value &= 0xF0;
   if(myHMP1 == value)
@@ -2257,7 +2144,7 @@ void TIA::pokeHMP1(uInt8 value, Int32 clock)
   if(myCurrentHMOVEPos != 0x7FFFFFFF &&
      hpos < MIN(myCurrentHMOVEPos + 6 + myMotionClockP1 * 4, 7))
   {
-    Int32 newMotion = (value ^ 0x80) >> 4;
+    int32_t newMotion = (value ^ 0x80) >> 4;
     // Check if new horizontal move can still be applied normally
     if(newMotion > myMotionClockP1 ||
        hpos <= MIN(myCurrentHMOVEPos + 6 + newMotion * 4, 7))
@@ -2279,7 +2166,7 @@ void TIA::pokeHMP1(uInt8 value, Int32 clock)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void TIA::pokeHMM0(uInt8 value, Int32 clock)
+void TIA::pokeHMM0(uint8_t value, int32_t clock)
 {
   value &= 0xF0;
   if(myHMM0 == value)
@@ -2291,7 +2178,7 @@ void TIA::pokeHMM0(uInt8 value, Int32 clock)
   if(myCurrentHMOVEPos != 0x7FFFFFFF &&
      hpos < MIN(myCurrentHMOVEPos + 6 + myMotionClockM0 * 4, 7))
   {
-    Int32 newMotion = (value ^ 0x80) >> 4;
+    int32_t newMotion = (value ^ 0x80) >> 4;
     // Check if new horizontal move can still be applied normally
     if(newMotion > myMotionClockM0 ||
        hpos <= MIN(myCurrentHMOVEPos + 6 + newMotion * 4, 7))
@@ -2312,7 +2199,7 @@ void TIA::pokeHMM0(uInt8 value, Int32 clock)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void TIA::pokeHMM1(uInt8 value, Int32 clock)
+void TIA::pokeHMM1(uint8_t value, int32_t clock)
 {
   value &= 0xF0;
   if(myHMM1 == value)
@@ -2324,7 +2211,7 @@ void TIA::pokeHMM1(uInt8 value, Int32 clock)
   if(myCurrentHMOVEPos != 0x7FFFFFFF &&
      hpos < MIN(myCurrentHMOVEPos + 6 + myMotionClockM1 * 4, 7))
   {
-    Int32 newMotion = (value ^ 0x80) >> 4;
+    int32_t newMotion = (value ^ 0x80) >> 4;
     // Check if new horizontal move can still be applied normally
     if(newMotion > myMotionClockM1 ||
        hpos <= MIN(myCurrentHMOVEPos + 6 + newMotion * 4, 7))
@@ -2345,7 +2232,7 @@ void TIA::pokeHMM1(uInt8 value, Int32 clock)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void TIA::pokeHMBL(uInt8 value, Int32 clock)
+void TIA::pokeHMBL(uint8_t value, int32_t clock)
 {
   value &= 0xF0;
   if(myHMBL == value)
@@ -2357,7 +2244,7 @@ void TIA::pokeHMBL(uInt8 value, Int32 clock)
   if(myCurrentHMOVEPos != 0x7FFFFFFF &&
      hpos < MIN(myCurrentHMOVEPos + 6 + myMotionClockBL * 4, 7))
   {
-    Int32 newMotion = (value ^ 0x80) >> 4;
+    int32_t newMotion = (value ^ 0x80) >> 4;
     // Check if new horizontal move can still be applied normally
     if(newMotion > myMotionClockBL ||
        hpos <= MIN(myCurrentHMOVEPos + 6 + newMotion * 4, 7))
@@ -2393,11 +2280,11 @@ void TIA::pokeHMBL(uInt8 value, Int32 clock)
 // Most of the ideas in these methods come from MESS.
 // (used with permission from Wilbert Pol)
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-inline void TIA::applyActiveHMOVEMotion(int hpos, Int16& pos, Int32 motionClock)
+inline void TIA::applyActiveHMOVEMotion(int hpos, int16_t& pos, int32_t motionClock)
 {
   if(hpos < MIN(myCurrentHMOVEPos + 6 + 16 * 4, 7))
   {
-    Int32 decrements_passed = (hpos - (myCurrentHMOVEPos + 4)) >> 2;
+    int32_t decrements_passed = (hpos - (myCurrentHMOVEPos + 4)) >> 2;
     pos += 8;
     if((motionClock - decrements_passed) > 0)
     {
@@ -2408,14 +2295,14 @@ inline void TIA::applyActiveHMOVEMotion(int hpos, Int16& pos, Int32 motionClock)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-inline void TIA::applyPreviousHMOVEMotion(int hpos, Int16& pos, uInt8 motion)
+inline void TIA::applyPreviousHMOVEMotion(int hpos, int16_t& pos, uint8_t motion)
 {
   if(myPreviousHMOVEPos != 0x7FFFFFFF)
   {
-    uInt8 motclk = (motion ^ 0x80) >> 4;
+    uint8_t motclk = (motion ^ 0x80) >> 4;
     if(hpos <= myPreviousHMOVEPos - 228 + 5 + motclk * 4)
     {
-      uInt8 motclk_passed = (hpos - (myPreviousHMOVEPos - 228 + 6)) >> 2;
+      uint8_t motclk_passed = (hpos - (myPreviousHMOVEPos - 228 + 6)) >> 2;
       pos -= (motclk - motclk_passed);
     }
   }
@@ -2427,12 +2314,10 @@ TIA::TIA(const TIA& c)
     mySound(c.mySound),
     mySettings(c.mySettings)
 {
-  assert(false);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 TIA& TIA::operator = (const TIA&)
 {
-  assert(false);
   return *this;
 }

@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll
-//  SS  SS   tt           ll   ll
-//  SS     tttttt  eeee   ll   ll   aaaa
+//   SSSS    tt          lll  lll       
+//  SS  SS   tt           ll   ll        
+//  SS     tttttt  eeee   ll   ll   aaaa 
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -25,17 +25,14 @@ class System;
 
 #include "bspf.hxx"
 #include "Cart.hxx"
-#ifdef DEBUGGER_SUPPORT
-  #include "CartARWidget.hxx"
-#endif
 
 /**
-  This is the cartridge class for Arcadia (aka Starpath) Supercharger
-  games.  Christopher Salomon provided most of the technical details
+  This is the cartridge class for Arcadia (aka Starpath) Supercharger 
+  games.  Christopher Salomon provided most of the technical details 
   used in creating this class.  A good description of the Supercharger
   is provided in the Cuttle Cart's manual.
 
-  The Supercharger has four 2K banks.  There are three banks of RAM
+  The Supercharger has four 2K banks.  There are three banks of RAM 
   and one bank of ROM.  All 6K of the RAM can be read and written.
 
   @author  Bradford W. Mott
@@ -53,7 +50,7 @@ class CartridgeAR : public Cartridge
       @param size      The size of the ROM image
       @param settings  A reference to the various settings (read-only)
     */
-    CartridgeAR(const uInt8* image, uInt32 size, const Settings& settings);
+    CartridgeAR(const uint8_t* image, uint32_t size, const Settings& settings);
 
     /**
       Destructor
@@ -86,17 +83,17 @@ class CartridgeAR : public Cartridge
 
       @param bank The bank that should be installed in the system
     */
-    bool bank(uInt16 bank);
+    bool bank(uint16_t bank);
 
     /**
       Get the current bank.
     */
-    uInt16 bank() const;
+    uint16_t bank() const;
 
     /**
       Query the number of banks supported by the cartridge.
     */
-    uInt16 bankCount() const;
+    uint16_t bankCount() const;
 
     /**
       Patch the cartridge ROM.
@@ -105,7 +102,7 @@ class CartridgeAR : public Cartridge
       @param value    The value to place into the address
       @return    Success or failure of the patch operation
     */
-    bool patch(uInt16 address, uInt8 value);
+    bool patch(uint16_t address, uint8_t value);
 
     /**
       Access the internal ROM image for this cartridge.
@@ -113,7 +110,7 @@ class CartridgeAR : public Cartridge
       @param size  Set to the size of the internal ROM image data
       @return  A pointer to the internal ROM image data
     */
-    const uInt8* getImage(int& size) const;
+    const uint8_t* getImage(int& size) const;
 
     /**
       Save the current state of this cart to the given Serializer.
@@ -138,25 +135,13 @@ class CartridgeAR : public Cartridge
     */
     string name() const { return "CartridgeAR"; }
 
-  #ifdef DEBUGGER_SUPPORT
-    /**
-      Get debugger widget responsible for accessing the inner workings
-      of the cart.
-    */
-    CartDebugWidget* debugWidget(GuiObject* boss, const GUI::Font& lfont,
-        const GUI::Font& nfont, int x, int y, int w, int h)
-    {
-      return new CartridgeARWidget(boss, lfont, nfont, x, y, w, h, *this);
-    }
-  #endif
-
   public:
     /**
       Get the byte at the specified address
 
       @return The byte at the specified address
     */
-    uInt8 peek(uInt16 address);
+    uint8_t peek(uint16_t address);
 
     /**
       Change the byte at the specified address to the given value
@@ -165,26 +150,17 @@ class CartridgeAR : public Cartridge
       @param value The value to be stored at the address
       @return  True if the poke changed the device address space, else false
     */
-    bool poke(uInt16 address, uInt8 value);
+    bool poke(uint16_t address, uint8_t value);
 
   private:
-    /**
-      Query/change the given address type to use the given disassembly flags
-
-      @param address The address to modify
-      @param flags A bitfield of DisasmType directives for the given address
-    */
-    uInt8 getAccessFlags(uInt16 address);
-    void setAccessFlags(uInt16 address, uInt8 flags);
-
     // Handle a change to the bank configuration
-    bool bankConfiguration(uInt8 configuration);
+    bool bankConfiguration(uint8_t configuration);
 
     // Compute the sum of the array of bytes
-    uInt8 checksum(uInt8* s, uInt16 length);
+    uint8_t checksum(uint8_t* s, uint16_t length);
 
     // Load the specified load into SC RAM
-    void loadIntoRAM(uInt8 load);
+    void loadIntoRAM(uint8_t load);
 
     // Sets up a "dummy" BIOS ROM in the ROM bank of the cartridge
     void initializeROM();
@@ -194,22 +170,22 @@ class CartridgeAR : public Cartridge
     M6502* my6502;
 
     // Indicates the offset within the image for the corresponding bank
-    uInt32 myImageOffset[2];
+    uint32_t myImageOffset[2];
 
     // The 6K of RAM and 2K of ROM contained in the Supercharger
-    uInt8 myImage[8192];
+    uint8_t myImage[8192];
 
     // The 256 byte header for the current 8448 byte load
-    uInt8 myHeader[256];
+    uint8_t myHeader[256];
 
     // Size of the ROM image
-    uInt32 mySize;
+    uint32_t mySize;
 
-    // All of the 8448 byte loads associated with the game
-    uInt8* myLoadImages;
+    // All of the 8448 byte loads associated with the game 
+    uint8_t* myLoadImages;
 
     // Indicates how many 8448 loads there are
-    uInt8 myNumberOfLoadImages;
+    uint8_t myNumberOfLoadImages;
 
     // Indicates if the RAM is write enabled
     bool myWriteEnabled;
@@ -218,25 +194,25 @@ class CartridgeAR : public Cartridge
     bool myPower;
 
     // Indicates when the power was last turned on
-    Int32 myPowerRomCycle;
+    int32_t myPowerRomCycle;
 
     // Data hold register used for writing
-    uInt8 myDataHoldRegister;
+    uint8_t myDataHoldRegister;
 
     // Indicates number of distinct accesses when data hold register was set
-    uInt32 myNumberOfDistinctAccesses;
+    uint32_t myNumberOfDistinctAccesses;
 
     // Indicates if a write is pending or not
     bool myWritePending;
 
-    uInt16 myCurrentBank;
+    uint16_t myCurrentBank;
 
     // Fake SC-BIOS code to simulate the Supercharger load bars
-    static uInt8 ourDummyROMCode[294];
+    static uint8_t ourDummyROMCode[294];
 
     // Default 256-byte header to use if one isn't included in the ROM
     // This data comes from z26
-    static const uInt8 ourDefaultHeader[256];
+    static const uint8_t ourDefaultHeader[256];
 };
 
 #endif

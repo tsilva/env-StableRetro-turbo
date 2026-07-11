@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll
-//  SS  SS   tt           ll   ll
-//  SS     tttttt  eeee   ll   ll   aaaa
+//   SSSS    tt          lll  lll       
+//  SS  SS   tt           ll   ll        
+//  SS     tttttt  eeee   ll   ll   aaaa 
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -49,24 +49,6 @@ class Settings
 
   public:
     /**
-      This method should be called to load the arguments from the commandline.
-
-      @return Name of the ROM to load, otherwise empty string
-    */
-    string loadCommandLine(int argc, char** argv);
-
-    /**
-      This method should be called *after* settings have been read,
-      to validate (and change, if necessary) any improper settings.
-    */
-    void validate();
-
-    /**
-      This method should be called to display usage information.
-    */
-    void usage();
-
-    /**
       Get the value assigned to the specified key.
 
       @param key The key of the setting to lookup
@@ -89,10 +71,8 @@ class Settings
       @return The specific type value of the setting
     */
     int getInt(const string& key) const     { return value(key).toInt();   }
-    float getFloat(const string& key) const { return value(key).toFloat(); }
     bool getBool(const string& key) const   { return value(key).toBool();  }
     const string& getString(const string& key) const { return value(key).toString(); }
-    const GUI::Size getSize(const string& key) const { return value(key).toSize();   }
 
   private:
     // Copy constructor isn't supported by this class so make it private
@@ -100,14 +80,6 @@ class Settings
 
     // Assignment operator isn't supported by this class so make it private
     Settings& operator = (const Settings&);
-
-    // Trim leading and following whitespace from a string
-    static string trim(string& str)
-    {
-      string::size_type first = str.find_first_not_of(' ');
-      return (first == string::npos) ? EmptyString :
-              str.substr(first, str.find_last_not_of(' ')-first+1);
-    }
 
   protected:
     // The parent OSystem object
@@ -121,11 +93,6 @@ class Settings
       Variant initialValue;
     };
     typedef Common::Array<Setting> SettingsArray;
-
-    const SettingsArray& getInternalSettings() const
-      { return myInternalSettings; }
-    const SettingsArray& getExternalSettings() const
-      { return myExternalSettings; }
 
     /** Get position in specified array of 'key' */
     int getInternalPos(const string& key) const;
