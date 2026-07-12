@@ -1653,6 +1653,10 @@ public:
 		const bool indexedVideoEnabled = !envFlagEnabled("STABLE_RETRO_DISABLE_INDEXED_VIDEO");
 		const bool atariIndexedVideoEnabled =
 			!envFlagEnabled("STABLE_RETRO_DISABLE_ATARI_INDEXED_VIDEO");
+		// Indexed video bypasses the CPU framebuffer, so only enable it when the
+		// downstream area plan consumes indexed frames directly.
+		const bool grayscaleAreaPlanEligible =
+			m_grayscale && m_algorithm == "area" && !cropMaskHasAny(m_cropMask);
 		m_slots.reserve(numEnvs);
 		for (size_t i = 0; i < numEnvs; ++i) {
 			auto slot = std::make_unique<Slot>(romPath, dataPath, scenarioPath, constructionInitialState, i);
@@ -1661,8 +1665,7 @@ public:
 			const bool atariCore = slot->emulator->m_re.core() == "Atari2600";
 			if (
 				indexedVideoEnabled &&
-				m_grayscale &&
-				m_algorithm == "area" &&
+				grayscaleAreaPlanEligible &&
 				(!atariCore || atariIndexedVideoEnabled)
 			) {
 				slot->usesIndexedVideo = slot->emulator->m_re.setIndexedVideoEnabled(true);
@@ -1692,7 +1695,7 @@ public:
 				m_singleObsSize = static_cast<size_t>(m_obsHeight) * static_cast<size_t>(m_obsWidth) * static_cast<size_t>(m_obsChannels);
 				m_stackedChannels = m_obsChannels * m_frameStack;
 				m_stackedObsSize = static_cast<size_t>(m_obsHeight) * static_cast<size_t>(m_obsWidth) * static_cast<size_t>(m_stackedChannels);
-				if (m_grayscale && m_algorithm == "area" && !cropMaskHasAny(m_cropMask)) {
+				if (grayscaleAreaPlanEligible) {
 					m_grayscaleAreaPlan = buildAreaResizePlan(rawW, rawH, m_crop, m_resize);
 					m_useGrayscaleAreaPlan = true;
 				}

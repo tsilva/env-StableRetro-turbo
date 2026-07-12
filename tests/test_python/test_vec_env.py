@@ -2148,6 +2148,163 @@ def _breakout_rom_path_or_skip():
         pytest.skip("Breakout-Atari2600-v0 ROM is not imported locally")
 
 
+def _make_breakout_vec_env(**kwargs):
+    import stable_retro as retro
+    from stable_retro.vec_env import RetroVecEnv
+
+    if not _has_stella_core():
+        pytest.skip("stella core is not built")
+
+    defaults = {
+        "state": "Start",
+        "num_envs": 1,
+        "rom_path": _breakout_rom_path_or_skip(),
+        "obs_grayscale": True,
+        "frame_skip": 4,
+        "frame_stack": 4,
+        "maxpool_last_two": True,
+        "num_threads": 1,
+        "obs_copy": "copy",
+        "info_filter": "none",
+        "autoreset_mode": "Disabled",
+    }
+    defaults.update(kwargs)
+    return RetroVecEnv("Breakout-Atari2600-v0", **defaults)
+
+
+def _scalar_area_resize_grayscale(source, dst_shape):
+    src_height, src_width = source.shape
+    dst_height, dst_width = dst_shape
+    resized = np.empty(dst_shape, dtype=np.uint8)
+    for dst_y in range(dst_height):
+        src_y0 = dst_y * src_height // dst_height
+        src_y1 = max((dst_y + 1) * src_height // dst_height, src_y0 + 1)
+        src_y1 = min(src_y1, src_height)
+        for dst_x in range(dst_width):
+            src_x0 = dst_x * src_width // dst_width
+            src_x1 = max((dst_x + 1) * src_width // dst_width, src_x0 + 1)
+            src_x1 = min(src_x1, src_width)
+            region = source[src_y0:src_y1, src_x0:src_x1]
+            resized[dst_y, dst_x] = region.sum(dtype=np.uint32) // region.size
+    return resized
+
+
+@pytest.mark.parametrize("resize_algorithm", ["nearest", "area"])
+@pytest.mark.parametrize("obs_layout", ["hwc", "chw"])
+@pytest.mark.parametrize("frame_stack", [1, 4])
+def test_retro_vec_env_atari_crop_mask_observations_are_visible(
+    resize_algorithm,
+    obs_layout,
+    frame_stack,
+):
+    crop_fill = 0
+    env = _make_breakout_vec_env(
+        obs_resize=(84, 84),
+        obs_crop=(17, 0, 0, 0),
+        obs_crop_mode="mask",
+        obs_crop_fill=crop_fill,
+        obs_resize_algorithm=resize_algorithm,
+        obs_layout=obs_layout,
+        frame_stack=frame_stack,
+    )
+    try:
+        observations = [env.reset()[0]]
+        actions = np.zeros((env.num_envs, env.num_buttons), dtype=np.uint8)
+        for step in range(3):
+            actions[:, 0] = int(step == 0)
+            observations.append(env.step(actions)[0])
+
+        expected_shape = (
+            (1, 84, 84, frame_stack)
+            if obs_layout == "hwc"
+            else (1, frame_stack, 84, 84)
+        )
+        for observation in observations:
+            assert observation.shape == expected_shape
+            assert np.any(observation != crop_fill)
+        assert len({observation.tobytes() for observation in observations}) > 1
+    finally:
+        env.close()
+
+
+def test_retro_vec_env_atari_crop_mask_area_matches_scalar_reference():
+    crop_top = 17
+    crop_fill = 0
+    common = {
+        "obs_layout": "hwc",
+        "frame_skip": 1,
+        "frame_stack": 1,
+        "maxpool_last_two": False,
+    }
+    source_env = _make_breakout_vec_env(
+        obs_resize=None,
+        obs_crop=None,
+        obs_resize_algorithm="nearest",
+        **common,
+    )
+    masked_env = _make_breakout_vec_env(
+        obs_resize=(84, 84),
+        obs_crop=(crop_top, 0, 0, 0),
+        obs_crop_mode="mask",
+        obs_crop_fill=crop_fill,
+        obs_resize_algorithm="area",
+        **common,
+    )
+    unmasked_env = _make_breakout_vec_env(
+        obs_resize=(84, 84),
+        obs_crop=None,
+        obs_resize_algorithm="area",
+        **common,
+    )
+    actions = np.zeros((1, source_env.num_buttons), dtype=np.uint8)
+    try:
+        source_obs = source_env.reset()[0]
+        masked_obs = masked_env.reset()[0]
+        unmasked_obs = unmasked_env.reset()[0]
+        for step in range(4):
+            source_gray = source_obs[0, :, :, 0]
+            masked_source = source_gray.copy()
+            masked_source[:crop_top, :] = crop_fill
+            masked_reference = _scalar_area_resize_grayscale(
+                masked_source,
+                (84, 84),
+            )
+            unmasked_reference = _scalar_area_resize_grayscale(
+                source_gray,
+                (84, 84),
+            )
+            masked_gray = masked_obs[0, :, :, 0]
+            unmasked_gray = unmasked_obs[0, :, :, 0]
+
+            np.testing.assert_array_equal(masked_gray, masked_reference)
+            np.testing.assert_array_equal(unmasked_gray, unmasked_reference)
+            fully_masked_rows = sum(
+                max((dst_y + 1) * source_gray.shape[0] // 84, 1) <= crop_top
+                for dst_y in range(84)
+            )
+            assert fully_masked_rows > 0
+            np.testing.assert_array_equal(
+                masked_gray[:fully_masked_rows],
+                crop_fill,
+            )
+            np.testing.assert_array_equal(
+                masked_gray[fully_masked_rows:],
+                unmasked_gray[fully_masked_rows:],
+            )
+            assert np.any(masked_gray != crop_fill)
+
+            if step == 3:
+                break
+            actions[:, 0] = int(step == 0)
+            source_obs = source_env.step(actions)[0]
+            masked_obs = masked_env.step(actions)[0]
+            unmasked_obs = unmasked_env.step(actions)[0]
+    finally:
+        source_env.close()
+        masked_env.close()
+        unmasked_env.close()
+
+
 def test_stella_breakout_autodetects_ntsc_palette():
     if not _has_stella_core():
         pytest.skip("stella core is not built")
