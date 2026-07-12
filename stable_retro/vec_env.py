@@ -40,7 +40,7 @@ class RetroVecEnv(VectorEnv):
 
     On Stella-backed Atari environments, ``use_fire_reset=True`` presses FIRE
     for one native frame after each full-episode reset when FIRE is available,
-    then releases it before reset no-ops. This matches ALE's vector-env default.
+    then releases it before reset no-ops.
 
     Native info-transition termination is opt-in and game/config-specific.
     Pass done_on={"name": ("key", "decrease")} to terminate only lanes whose

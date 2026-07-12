@@ -85,48 +85,6 @@ def test_retro_vec_env_public_export():
     assert not hasattr(retro, "RetroVectorEnv")
 
 
-def test_atari_vec_env_public_export():
-    import stable_retro as retro
-    from stable_retro.atari_vec_env import AtariVecEnv
-
-    assert retro.AtariVecEnv is AtariVecEnv
-
-
-def test_atari_vec_env_maps_stable_retro_id_and_renders_cached_frames(monkeypatch):
-    import stable_retro.atari_vec_env as atari_module
-
-    class FakeAtariVectorEnv:
-        def __init__(self, game, **kwargs):
-            self.game = game
-            self.kwargs = kwargs
-            self.num_envs = 2
-
-        def reset(self, *, seed=None, options=None):
-            del seed, options
-            observations = np.arange(2 * 4 * 3 * 5, dtype=np.uint8).reshape(2, 4, 3, 5)
-            return observations, {}
-
-        def close(self):
-            return None
-
-    monkeypatch.setattr(
-        atari_module,
-        "_atari_vector_env_type",
-        lambda: FakeAtariVectorEnv,
-    )
-    env = atari_module.AtariVecEnv("Breakout-Atari2600-v0")
-
-    assert env.env.game == "breakout"
-    assert str(env.env.kwargs["rom_path"]).endswith(
-        "Breakout-Atari2600-v0/rom.a26"
-    )
-    env.reset()
-    frames = env.get_images()
-    assert [frame.shape for frame in frames] == [(3, 5, 3), (3, 5, 3)]
-    np.testing.assert_array_equal(frames[0][..., 0], frames[0][..., 1])
-    env.close()
-
-
 def test_retro_vec_env_imports_without_sb3():
     code = """
 import builtins

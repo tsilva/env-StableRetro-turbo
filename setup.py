@@ -262,7 +262,6 @@ setup(
     license="GPL-2.0-only",
     license_files=["LICENSE", "LICENSES.md"],
     install_requires=[
-        "ale-py-turbo==0.12.0.post1",
         "gymnasium>=1.0.0",
         "pyglet>=1.5.27,<2",
         "farama-notifications>=0.0.1",

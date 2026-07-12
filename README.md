@@ -19,8 +19,6 @@ Compared with upstream Stable Retro's single-environment `RetroEnv` API,
 
 - **⚡ RetroVecEnv**: `RetroVecEnv` provides a Gymnasium `VectorEnv`
   fast path for many emulator lanes at once.
-- **🕹️ AtariVecEnv**: Atari workloads use the specialized `ale-py-turbo`
-  backend through the same `stable_retro` package boundary.
 - **🧪 Fused native preprocessing**: RL image transforms, frame handling, and
   reward clipping can run in the native rollout path.
 - **📦 Observation ownership modes**: Callers can choose copy-safe observations
@@ -122,8 +120,8 @@ env.close()  # Release native emulator resources.
 
 ### Atari
 
-Atari support is included in the standard install through `ale-py-turbo` and
-the `stable_retro.AtariVecEnv` facade:
+Atari support is included in the standard install through the packaged Stella
+libretro core and the same `RetroEnv` / `RetroVecEnv` API used by other systems:
 
 ```bash
 pip install stable-retro-turbo
@@ -133,19 +131,21 @@ pip install stable-retro-turbo
 import stable_retro as retro
 from gymnasium.vector import AutoresetMode
 
-env = retro.AtariVecEnv(
+env = retro.RetroVecEnv(
     "Breakout-Atari2600-v0",
+    state="Start",
     num_envs=32,
     num_threads=16,
     autoreset_mode=AutoresetMode.DISABLED,
-    img_height=84,
-    img_width=84,
-    grayscale=True,
-    stack_num=4,
-    frameskip=4,
-    maxpool=True,
-    noop_max=0,
-    full_action_space=True,
+    obs_resize=(84, 84),
+    obs_grayscale=True,
+    obs_resize_algorithm="area",
+    obs_layout="chw",
+    frame_skip=4,
+    frame_stack=4,
+    maxpool_last_two=True,
+    noop_reset_max=0,
+    info_filter="none",
 )
 obs, infos = env.reset(seed=123)
 obs, rewards, terminations, truncations, infos = env.step(env.action_space.sample())
@@ -156,11 +156,9 @@ env.close()
 ```
 
 Import Atari ROMs into Stable Retro's data tree before constructing the env.
-The facade passes that canonical ROM path to `ale-py-turbo`, exposes ALE's
-discrete action space and native preprocessing, and provides lane-local masked
-reset under `AutoresetMode.DISABLED`. Atari save-state starts and Stable Retro
-scenario/button-mask semantics remain available only on the generic Stella-backed
-`RetroVecEnv` path and are not interchangeable experiment contracts.
+No separate Atari runtime or ROM registry is used. `RetroVecEnv` preserves Stable
+Retro `.state` files, scenario rewards, button-mask actions, native preprocessing,
+and lane-local masked reset under `AutoresetMode.DISABLED`.
 
 ## RetroVecEnv Parameters
 
@@ -366,9 +364,7 @@ Modal runs: full env benchmark
 
 - The import package is `stable_retro`; `retro` remains as a compatibility shim.
 - `RetroVecEnv` is the turbo-specific Gymnasium vector environment.
-- `AtariVecEnv` uses `ale-py-turbo` behind the `stable_retro` API boundary.
-- The packaged Stella core remains available through `RetroEnv` and `RetroVecEnv`
-  for explicit legacy/save-state contracts.
+- Atari uses the packaged Stella core through `RetroEnv` and `RetroVecEnv`.
 - `RetroVectorEnv` is not exposed; `RetroVecEnv` is the public native vector API.
 - Source builds and CI cover Python `3.11` through `3.14`; the repo-local
   deterministic release helper publishes `cp311`, `cp312`, `cp313`, and `cp314`
