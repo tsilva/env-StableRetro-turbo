@@ -1092,6 +1092,7 @@ def test_retro_vec_env_accepts_retro_env_keyword_shape(tmp_path):
         obs_copy="safe_view",
         maxpool_last_two=True,
         noop_reset_max=0,
+        use_fire_reset=False,
         sticky_action_prob=0.0,
         info_filter="terminal",
     )
@@ -2170,6 +2171,68 @@ def _make_breakout_vec_env(**kwargs):
     }
     defaults.update(kwargs)
     return RetroVecEnv("Breakout-Atari2600-v0", **defaults)
+
+
+def test_retro_vec_env_atari_fire_reset_matches_one_manual_fire_step():
+    no_fire_env = _make_breakout_vec_env(
+        frame_skip=1,
+        frame_stack=1,
+        maxpool_last_two=False,
+        noop_reset_max=0,
+        use_fire_reset=False,
+    )
+    fire_env = _make_breakout_vec_env(
+        frame_skip=1,
+        frame_stack=1,
+        maxpool_last_two=False,
+        noop_reset_max=0,
+        use_fire_reset=True,
+    )
+    try:
+        no_fire_env.reset(seed=123)
+        fire_observation = fire_env.reset(seed=123)[0]
+        fire_action = np.zeros((1, no_fire_env.num_buttons), dtype=np.uint8)
+        fire_action[:, 0] = 1
+        manual_fire_observation = no_fire_env.step(fire_action)[0]
+
+        np.testing.assert_array_equal(fire_observation, manual_fire_observation)
+    finally:
+        no_fire_env.close()
+        fire_env.close()
+
+
+def test_retro_vec_env_atari_fire_reset_respects_reset_mask():
+    env = _make_breakout_vec_env(
+        num_envs=2,
+        num_threads=2,
+        frame_skip=1,
+        frame_stack=1,
+        maxpool_last_two=False,
+        noop_reset_max=0,
+        use_fire_reset=True,
+    )
+    control = _make_breakout_vec_env(
+        frame_skip=1,
+        frame_stack=1,
+        maxpool_last_two=False,
+        noop_reset_max=0,
+        use_fire_reset=True,
+    )
+    try:
+        env.reset(seed=[123, 456])
+        noops = np.zeros((2, env.num_buttons), dtype=np.uint8)
+        before = env.step(noops)[0].copy()
+        expected_reset = control.reset(seed=789)[0][0]
+        reset_observation = env.reset(
+            seed=[789, 1011],
+            options={"reset_mask": np.array([True, False])},
+        )[0]
+
+        np.testing.assert_array_equal(reset_observation[1], before[1])
+        np.testing.assert_array_equal(reset_observation[0], expected_reset)
+    finally:
+        env.close()
+        control.close()
 
 
 def _scalar_area_resize_grayscale(source, dst_shape):

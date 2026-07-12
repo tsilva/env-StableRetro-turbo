@@ -1559,6 +1559,7 @@ public:
 		const string& algorithm,
 		bool maxpoolLastTwo,
 		int noopResetMax,
+		int fireResetButton,
 		double stickyActionProb,
 		bool filterActions,
 		bool rewardClip,
@@ -1587,6 +1588,7 @@ public:
 		, m_algorithm(algorithm)
 		, m_maxpoolLastTwo(maxpoolLastTwo)
 		, m_noopResetMax(noopResetMax)
+		, m_fireResetButton(fireResetButton)
 		, m_stickyActionProb(stickyActionProb)
 		, m_filterActions(filterActions)
 		, m_rewardClip(rewardClip)
@@ -1611,6 +1613,9 @@ public:
 		}
 		if (noopResetMax < 0) {
 			throw std::runtime_error("noop_reset_max must be non-negative");
+		}
+		if (fireResetButton < -1 || fireResetButton >= numButtons) {
+			throw std::runtime_error("fire_reset_button must be -1 or a valid button index");
 		}
 		if (stickyActionProb < 0.0 || stickyActionProb > 1.0) {
 			throw std::runtime_error("sticky_action_prob must be between 0.0 and 1.0");
@@ -2752,9 +2757,17 @@ private:
 		slot.emulator->m_re.run();
 		slot.data.reset();
 		slot.data.updateRam();
+		const bool useFireReset = m_fireResetButton >= 0;
+		if (useFireReset) {
+			slot.emulator->m_re.setKey(0, m_fireResetButton, true);
+			slot.emulator->m_re.run();
+			slot.emulator->m_re.setKey(0, m_fireResetButton, false);
+			slot.data.m_data.updateRam();
+			slot.data.m_scen.update(1);
+		}
 		if (m_noopResetMax > 0) {
 			std::uniform_int_distribution<int> noopDist(0, m_noopResetMax);
-			const int noopCount = noopDist(slot.rng);
+			const int noopCount = std::max(0, noopDist(slot.rng) - static_cast<int>(useFireReset));
 			for (int i = 0; i < noopCount; ++i) {
 				slot.emulator->m_re.run();
 				slot.data.m_data.updateRam();
@@ -3114,6 +3127,7 @@ private:
 	string m_algorithm;
 	bool m_maxpoolLastTwo = false;
 	int m_noopResetMax = 0;
+	int m_fireResetButton = -1;
 	double m_stickyActionProb = 0.0;
 	bool m_filterActions = false;
 	bool m_rewardClip = false;
@@ -3396,6 +3410,7 @@ PYBIND11_MODULE(_retro, m) {
 				const string&,
 				bool,
 				int,
+				int,
 				double,
 				bool,
 				bool,
@@ -3426,6 +3441,7 @@ PYBIND11_MODULE(_retro, m) {
 			py::arg("algorithm"),
 			py::arg("maxpool_last_two"),
 			py::arg("noop_reset_max"),
+			py::arg("fire_reset_button"),
 			py::arg("sticky_action_prob"),
 			py::arg("filter_actions"),
 			py::arg("reward_clip"),

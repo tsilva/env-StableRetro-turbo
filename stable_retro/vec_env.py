@@ -38,6 +38,10 @@ class RetroVecEnv(VectorEnv):
     Use ``set_state_policy()`` with the same shapes to update the reset policy
     used by future resets and autoresets.
 
+    On Stella-backed Atari environments, ``use_fire_reset=True`` presses FIRE
+    for one native frame after each full-episode reset when FIRE is available,
+    then releases it before reset no-ops. This matches ALE's vector-env default.
+
     Native info-transition termination is opt-in and game/config-specific.
     Pass done_on={"name": ("key", "decrease")} to terminate only lanes whose
     post-reset baseline changes as requested. In same-step mode those lanes are
@@ -83,6 +87,7 @@ class RetroVecEnv(VectorEnv):
         frame_stack=1,
         maxpool_last_two=False,
         noop_reset_max=0,
+        use_fire_reset=True,
         sticky_action_prob=0.0,
         reward_clip=False,
         info_filter="all",
@@ -107,6 +112,7 @@ class RetroVecEnv(VectorEnv):
             noop_reset_max,
             "noop_reset_max",
         )
+        use_fire_reset = bool(use_fire_reset)
         sticky_action_prob = RetroEnv._normalize_probability(
             sticky_action_prob,
             "sticky_action_prob",
@@ -124,6 +130,7 @@ class RetroVecEnv(VectorEnv):
         self._game = game
         self._inttype = inttype
         self._rom_path = rom_path
+        self.use_fire_reset = use_fire_reset
 
         info_filter_mode, info_filter_keys = self._normalize_info_filter(info_filter)
         self._info_filter_mode = info_filter_mode
@@ -224,6 +231,7 @@ class RetroVecEnv(VectorEnv):
                 num_envs,
             )
             self.num_buttons = template.num_buttons
+            fire_button = self._fire_reset_button(template, use_fire_reset)
             self.button_combos = [
                 [int(action) for action in combo] for combo in template.button_combos
             ]
@@ -275,6 +283,7 @@ class RetroVecEnv(VectorEnv):
             str(env_kwargs.get("obs_resize_algorithm", "nearest")),
             bool(maxpool_last_two),
             noop_reset_max,
+            fire_button,
             sticky_action_prob,
             bool(self._filter_actions),
             bool(reward_clip),
@@ -297,6 +306,26 @@ class RetroVecEnv(VectorEnv):
         self._active_state_indices = self.native.active_state_indices()
         self._active_state_indices.setflags(write=False)
         self._active_state_names = [None for _ in range(self.num_envs)]
+
+    @staticmethod
+    def _fire_reset_button(template, enabled):
+        """Return the Stella FIRE button index, or -1 when unavailable."""
+        if not enabled or template.system != "Atari2600":
+            return -1
+        try:
+            fire_button = template.buttons.index("BUTTON")
+        except ValueError:
+            return -1
+        if template.use_restricted_actions == Actions.ALL:
+            return fire_button
+        fire_mask = 1 << fire_button
+        if any(
+            int(action) & fire_mask
+            for combo in template.button_combos
+            for action in combo
+        ):
+            return fire_button
+        return -1
 
     @staticmethod
     def _normalize_autoreset_mode(value):
