@@ -387,7 +387,7 @@ class TIA : public Device
     // Pointer to the previous frame buffer
     uint8_t* myPreviousFrameBuffer;
 
-    bool myRenderPixels{true};
+    bool myRenderPixels;
 
     // Pointer to the next pixel that will be drawn in the current frame buffer
     uint8_t* myFramePointer;

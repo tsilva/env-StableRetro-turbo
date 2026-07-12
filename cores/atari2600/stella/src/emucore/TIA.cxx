@@ -42,6 +42,7 @@ TIA::TIA(Console& console, Sound& sound, Settings& settings)
   : myConsole(console),
     mySound(sound),
     mySettings(settings),
+    myRenderPixels(true),
     myFrameYStart(34),
     myFrameHeight(210),
     myMaximumNumberOfScanlines(262),
