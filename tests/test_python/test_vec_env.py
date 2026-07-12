@@ -2241,6 +2241,64 @@ def test_retro_vec_env_atari_render_skip_preserves_control_trace(tmp_path):
             assert left_infos == right_infos
 
 
+def test_retro_vec_env_atari_repeated_state_resets_are_deterministic(tmp_path):
+    if not _has_stella_core():
+        pytest.skip("stella core is not built")
+
+    import stable_retro as retro
+    from stable_retro.vec_env import RetroVecEnv
+
+    root = Path(__file__).resolve().parents[1]
+    rom_path = root / "roms" / "automaton.a26"
+    emulator = retro.RetroEmulator(str(rom_path))
+    state_path = tmp_path / "Start.state"
+    state_path.write_bytes(gzip.compress(emulator.get_state(), mtime=0))
+    del emulator
+
+    empty_info = _empty_info_path(tmp_path)
+    env = RetroVecEnv(
+        "Breakout-Atari2600-v0",
+        state=str(state_path),
+        num_envs=2,
+        rom_path=str(rom_path),
+        info=str(empty_info),
+        scenario=str(empty_info),
+        obs_resize=(84, 84),
+        obs_grayscale=True,
+        obs_resize_algorithm="area",
+        frame_skip=4,
+        frame_stack=4,
+        maxpool_last_two=True,
+        num_threads=2,
+        obs_copy="copy",
+        info_filter="none",
+        autoreset_mode="Disabled",
+    )
+    actions = np.zeros((env.num_envs, env.num_buttons), dtype=np.uint8)
+    reset_mask = np.ones(env.num_envs, dtype=np.bool_)
+    baseline = None
+    try:
+        for _ in range(10):
+            obs, _ = env.reset(options={"reset_mask": reset_mask})
+            trace = [obs.tobytes()]
+            for _ in range(8):
+                obs, rewards, terminated, truncated, _ = env.step(actions)
+                trace.extend(
+                    (
+                        obs.tobytes(),
+                        rewards.tobytes(),
+                        terminated.tobytes(),
+                        truncated.tobytes(),
+                    ),
+                )
+            if baseline is None:
+                baseline = trace
+            else:
+                assert trace == baseline
+    finally:
+        env.close()
+
+
 def _as_hwc_observation(obs, obs_layout):
     obs = np.asarray(obs)
     if obs_layout == "chw":

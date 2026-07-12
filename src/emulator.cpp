@@ -402,16 +402,32 @@ bool Emulator::unserialize(const void* data, size_t size) {
 		retro_system_info systemInfo;
 		m_retro_get_system_info(&systemInfo);
 		if (!strcmp(systemInfo.library_name, "Stella")) {
-			reset();
-		}
-
-
-			ensureInitializedForSerialization();
-			bool ok = m_retro_unserialize(data, size);
-			if (ok && (m_serializationQuirks & RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE)) {
-				m_needsInitFrame = false;
+			// Stella's legacy state omits device-local transient fields, so rebuild
+			// its Console before applying the state. Keep the already-loaded shared
+			// library and ROM bytes: unloading/re-copying/reloading the dylib for
+			// every lane reset is unnecessary and stalls the full vector batch.
+			m_retro_unload_game();
+			if (!m_retro_load_game(&m_gameInfo)) {
+				return false;
 			}
-			return ok;
+			if (m_stable_retro_set_audio_enabled) {
+				m_stable_retro_set_audio_enabled(m_audioEnabled);
+			}
+			if (m_addressSpace) {
+				m_addressSpace->reset();
+				m_addressSpace->addBlock(
+					Retro::ramBase(m_core),
+					m_retro_get_memory_size(RETRO_MEMORY_SYSTEM_RAM),
+					m_retro_get_memory_data(RETRO_MEMORY_SYSTEM_RAM)
+				);
+			}
+		}
+		ensureInitializedForSerialization();
+		bool ok = m_retro_unserialize(data, size);
+		if (ok && (m_serializationQuirks & RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE)) {
+			m_needsInitFrame = false;
+		}
+		return ok;
 	} catch (...) {
 		return false;
 	}
@@ -492,6 +508,7 @@ bool Emulator::loadCore(const string& corePath) {
 	m_stable_retro_set_audio_enabled = reinterpret_cast<void (*)(bool)>(GETSYM(m_coreHandle, "stable_retro_set_audio_enabled"));
 	m_stable_retro_set_indexed_video = reinterpret_cast<void (*)(bool)>(GETSYM(m_coreHandle, "stable_retro_set_indexed_video"));
 	m_stable_retro_get_indexed_video = reinterpret_cast<bool (*)(const uint8_t**, const uint16_t**, unsigned*, unsigned*, size_t*, bool*, int*)>(GETSYM(m_coreHandle, "stable_retro_get_indexed_video"));
+	m_stable_retro_get_previous_indexed_video = reinterpret_cast<bool (*)(const uint8_t**)>(GETSYM(m_coreHandle, "stable_retro_get_previous_indexed_video"));
 
 	// The default according to the docs
 	m_imgDepth = 15;
@@ -544,7 +561,8 @@ bool Emulator::getIndexedVideoFrame(IndexedVideoFrame& frame) {
 	if (!m_stable_retro_get_indexed_video) {
 		return false;
 	}
-	return m_stable_retro_get_indexed_video(
+	frame.previousData = nullptr;
+	const bool valid = m_stable_retro_get_indexed_video(
 		&frame.data,
 		&frame.palette,
 		&frame.width,
@@ -553,6 +571,10 @@ bool Emulator::getIndexedVideoFrame(IndexedVideoFrame& frame) {
 		&frame.rawPalette,
 		&frame.deemp
 	) && frame.data && frame.palette && frame.width && frame.height && frame.pitch;
+	if (valid && m_stable_retro_get_previous_indexed_video) {
+		m_stable_retro_get_previous_indexed_video(&frame.previousData);
+	}
+	return valid;
 }
 
 double Emulator::getAspectRatio() const {

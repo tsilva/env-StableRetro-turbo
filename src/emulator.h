@@ -31,6 +31,7 @@ const int MAX_PLAYERS = 2;
 
 struct IndexedVideoFrame {
 	const uint8_t* data = nullptr;
+	const uint8_t* previousData = nullptr;
 	const uint16_t* palette = nullptr;
 	unsigned width = 0;
 	unsigned height = 0;
@@ -155,6 +156,7 @@ private:
 	void (*m_stable_retro_set_audio_enabled)(bool) = nullptr;
 	void (*m_stable_retro_set_indexed_video)(bool) = nullptr;
 	bool (*m_stable_retro_get_indexed_video)(const uint8_t**, const uint16_t**, unsigned*, unsigned*, size_t*, bool*, int*) = nullptr;
+	bool (*m_stable_retro_get_previous_indexed_video)(const uint8_t**) = nullptr;
 
 	bool m_romLoaded = false;
 	std::string m_core;

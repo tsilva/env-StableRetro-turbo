@@ -1462,6 +1462,20 @@ bool retro_unserialize(const void *data, size_t size)
       state.set(s);
       if(!stateManager.loadState(state))
          return false;
+
+      /* TIA savestates do not include the two display buffers. The current
+       * Stable Retro trailer restores the visible current frame below; clear
+       * the previous frame so an in-place load has the same framebuffer
+       * history as a freshly constructed core. This is especially important
+       * now that native max-pooling reads Stella's previous buffer directly. */
+      TIA& tia = console->tia();
+      uint32_t visiblePixels = tia.width() * tia.height();
+      if(visiblePixels > SV_FRAME_SIZE)
+         visiblePixels = SV_FRAME_SIZE;
+      memset(tia.previousFrameBuffer(), 0, visiblePixels);
+      if(frameBufferPrev)
+         memset(frameBufferPrev, 0, FRAME_BUFFER_SIZE);
+      currentPalette32 = NULL;
    }
    catch(...)
    {
@@ -1908,4 +1922,14 @@ extern "C" RETRO_API bool stable_retro_get_indexed_video(
    *raw_palette = false;
    *deemp = 0;
    return true;
+}
+
+extern "C" RETRO_API bool stable_retro_get_previous_indexed_video(
+      const uint8_t **data)
+{
+   if(!stable_retro_indexed_video_enabled || !console || !data)
+      return false;
+
+   *data = console->tia().previousFrameBuffer();
+   return *data != NULL;
 }

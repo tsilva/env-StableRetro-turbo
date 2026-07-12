@@ -1322,6 +1322,23 @@ void processAreaResizePlanToBuffer(
 	PixelReader&& readPixel,
 	uint8_t* dst
 ) {
+	auto exactAverage = [](uint32_t sum, uint32_t count) -> uint8_t {
+		// Area downscaling repeatedly uses a small set of cell sizes. Keeping
+		// those divisors compile-time constants lets release compilers replace
+		// integer division with shifts or multiply-high sequences while
+		// preserving the exact floor(sum / count) result.
+		switch (count) {
+		case 1: return static_cast<uint8_t>(sum);
+		case 2: return static_cast<uint8_t>(sum / 2);
+		case 3: return static_cast<uint8_t>(sum / 3);
+		case 4: return static_cast<uint8_t>(sum / 4);
+		case 5: return static_cast<uint8_t>(sum / 5);
+		case 6: return static_cast<uint8_t>(sum / 6);
+		case 7: return static_cast<uint8_t>(sum / 7);
+		case 8: return static_cast<uint8_t>(sum / 8);
+		default: return static_cast<uint8_t>(sum / count);
+		}
+	};
 	for (size_t dy = 0; dy < plan.rows.size(); ++dy) {
 		const AreaResizeSpan& rowSpan = plan.rows[dy];
 		for (size_t dx = 0; dx < plan.columns.size(); ++dx) {
@@ -1335,7 +1352,7 @@ void processAreaResizePlanToBuffer(
 			const uint32_t count = static_cast<uint32_t>(
 				(rowSpan.end - rowSpan.begin) * (columnSpan.end - columnSpan.begin)
 			);
-			dst[dy * plan.columns.size() + dx] = static_cast<uint8_t>(sum / count);
+			dst[dy * plan.columns.size() + dx] = exactAverage(sum, count);
 		}
 	}
 }
@@ -2837,6 +2854,7 @@ private:
 		bool done = false;
 		float totalReward = 0.0f;
 		bool sawFrame = false;
+		bool useIndexedFramePair = false;
 		std::vector<uint8_t> prevRgb;
 		std::vector<uint8_t> currRgb;
 		std::vector<uint8_t> preSkipState;
@@ -2876,19 +2894,26 @@ private:
 					if (!done && i < m_frameSkip - 1) {
 						IndexedVideoFrame indexedFrame;
 						if (slot.usesIndexedVideo && slot.emulator->m_re.getIndexedVideoFrame(indexedFrame)) {
-							slot.prevIndexed.resize(static_cast<size_t>(indexedFrame.pitch) * static_cast<size_t>(indexedFrame.height));
-							const long top = m_useGrayscaleAreaPlan ? m_grayscaleAreaPlan.rows.front().begin : 0;
-							const long bottom = m_useGrayscaleAreaPlan ? m_grayscaleAreaPlan.rows.back().end : indexedFrame.height;
-							const long left = m_useGrayscaleAreaPlan ? m_grayscaleAreaPlan.columns.front().begin : 0;
-							const long right = m_useGrayscaleAreaPlan ? m_grayscaleAreaPlan.columns.back().end : indexedFrame.width;
-							for (long row = top; row < bottom; ++row) {
-								std::memcpy(
-									slot.prevIndexed.data() + static_cast<size_t>(row) * indexedFrame.pitch + static_cast<size_t>(left),
-									indexedFrame.data + static_cast<size_t>(row) * indexedFrame.pitch + static_cast<size_t>(left),
-									static_cast<size_t>(right - left)
-								);
+							if (indexedFrame.previousData) {
+								// Stella retains both TIA framebuffers. After the final
+								// emulated frame, previousData is exactly this frame, so
+								// avoid copying it through slot.prevIndexed.
+								useIndexedFramePair = true;
+							} else {
+								slot.prevIndexed.resize(static_cast<size_t>(indexedFrame.pitch) * static_cast<size_t>(indexedFrame.height));
+								const long top = m_useGrayscaleAreaPlan ? m_grayscaleAreaPlan.rows.front().begin : 0;
+								const long bottom = m_useGrayscaleAreaPlan ? m_grayscaleAreaPlan.rows.back().end : indexedFrame.height;
+								const long left = m_useGrayscaleAreaPlan ? m_grayscaleAreaPlan.columns.front().begin : 0;
+								const long right = m_useGrayscaleAreaPlan ? m_grayscaleAreaPlan.columns.back().end : indexedFrame.width;
+								for (long row = top; row < bottom; ++row) {
+									std::memcpy(
+										slot.prevIndexed.data() + static_cast<size_t>(row) * indexedFrame.pitch + static_cast<size_t>(left),
+										indexedFrame.data + static_cast<size_t>(row) * indexedFrame.pitch + static_cast<size_t>(left),
+										static_cast<size_t>(right - left)
+									);
+								}
+								slot.hasPrevIndexed = true;
 							}
-							slot.hasPrevIndexed = true;
 						} else if (m_useGrayscaleAreaPlan) {
 							slot.emulator->readRawFrameRegion(
 								slot.prevRaw,
@@ -2921,9 +2946,12 @@ private:
 			if (m_grayscale) {
 				IndexedVideoFrame indexedFrame;
 				if (slot.usesIndexedVideo && slot.emulator->m_re.getIndexedVideoFrame(indexedFrame) && m_useGrayscaleAreaPlan) {
+					const uint8_t* maxIndexed = slot.hasPrevIndexed
+						? slot.prevIndexed.data()
+						: (useIndexedFramePair ? indexedFrame.previousData : nullptr);
 					processIndexedGrayscaleAreaPlanToBuffer(
 						indexedFrame,
-						slot.hasPrevIndexed ? slot.prevIndexed.data() : nullptr,
+						maxIndexed,
 						&slot.indexedPaletteCache,
 						m_grayscaleAreaPlan,
 						slot.singleObs.data()
