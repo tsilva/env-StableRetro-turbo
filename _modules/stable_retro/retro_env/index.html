@@ -452,6 +452,14 @@
         <span class="bp">self</span><span class="o">.</span><span class="n">em</span><span class="o">.</span><span class="n">configure_data</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">data</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">em</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
 
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">system</span> <span class="o">==</span> <span class="s2">&quot;Atari2600&quot;</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">initial_state</span><span class="p">:</span>
+            <span class="kn">from</span><span class="w"> </span><span class="nn">stable_retro.stella_state</span><span class="w"> </span><span class="kn">import</span> <span class="n">migrate_legacy_state</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">initial_state</span> <span class="o">=</span> <span class="n">migrate_legacy_state</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">em</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">initial_state</span><span class="p">,</span>
+            <span class="p">)</span>
+
         <span class="n">core</span> <span class="o">=</span> <span class="n">retro</span><span class="o">.</span><span class="n">get_system_info</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">system</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">buttons</span> <span class="o">=</span> <span class="n">core</span><span class="p">[</span><span class="s2">&quot;buttons&quot;</span><span class="p">]</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">num_buttons</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">buttons</span><span class="p">)</span>
@@ -1065,9 +1073,9 @@
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Render the current frame in human mode or return an RGB array.&quot;&quot;&quot;</span>
         <span class="n">mode</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">render_mode</span>
 
-        <span class="n">img</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">img</span>
-        <span class="k">if</span> <span class="n">img</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-            <span class="n">img</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_screen</span><span class="p">(</span><span class="n">apply_rotation</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="c1"># Observations may be cropped, resized, grayscale, or frame-stacked.</span>
+        <span class="c1"># Rendering remains a view of the emulator&#39;s raw RGB display.</span>
+        <span class="n">img</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_raw_screen</span><span class="p">(</span><span class="n">apply_rotation</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
         <span class="k">if</span> <span class="n">mode</span> <span class="o">==</span> <span class="s2">&quot;rgb_array&quot;</span><span class="p">:</span>
             <span class="k">return</span> <span class="n">img</span>
         <span class="k">elif</span> <span class="n">mode</span> <span class="o">==</span> <span class="s2">&quot;human&quot;</span><span class="p">:</span>
@@ -1107,12 +1115,8 @@
             <span class="n">blocks</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">arr</span><span class="p">)</span>
         <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span><span class="n">blocks</span><span class="p">)</span>
 
-    <span class="k">def</span><span class="w"> </span><span class="nf">get_screen</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">player</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">apply_rotation</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the current screen, optionally cropped and rotation-corrected.&quot;&quot;&quot;</span>
-        <span class="k">if</span> <span class="n">apply_rotation</span><span class="p">:</span>
-            <span class="n">native</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_native_processed_screen</span><span class="p">(</span><span class="n">player</span><span class="p">)</span>
-            <span class="k">if</span> <span class="n">native</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-                <span class="k">return</span> <span class="n">native</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_raw_screen</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">player</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">apply_rotation</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the RGB display before observation preprocessing.&quot;&quot;&quot;</span>
         <span class="n">img</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">em</span><span class="o">.</span><span class="n">get_screen</span><span class="p">()</span>
         <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">w</span><span class="p">,</span> <span class="n">h</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">crop_info</span><span class="p">(</span><span class="n">player</span><span class="p">)</span>
         <span class="k">if</span> <span class="ow">not</span> <span class="n">w</span> <span class="ow">or</span> <span class="n">x</span> <span class="o">+</span> <span class="n">w</span> <span class="o">&gt;</span> <span class="n">img</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]:</span>
@@ -1129,6 +1133,15 @@
             <span class="n">result</span> <span class="o">=</span> <span class="n">img</span><span class="p">[</span><span class="n">y</span><span class="p">:</span><span class="n">h</span><span class="p">,</span> <span class="n">x</span><span class="p">:</span><span class="n">w</span><span class="p">]</span>
         <span class="k">if</span> <span class="n">apply_rotation</span><span class="p">:</span>
             <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_apply_rotation</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">result</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_screen</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">player</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">apply_rotation</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the current preprocessed observation screen.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">apply_rotation</span><span class="p">:</span>
+            <span class="n">native</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_native_processed_screen</span><span class="p">(</span><span class="n">player</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">native</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">native</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_raw_screen</span><span class="p">(</span><span class="n">player</span><span class="o">=</span><span class="n">player</span><span class="p">,</span> <span class="n">apply_rotation</span><span class="o">=</span><span class="n">apply_rotation</span><span class="p">)</span>
         <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_apply_obs_crop</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
         <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_apply_obs_grayscale</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
         <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_resize_obs</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
@@ -1297,7 +1310,7 @@
         })()
       </script>
 
-    <script src="../../../_static/documentation_options.js?v=af30a5f0"></script>
+    <script src="../../../_static/documentation_options.js?v=f41766d2"></script>
     <script src="../../../_static/doctools.js?v=9a2dae69"></script>
     <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../../../_static/scripts/furo.js?v=7660844c"></script>
