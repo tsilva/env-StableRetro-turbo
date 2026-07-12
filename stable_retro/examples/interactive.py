@@ -149,8 +149,18 @@ class Interactive(abc.ABC):
     Base class for making gym environments interactive for human use
     """
 
-    def __init__(self, env, sync=True, tps=60, aspect_ratio=None, show_obs=False):
-        obs, _info = env.reset()
+    def __init__(
+        self,
+        env,
+        sync=True,
+        tps=60,
+        aspect_ratio=None,
+        show_obs=False,
+        reset_action=None,
+    ):
+        self._env = env
+        self._reset_action = reset_action
+        obs, _info = self._reset_environment()
         self._observation = obs
         self._image = self.get_image(obs, env)
         assert (
@@ -202,7 +212,6 @@ class Interactive(abc.ABC):
             None,
         )
 
-        self._env = env
         self._win = win
         self._closed = False
 
@@ -226,6 +235,15 @@ class Interactive(abc.ABC):
                 "Preprocessed observation",
                 self._on_close,
             )
+
+    def _reset_environment(self):
+        """Reset the environment and apply any launcher-specific start action."""
+        obs, info = self._env.reset()
+        if self._reset_action is not None:
+            obs, _reward, _terminated, _truncated, _step_info = self._env.step(
+                self._reset_action,
+            )
+        return obs, info
 
     def get_observation_image(self, obs, reset=False):
         """Return the RGB visualization for an environment observation."""
@@ -299,7 +317,7 @@ class Interactive(abc.ABC):
                     print(mess)
 
                 if done:
-                    obs, _info = self._env.reset()
+                    obs, _info = self._reset_environment()
                     self._observation = obs
                     self._image = self.get_image(obs, self._env)
                     if self._observation_window is not None:
@@ -420,7 +438,17 @@ class RetroInteractive(Interactive):
             **env_kwargs,
         )
         self._buttons = env.buttons
-        super().__init__(env=env, sync=False, tps=60, show_obs=show_obs)
+        reset_action = None
+        if env.system == "Atari2600" and "BUTTON" in env.buttons:
+            reset_action = np.zeros(env.num_buttons, dtype=np.uint8)
+            reset_action[env.buttons.index("BUTTON")] = 1
+        super().__init__(
+            env=env,
+            sync=False,
+            tps=60,
+            show_obs=show_obs,
+            reset_action=reset_action,
+        )
 
     def get_image(self, _obs, env):
         return env.render()

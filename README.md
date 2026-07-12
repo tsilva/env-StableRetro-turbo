@@ -81,6 +81,8 @@ fourth frame while the RGB game continues rendering at its normal 60 FPS.
 
 `all` opens one game per platform, sequentially. Use
 `stable-retro-turbo play --list` to see the current ROM-backed platform choices.
+For Atari games, the player presses FIRE for one frame after the initial reset
+and every later episode reset so games such as Breakout start automatically.
 
 ## Use
 
@@ -190,6 +192,7 @@ retro.RetroVecEnv(
     frame_stack=1,               # stack this many processed frames
     maxpool_last_two=False,      # max-pool the last two skipped frames
     noop_reset_max=0,            # random no-op frames after reset
+    use_fire_reset=True,         # press FIRE once after Atari resets
     sticky_action_prob=0.0,      # chance to repeat the previous lane action
     reward_clip=False,           # clip rewards in the native path
     info_filter="all",           # "all", "terminal", "none", or mode/keys mapping
@@ -219,6 +222,7 @@ one state per env lane, or a `{state_name: weight}` mapping sampled on reset.
 | `frame_stack` | `1` | Stack this many processed frames in each returned observation. |
 | `maxpool_last_two` | `False` | Max-pool the last two skipped frames before preprocessing. |
 | `noop_reset_max` | `0` | Apply up to this many random no-op frames after reset. |
+| `use_fire_reset` | `True` | Press and release FIRE for one native frame after each full-episode Atari reset when the action is available. |
 | `sticky_action_prob` | `0.0` | Probability of repeating the previous lane action instead of the requested action. |
 | `reward_clip` | `False` | Clip rewards with the same semantics as the single-env preprocessing path. |
 | `info_filter` | `"all"` | Info payload filter: `"all"`, `"terminal"`, `"none"`, or `{"mode": ..., "keys": (...)}`. |

@@ -61,6 +61,7 @@ def test_retro_vec_env_legacy_aliases_are_removed():
     from stable_retro.vec_env import RetroVecEnv
 
     params = inspect.signature(RetroVecEnv.__init__).parameters
+    assert params["use_fire_reset"].default is True
     assert not any(
         param.kind is inspect.Parameter.VAR_KEYWORD for param in params.values()
     )

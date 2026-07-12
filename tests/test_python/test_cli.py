@@ -145,6 +145,7 @@ def test_retro_interactive_resolves_aspect_ratio_after_reset(monkeypatch):
 
     class Env:
         buttons = ["A"]
+        system = "GameBoy"
         em = Emulator()
 
     def capture_init(_self, **kwargs):
@@ -165,6 +166,7 @@ def test_retro_interactive_show_obs_uses_ppo_preprocessing(monkeypatch):
 
     class Env:
         buttons = ["A"]
+        system = "Nes"
 
     monkeypatch.setattr(
         interactive_module.retro,
@@ -198,6 +200,57 @@ def test_retro_interactive_show_obs_uses_ppo_preprocessing(monkeypatch):
     }
     assert interactive_kwargs["tps"] == 60
     assert interactive_kwargs["show_obs"] is True
+    assert interactive_kwargs["reset_action"] is None
+
+
+def test_retro_interactive_autofires_after_atari_reset(monkeypatch):
+    interactive_kwargs = {}
+
+    class Env:
+        buttons = ["BUTTON", "RESET", "SELECT"]
+        num_buttons = len(buttons)
+        system = "Atari2600"
+
+    monkeypatch.setattr(interactive_module.retro, "make", lambda **_kwargs: Env())
+    monkeypatch.setattr(
+        interactive_module.Interactive,
+        "__init__",
+        lambda _self, **kwargs: interactive_kwargs.update(kwargs),
+    )
+
+    RetroInteractive(
+        game="Breakout-Atari2600-v0",
+        state="Start",
+        scenario=None,
+        record=False,
+    )
+
+    assert interactive_kwargs["reset_action"].tolist() == [1, 0, 0]
+
+
+def test_interactive_applies_reset_action_after_every_reset():
+    class Env:
+        def __init__(self):
+            self.calls = []
+
+        def reset(self):
+            self.calls.append("reset")
+            return "reset observation", {"reset": True}
+
+        def step(self, action):
+            self.calls.append(("step", action))
+            return "fired observation", 0, False, False, {"fired": True}
+
+    env = Env()
+    interactive = object.__new__(RetroInteractive)
+    interactive._env = env
+    interactive._reset_action = "fire"
+
+    observation, info = interactive._reset_environment()
+
+    assert observation == "fired observation"
+    assert info == {"reset": True}
+    assert env.calls == ["reset", ("step", "fire")]
 
 
 def test_retro_interactive_samples_observation_stack_without_slower_gameplay():
