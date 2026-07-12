@@ -20,7 +20,6 @@ static inline T _hypot(T x, T y) {
 #include "script.h"
 #include "movie.h"
 #include "movie-bk2.h"
-#include "atari.h"
 
 #include <algorithm>
 #include <array>
@@ -1698,7 +1697,7 @@ public:
 			m_emptyInfos.append(py::dict());
 		}
 		m_errors.resize(m_slots.size());
-		m_terminalObservations.resize(m_slots.size());
+		m_stepOutputs.resize(m_slots.size());
 	}
 
 	enum class InitialStateMode {
@@ -1884,26 +1883,48 @@ public:
 				}
 			}
 		}
-		py::array_t<uint8_t>& obsArray = nextObservationArray();
-		uint8_t* obsData = obsArray.mutable_data();
-		clearErrors();
-		{
-			py::gil_scoped_release release;
-			batchThreadPool(m_numThreads).parallelFor(m_slots.size(), [&](size_t index) {
-				try {
-					if (resetMask[index]) {
-						if (hasSeed[index]) m_slots[index]->rng.seed(seedValues[index]);
-						resetSlot(*m_slots[index], obsData + index * m_stackedObsSize, startIndices[index]);
-					} else {
-						writeStackedObservation(*m_slots[index], obsData + index * m_stackedObsSize);
-					}
-				} catch (const std::exception& exc) {
-					m_errors[index] = exc.what();
-				} catch (...) {
-					m_errors[index] = "unknown native vector reset error";
+			const bool hadPreviousObservation = m_hasPreviousObservation;
+			py::array_t<uint8_t>& obsArray = nextObservationArray();
+			uint8_t* obsData = obsArray.mutable_data();
+			std::vector<size_t> resetIndices;
+			resetIndices.reserve(m_slots.size());
+			for (size_t index = 0; index < resetMask.size(); ++index) {
+				if (resetMask[index]) {
+					resetIndices.push_back(index);
 				}
-			});
-		}
+			}
+			const bool partialReset = resetIndices.size() != m_slots.size();
+			if (partialReset && hadPreviousObservation && !m_unsafeZeroCopy) {
+				std::memcpy(
+					obsData,
+					m_obsArrays[m_previousObsArray].data(),
+					m_slots.size() * m_stackedObsSize
+				);
+			}
+			const size_t workCount = partialReset && !hadPreviousObservation
+				? m_slots.size()
+				: resetIndices.size();
+			clearErrors();
+			{
+				py::gil_scoped_release release;
+				batchThreadPool(m_numThreads).parallelFor(workCount, [&](size_t workIndex) {
+					const size_t index = partialReset && !hadPreviousObservation
+						? workIndex
+						: resetIndices[workIndex];
+					try {
+						if (resetMask[index]) {
+							if (hasSeed[index]) m_slots[index]->rng.seed(seedValues[index]);
+							resetSlot(*m_slots[index], obsData + index * m_stackedObsSize, startIndices[index]);
+						} else {
+							writeStackedObservation(*m_slots[index], obsData + index * m_stackedObsSize);
+						}
+					} catch (const std::exception& exc) {
+						m_errors[index] = exc.what();
+					} catch (...) {
+						m_errors[index] = "unknown native vector reset error";
+					}
+				});
+			}
 		throwFirstError(m_errors);
 		m_anyPendingReset = std::any_of(m_slots.begin(), m_slots.end(), [](const auto& slot) {
 			return slot->pendingReset;
@@ -2031,14 +2052,15 @@ public:
 		}
 		py::array_t<uint8_t>& obsArray = nextObservationArray();
 		uint8_t* obsData = obsArray.mutable_data();
-		std::vector<StepOutput> outputs(m_slots.size());
+		for (StepOutput& output : m_stepOutputs) {
+			clearStepOutput(output);
+		}
 		clearErrors();
-		clearTerminalObservations();
 		{
 			py::gil_scoped_release release;
 			batchThreadPool(m_numThreads).parallelFor(m_slots.size(), [&](size_t index) {
 				try {
-					StepOutput output;
+					StepOutput& output = m_stepOutputs[index];
 					std::vector<uint8_t>& action = m_slots[index]->action;
 					for (int key = 0; key < m_numButtons; ++key) {
 						action[static_cast<size_t>(key)] = mask(static_cast<py::ssize_t>(index), key) ? 1 : 0;
@@ -2050,7 +2072,6 @@ public:
 						output,
 						!m_noInfo && m_autoresetSameStep
 					);
-					outputs[index] = std::move(output);
 				} catch (const std::exception& exc) {
 					m_errors[index] = exc.what();
 				} catch (...) {
@@ -2061,12 +2082,11 @@ public:
 		throwFirstError(m_errors);
 		float* rewardData = m_rewardArray.mutable_data();
 		bool* doneData = m_doneArray.mutable_data();
-		for (size_t i = 0; i < outputs.size(); ++i) {
-			rewardData[i] = outputs[i].reward;
-			doneData[i] = outputs[i].done;
-			if (outputs[i].done) {
-				m_terminalObservations[i] = std::move(outputs[i].terminalObservation);
-				if (!m_autoresetSameStep) m_anyPendingReset = true;
+		for (size_t i = 0; i < m_stepOutputs.size(); ++i) {
+			rewardData[i] = m_stepOutputs[i].reward;
+			doneData[i] = m_stepOutputs[i].done;
+			if (m_stepOutputs[i].done && !m_autoresetSameStep) {
+				m_anyPendingReset = true;
 			}
 		}
 		if (m_noInfo) {
@@ -2075,25 +2095,25 @@ public:
 		py::list infos;
 		for (size_t i = 0; i < m_slots.size(); ++i) {
 			py::dict info = py::dict();
-			if (m_fullInfo || outputs[i].done) {
+			if (m_fullInfo || m_stepOutputs[i].done) {
 				info = lookupInfo(*m_slots[i]);
 			}
-			if (m_reportInitialState && (m_fullInfo || outputs[i].done)) {
-				addStartStateInfo(info, outputs[i].startStateLabel);
+			if (m_reportInitialState && (m_fullInfo || m_stepOutputs[i].done)) {
+				addStartStateInfo(info, m_stepOutputs[i].startStateLabel);
 			}
-			if (!m_terminalObservations[i].empty()) {
+			if (!m_stepOutputs[i].terminalObservation.empty()) {
 				py::array_t<uint8_t> terminal(observationShapeContainer());
-				std::memcpy(terminal.mutable_data(), m_terminalObservations[i].data(), m_stackedObsSize);
+				std::memcpy(terminal.mutable_data(), m_stepOutputs[i].terminalObservation.data(), m_stackedObsSize);
 				info["terminal_observation"] = terminal;
-				info["terminal_info"] = terminalInfoDict(outputs[i]);
+				info["terminal_info"] = terminalInfoDict(m_stepOutputs[i]);
 				py::dict resetInfo = py::dict();
-					addStartStateInfo(resetInfo, outputs[i].resetStartStateLabel);
-					info["reset_info"] = resetInfo;
-					info["TimeLimit.truncated"] = false;
-				}
-			if (!outputs[i].firedDoneOnInfoRules.empty()) {
+				addStartStateInfo(resetInfo, m_stepOutputs[i].resetStartStateLabel);
+				info["reset_info"] = resetInfo;
+				info["TimeLimit.truncated"] = false;
+			}
+			if (!m_stepOutputs[i].firedDoneOnInfoRules.empty()) {
 				py::dict doneOnInfo = py::dict();
-				for (const DoneOnInfoFiredRule& fired : outputs[i].firedDoneOnInfoRules) {
+				for (const DoneOnInfoFiredRule& fired : m_stepOutputs[i].firedDoneOnInfoRules) {
 					py::dict triggerInfo = py::dict();
 					triggerInfo["trigger"] = py::str(fired.triggerId);
 					triggerInfo["compare"] = py::str(fired.compare);
@@ -2234,10 +2254,14 @@ private:
 
 	py::array_t<uint8_t>& nextObservationArray() {
 		if (m_unsafeZeroCopy) {
+			m_previousObsArray = 0;
+			m_hasPreviousObservation = true;
 			return m_obsArrays[0];
 		}
 		const size_t index = m_nextObsArray;
 		m_nextObsArray = 1 - m_nextObsArray;
+		m_previousObsArray = 1 - index;
+		m_hasPreviousObservation = true;
 		return m_obsArrays[index];
 	}
 
@@ -2416,6 +2440,16 @@ private:
 		std::vector<uint8_t> terminalObservation;
 		std::unordered_map<std::string, int64_t> terminalInfo;
 	};
+
+	void clearStepOutput(StepOutput& output) {
+		output.reward = 0.0f;
+		output.done = false;
+		output.firedDoneOnInfoRules.clear();
+		output.startStateLabel.clear();
+		output.resetStartStateLabel.clear();
+		output.terminalObservation.clear();
+		output.terminalInfo.clear();
+	}
 
 	py::dict lookupInfo(const Slot& slot) const {
 		if (m_infoKeys.empty()) {
@@ -2813,7 +2847,7 @@ private:
 				m_maxpoolLastTwo ? (i >= m_frameSkip - 2) : (i == m_frameSkip - 1);
 			bool skippedRender = false;
 			if (m_renderSkipEnabled && !mayNeedPixels) {
-				if (preserveTerminalFrame) {
+				if (preserveTerminalFrame && !slot.usesIndexedVideo) {
 					const size_t stateSize = slot.emulator->m_re.serializeSize();
 					preSkipState.resize(stateSize);
 					if (!slot.emulator->m_re.serialize(preSkipState.data(), stateSize)) {
@@ -2830,7 +2864,7 @@ private:
 			const bool scenarioDone = slot.data.m_scen.isDone();
 			const bool doneOnInfo = checkDoneOnInfo(slot, output);
 			done = scenarioDone || doneOnInfo;
-			if (done && skippedRender && preserveTerminalFrame) {
+			if (done && skippedRender && preserveTerminalFrame && !slot.usesIndexedVideo) {
 				if (!slot.emulator->m_re.unserialize(preSkipState.data(), preSkipState.size())) {
 					throw std::runtime_error("failed to restore pre-render-skip terminal state");
 				}
@@ -2900,30 +2934,30 @@ private:
 						done ? nullptr : dst
 					);
 					output.reward = clipReward(totalReward);
-						output.done = done;
-						if (m_reportInitialState && (m_fullInfo || done)) {
-							output.startStateLabel = slot.currentStartStateLabel;
+					output.done = done;
+					if (m_reportInitialState && (m_fullInfo || done)) {
+						output.startStateLabel = slot.currentStartStateLabel;
+					}
+					if (done && captureTerminalObservation) {
+						output.terminalObservation.resize(m_stackedObsSize);
+						writeStackedObservation(slot, output.terminalObservation.data());
+						if (!m_noInfo) output.terminalInfo = captureInfo(slot);
+						if (m_autoresetSameStep) {
+							resetSlot(slot, dst);
+						} else {
+							writeStackedObservation(slot, dst);
+							slot.pendingReset = true;
 						}
-						if (done && captureTerminalObservation) {
-							output.terminalObservation.resize(m_stackedObsSize);
-							writeStackedObservation(slot, output.terminalObservation.data());
-							output.terminalInfo = captureInfo(slot);
-							if (m_autoresetSameStep) {
-								resetSlot(slot, dst);
-							} else {
-								writeStackedObservation(slot, dst);
-								slot.pendingReset = true;
-							}
-							output.resetStartStateLabel = slot.currentStartStateLabel;
-						} else if (done) {
-							output.terminalInfo = captureInfo(slot);
-							if (m_autoresetSameStep) {
-								resetSlot(slot, dst);
-							} else {
-								writeStackedObservation(slot, dst);
-								slot.pendingReset = true;
-							}
-							output.resetStartStateLabel = slot.currentStartStateLabel;
+						output.resetStartStateLabel = slot.currentStartStateLabel;
+					} else if (done) {
+						if (!m_noInfo) output.terminalInfo = captureInfo(slot);
+						if (m_autoresetSameStep) {
+							resetSlot(slot, dst);
+						} else {
+							writeStackedObservation(slot, dst);
+							slot.pendingReset = true;
+						}
+						output.resetStartStateLabel = slot.currentStartStateLabel;
 					} else if (!observationWritten) {
 						writeStackedObservation(slot, dst);
 					}
@@ -2988,30 +3022,30 @@ private:
 			done ? nullptr : dst
 		);
 		output.reward = clipReward(totalReward);
-			output.done = done;
-			if (m_reportInitialState && (m_fullInfo || done)) {
-				output.startStateLabel = slot.currentStartStateLabel;
+		output.done = done;
+		if (m_reportInitialState && (m_fullInfo || done)) {
+			output.startStateLabel = slot.currentStartStateLabel;
+		}
+		if (done && captureTerminalObservation) {
+			output.terminalObservation.resize(m_stackedObsSize);
+			writeStackedObservation(slot, output.terminalObservation.data());
+			if (!m_noInfo) output.terminalInfo = captureInfo(slot);
+			if (m_autoresetSameStep) {
+				resetSlot(slot, dst);
+			} else {
+				writeStackedObservation(slot, dst);
+				slot.pendingReset = true;
 			}
-			if (done && captureTerminalObservation) {
-				output.terminalObservation.resize(m_stackedObsSize);
-				writeStackedObservation(slot, output.terminalObservation.data());
-				output.terminalInfo = captureInfo(slot);
-				if (m_autoresetSameStep) {
-					resetSlot(slot, dst);
-				} else {
-					writeStackedObservation(slot, dst);
-					slot.pendingReset = true;
-				}
-				output.resetStartStateLabel = slot.currentStartStateLabel;
-			} else if (done) {
-				output.terminalInfo = captureInfo(slot);
-				if (m_autoresetSameStep) {
-					resetSlot(slot, dst);
-				} else {
-					writeStackedObservation(slot, dst);
-					slot.pendingReset = true;
-				}
-				output.resetStartStateLabel = slot.currentStartStateLabel;
+			output.resetStartStateLabel = slot.currentStartStateLabel;
+		} else if (done) {
+			if (!m_noInfo) output.terminalInfo = captureInfo(slot);
+			if (m_autoresetSameStep) {
+				resetSlot(slot, dst);
+			} else {
+				writeStackedObservation(slot, dst);
+				slot.pendingReset = true;
+			}
+			output.resetStartStateLabel = slot.currentStartStateLabel;
 		} else if (!observationWritten) {
 			writeStackedObservation(slot, dst);
 		}
@@ -3020,12 +3054,6 @@ private:
 	void clearErrors() {
 		for (std::string& error : m_errors) {
 			error.clear();
-		}
-	}
-
-	void clearTerminalObservations() {
-		for (std::vector<uint8_t>& terminalObservation : m_terminalObservations) {
-			terminalObservation.clear();
 		}
 	}
 
@@ -3081,11 +3109,13 @@ private:
 	AreaResizePlan m_grayscaleAreaPlan;
 	std::array<py::array_t<uint8_t>, 2> m_obsArrays;
 	size_t m_nextObsArray = 0;
+	size_t m_previousObsArray = 0;
+	bool m_hasPreviousObservation = false;
 	py::array_t<float> m_rewardArray;
 	py::array_t<bool> m_doneArray;
 	py::list m_emptyInfos;
 	std::vector<std::string> m_errors;
-	std::vector<std::vector<uint8_t>> m_terminalObservations;
+	std::vector<StepOutput> m_stepOutputs;
 };
 
 	py::tuple PyRetroEmulator::stepRepeatAndProcess(
@@ -3222,7 +3252,6 @@ py::str dataPath(py::handle hint = py::none()) {
 
 PYBIND11_MODULE(_retro, m) {
 	m.doc() = "libretro bindings";
-	bindAtariVecEnv(m);
 
 	py::class_<PyRetroEmulator>(m, "RetroEmulator")
 		.def(py::init<const string&>())

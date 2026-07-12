@@ -118,51 +118,47 @@ obs, rewards, terminations, truncations, infos = env.step(env.action_space.sampl
 env.close()  # Release native emulator resources.
 ```
 
-### Atari shared-core backend
+### Atari
 
-Atari support is included in the standard install. Stella remains available
-through `RetroEnv` and `RetroVecEnv`; use `AtariVecEnv` for the owned,
-ALE-derived shared-core path:
+Atari support is included in the standard install through the packaged Stella
+libretro core and the same `RetroEnv` / `RetroVecEnv` API used by other systems:
 
 ```bash
 pip install stable-retro-turbo
 ```
 
 ```python
-import numpy as np
 import stable_retro as retro
+from gymnasium.vector import AutoresetMode
 
-env = retro.AtariVecEnv(
+env = retro.RetroVecEnv(
     "Breakout-Atari2600-v0",
-    state=retro.State.NONE,
+    state="Start",
     num_envs=32,
     num_threads=16,
+    autoreset_mode=AutoresetMode.DISABLED,
+    obs_resize=(84, 84),
+    obs_grayscale=True,
+    obs_resize_algorithm="area",
+    obs_layout="chw",
+    frame_skip=4,
+    frame_stack=4,
+    maxpool_last_two=True,
     noop_reset_max=0,
-    use_fire_reset=False,
-    reward_clip=False,
+    info_filter="none",
 )
 obs, infos = env.reset(seed=123)
-obs, rewards, terminations, truncations, infos = env.step(
-    np.zeros(32, dtype=np.int64),
-)
+obs, rewards, terminations, truncations, infos = env.step(env.action_space.sample())
+done = terminations | truncations
+if done.any():
+    obs, infos = env.reset(options={"reset_mask": done})
 env.close()
 ```
 
-`AtariVecEnv` shares reentrant emulator code across lanes and uses native
-discrete Atari actions. The libretro/Stella backend remains available through
-`RetroEnv` and `RetroVecEnv`, including Stable Retro `.state` files and the
-button-mask action contract.
-
-The ALE-derived emulator and vector scheduler are compiled into the Stable
-Retro wheel. `ale-py` supplies the legal ROM registry, but its
-`AtariVectorEnv` is not wrapped or monkeypatched. `AtariVecEnv` supports
-`AutoresetMode.DISABLED`; a masked reset executes native reset work only for
-selected lanes and returns read-only snapshots for unselected lanes. Scalar
-seeds expand as `seed + lane_index`. Full-length seed sequences ignore
-unselected entries, and selected-length sequences map to selected lanes in
-ascending lane order. Seeds accept the full unsigned 32-bit domain used by
-NumPy `SeedSequence`; because ALE stores a non-negative signed seed, its high
-bit is deterministically folded before native reset.
+Import Atari ROMs into Stable Retro's data tree before constructing the env.
+No `ale-py` installation or ROM registry is used. `RetroVecEnv` preserves Stable
+Retro `.state` files, scenario rewards, button-mask actions, native preprocessing,
+and lane-local masked reset under `AutoresetMode.DISABLED`.
 
 ## RetroVecEnv Parameters
 
@@ -305,7 +301,7 @@ selected lanes.
 uv run python scripts/benchmark_vec_env.py --list-profiles                         # show saved benchmark profiles
 uv run python scripts/benchmark_vec_env.py --profile supermario-level1-1 --dry-run # print resolved env benchmark config
 uv run python scripts/benchmark_vec_env.py --profile supermario-level1-1           # run native/classic rollout benchmark
-uv run python scripts/benchmark_atari_alepy.py --dry-run                           # compare Stella, AtariVecEnv, and direct ale-py
+uv run python scripts/benchmark_vec_env.py --profile atari-breakout --autoreset-mode Disabled # benchmark Atari manual reset
 make benchmark-local BENCHMARK_ARGS=--dry-run GAME=MegaMan PLATFORM=Nes STATE=Level1
 make benchmark GAME=SuperMarioBros PLATFORM=Nes STATE=Level1-1
 uv run pytest tests/test_python/test_vec_env.py                                    # run focused RetroVecEnv tests
@@ -323,8 +319,8 @@ two-frame max-pool, `32` envs, and `16` native threads.
 
 Use real saved states for user-facing `RetroVecEnv` throughput numbers.
 `State.NONE` is reserved for explicit direct-ROM hot-path diagnostics and
-requires `--allow-state-none`. The Atari/ALE comparison reports both the Stella
-saved-state contract and the power-on-reset AtariVecEnv contract.
+requires `--allow-state-none`. The `atari-breakout` profile measures the real
+Stella `Start` saved-state contract through `RetroVecEnv`.
 
 `make benchmark` refreshes the local extension through `setup.py build_ext --inplace`
 only when native/build inputs changed, then runs the same benchmark entrypoint
@@ -368,7 +364,7 @@ Modal runs: full env benchmark
 
 - The import package is `stable_retro`; `retro` remains as a compatibility shim.
 - `RetroVecEnv` is the turbo-specific Gymnasium vector environment.
-- `AtariVecEnv` is the owned ALE-derived shared-core Atari vector environment; Stella remains available through `RetroEnv` and `RetroVecEnv`.
+- Atari uses the packaged Stella core through `RetroEnv` and `RetroVecEnv`; ALE and `ale-py` are not runtime dependencies.
 - `RetroVectorEnv` is not exposed; `RetroVecEnv` is the public native vector API.
 - Source builds and CI cover Python `3.11` through `3.14`; the repo-local
   deterministic release helper publishes `cp311`, `cp312`, `cp313`, and `cp314`

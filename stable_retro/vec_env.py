@@ -126,6 +126,7 @@ class RetroVecEnv(VectorEnv):
         self._rom_path = rom_path
 
         info_filter_mode, info_filter_keys = self._normalize_info_filter(info_filter)
+        self._info_filter_mode = info_filter_mode
         copy_obs, unsafe_view = self._normalize_obs_copy(obs_copy)
         obs_crop_mode = self._normalize_obs_crop_mode(obs_crop_mode)
 
@@ -1090,7 +1091,12 @@ class RetroVecEnv(VectorEnv):
         self._refresh_active_state_names(np.flatnonzero(reset_mask))
         self._reset_seeds()
         self._reset_options()
-        return self._obs(), self._list_infos_to_dict(infos)
+        vector_infos = (
+            {}
+            if getattr(self, "_info_filter_mode", "all") == "none"
+            else self._list_infos_to_dict(infos)
+        )
+        return self._obs(), vector_infos
 
     def step(self, actions):
         masks = self._actions_to_masks(actions)
@@ -1105,7 +1111,9 @@ class RetroVecEnv(VectorEnv):
             np.array(rewards, dtype=np.float32, copy=True),
             terminations,
             truncations,
-            self._step_infos_to_dict(infos),
+            {}
+            if getattr(self, "_info_filter_mode", "all") == "none"
+            else self._step_infos_to_dict(infos),
         )
 
     def close(self):

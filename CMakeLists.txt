@@ -106,19 +106,6 @@ endif()
 find_package(ZLIB REQUIRED)
 find_package(PkgConfig)
 
-# AtariVecEnv owns its ALE native backend so lifecycle fixes ship in this wheel
-# instead of depending on an unreleased ale-py binary.  Python still uses
-# ale-py's ROM registry to locate legally installed ROMs.
-set(BUILD_CPP_LIB ON)
-set(BUILD_PYTHON_LIB OFF)
-set(BUILD_VECTOR_LIB ON)
-set(BUILD_VECTOR_XLA_LIB OFF)
-set(SDL_SUPPORT OFF)
-set(STABLE_RETRO_VENDORED_ALE ON)
-include_directories("${CMAKE_SOURCE_DIR}/third-party/ale/src"
-                    "${CMAKE_BINARY_DIR}/third-party/ale")
-add_subdirectory(third-party/ale/src/ale third-party/ale)
-
 if(ENABLE_CAPNPROTO AND NOT BUILD_MANYLINUX)
   # CapnProto requires a newer kernel than manylinux1 provides
   find_package(CapnProto QUIET)
@@ -513,7 +500,7 @@ include_directories(src stable_retro third-party/pybind11/include third-party
                     third-party/gtest/googletest/include ${Python_INCLUDE_DIRS})
 
 if(BUILD_PYTHON)
-  add_library(stable_retro SHARED src/retro.cpp src/atari.cpp)
+  add_library(stable_retro SHARED src/retro.cpp)
   target_compile_features(stable_retro PRIVATE cxx_std_17)
   set_target_properties(
     stable_retro
@@ -537,8 +524,6 @@ if(BUILD_PYTHON)
   target_link_libraries(
     stable_retro
     retro-base
-    ale-lib
-    ale
     ${LUA_LINK_LIBRARY}
     ${PYBIND_LIBS}
     ${STATIC_LDFLAGS})

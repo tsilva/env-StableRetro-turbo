@@ -448,24 +448,49 @@ def _expand_round_robin_states(states, num_envs):
     return [states[index % len(states)] for index in range(num_envs)]
 
 
-def _run_vec(name, env, seconds, warmup_steps, fixed_actions=None) -> Result:
+def _step_and_reset(env, action, manual_reset):
+    result = env.step(action)
+    if manual_reset:
+        done = np.asarray(result[2], dtype=bool) | np.asarray(result[3], dtype=bool)
+        if done.any():
+            env.reset(options={"reset_mask": done})
+    return result
+
+
+def _run_vec(
+    name,
+    env,
+    seconds,
+    warmup_steps,
+    fixed_actions=None,
+    manual_reset=False,
+) -> Result:
     env.reset()
     for _ in range(warmup_steps):
-        env.step(_sample_actions(env, fixed_actions))
+        _step_and_reset(env, _sample_actions(env, fixed_actions), manual_reset)
     steps = 0
     start = time.perf_counter()
     while True:
         elapsed = time.perf_counter() - start
         if elapsed >= seconds:
             break
-        env.step(_sample_actions(env, fixed_actions))
+        _step_and_reset(env, _sample_actions(env, fixed_actions), manual_reset)
         steps += env.num_envs
     elapsed = time.perf_counter() - start
     env.close()
     return Result(name=name, steps=steps, seconds=elapsed)
 
 
-def _run_vec_steps(name, env, steps, repeats, warmup_steps, action_names, action_seed):
+def _run_vec_steps(
+    name,
+    env,
+    steps,
+    repeats,
+    warmup_steps,
+    action_names,
+    action_seed,
+    manual_reset=False,
+):
     if steps <= 0:
         raise SystemExit("--steps must be positive")
     if repeats <= 0:
@@ -475,13 +500,13 @@ def _run_vec_steps(name, env, steps, repeats, warmup_steps, action_names, action
     measured_actions = _sample_action_sequence(templates, steps, action_seed)
     env.reset()
     for action in warmup_actions:
-        env.step(action)
+        _step_and_reset(env, action, manual_reset)
 
     results = []
     for _ in range(repeats):
         start = time.perf_counter()
         for action in measured_actions:
-            env.step(action)
+            _step_and_reset(env, action, manual_reset)
         elapsed = time.perf_counter() - start
         results.append(Result(name=name, steps=steps * env.num_envs, seconds=elapsed))
     env.close()
@@ -721,6 +746,11 @@ def main(argv=None) -> int:
         default="safe_view",
     )
     parser.add_argument(
+        "--autoreset-mode",
+        choices=("SameStep", "Disabled"),
+        default="SameStep",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print the resolved benchmark profile/config without creating envs.",
@@ -840,6 +870,7 @@ def main(argv=None) -> int:
         "maxpool_last_two": maxpool_last_two,
         "info_filter": args.info_filter,
         "obs_layout": obs_layout,
+        "autoreset_mode": args.autoreset_mode,
     }
     if done_on is not None:
         env_kwargs["done_on"] = done_on
@@ -855,6 +886,8 @@ def main(argv=None) -> int:
         raise SystemExit("--states requires --backend=native")
     if done_on is not None and backend != "native":
         raise SystemExit("--done-on requires --backend=native")
+    if args.autoreset_mode == "Disabled" and backend != "native":
+        raise SystemExit("--autoreset-mode=Disabled requires --backend=native")
     action_names = _parse_actions(args.actions)
     if args.steps is not None and action_names is None:
         raise SystemExit("--steps requires --actions for deterministic fixed-step mode")
@@ -883,7 +916,8 @@ def main(argv=None) -> int:
         f"info_filter={args.info_filter} "
         f"info_filter_keys={'default' if info_filter_keys is None else len(info_filter_keys)} "
         f"obs_layout={obs_layout} vec_transpose_image={args.vec_transpose_image} "
-        f"obs_copy={args.obs_copy} actions={action_names or action_label} "
+            f"obs_copy={args.obs_copy} actions={action_names or action_label} "
+            f"autoreset_mode={args.autoreset_mode} "
         f"steps={args.steps} repeats={args.repeats} seconds={args.seconds}",
     )
     if args.dry_run:
@@ -941,6 +975,7 @@ def main(argv=None) -> int:
                 args.seconds,
                 args.warmup_steps,
                 fixed_actions=fixed_actions,
+                manual_reset=args.autoreset_mode == "Disabled",
             )
             results = [result]
         else:
@@ -952,6 +987,7 @@ def main(argv=None) -> int:
                 args.warmup_steps,
                 action_names,
                 args.action_seed,
+                manual_reset=args.autoreset_mode == "Disabled",
             )
     finally:
         if old_disable_audio is None:

@@ -260,16 +260,12 @@ setup(
     url="https://github.com/tsilva/stable-retro-turbo",
     version=VERSION_PATH.read_text(encoding="utf-8").strip(),
     license="GPL-2.0-only",
-    license_files=["LICENSE", "LICENSES.md", "third-party/ale/LICENSE.md"],
+    license_files=["LICENSE", "LICENSES.md"],
     install_requires=[
-        "ale-py>=0.12.0",
         "gymnasium>=1.0.0",
         "pyglet>=1.5.27,<2",
         "farama-notifications>=0.0.1",
     ],
-    extras_require={
-        "atari": [],
-    },
     python_requires=">=3.11,<3.15",
     classifiers=[
         "Programming Language :: Python :: 3",

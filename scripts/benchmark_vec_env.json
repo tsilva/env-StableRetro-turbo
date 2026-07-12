@@ -30,6 +30,22 @@
       "maxpool_last_two": true,
       "num_envs": 32,
       "num_threads": 16
+    },
+    {
+      "name": "atari-breakout",
+      "description": "Training-representative Atari Breakout Start state through RetroVecEnv.",
+      "game": "Breakout-Atari2600-v0",
+      "state": "Start",
+      "resize": "84x84",
+      "grayscale": true,
+      "frame_skip": 4,
+      "frame_stack": 4,
+      "obs_crop": null,
+      "resize_algorithm": "area",
+      "maxpool_last_two": true,
+      "num_envs": 32,
+      "num_threads": 16,
+      "obs_layout": "chw"
     }
   ]
 }
