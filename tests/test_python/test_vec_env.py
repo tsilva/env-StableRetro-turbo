@@ -2139,6 +2139,43 @@ def _has_stella_core():
     )
 
 
+def _breakout_rom_path_or_skip():
+    import stable_retro as retro
+
+    try:
+        return retro.data.get_original_romfile_path("Breakout-Atari2600-v0")
+    except FileNotFoundError:
+        pytest.skip("Breakout-Atari2600-v0 ROM is not imported locally")
+
+
+def test_stella_breakout_autodetects_ntsc_palette():
+    if not _has_stella_core():
+        pytest.skip("stella core is not built")
+
+    import stable_retro as retro
+
+    emulator = retro.RetroEmulator(_breakout_rom_path_or_skip())
+    state_path = retro.data.get_file_path(
+        "Breakout-Atari2600-v0",
+        "Start.state",
+        retro.data.Integrations.STABLE,
+    )
+    try:
+        with gzip.open(state_path, "rb") as state_file:
+            emulator.set_state(state_file.read())
+        for _ in range(300):
+            emulator.step()
+
+        assert emulator.get_screen_rate() == pytest.approx(59.92, abs=0.01)
+        colors = {
+            tuple(color)
+            for color in np.unique(emulator.get_screen().reshape(-1, 3), axis=0)
+        }
+        assert {(200, 72, 72), (72, 160, 72), (64, 72, 200)} <= colors
+    finally:
+        del emulator
+
+
 def test_stella_reports_the_submitted_frame_width():
     if not _has_stella_core():
         pytest.skip("stella core is not built")

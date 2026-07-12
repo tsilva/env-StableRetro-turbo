@@ -121,9 +121,18 @@ Console::Console(OSystem* osystem, Cartridge* cart, const Properties& props)
     bool fastscbios = myOSystem->settings().getBool("fastscbios");
     myOSystem->settings().setValue("fastscbios", true);
     mySystem->reset(true);  // autodetect in reset enabled
+    // The first frames after power-on can have unstable scanline counts.
+    // Vote only over the second half of the probe, matching ALE's robust
+    // detector, instead of allowing startup garbage to classify NTSC ROMs
+    // such as Breakout as PAL.
+    int palFrames = 0;
     for(int i = 0; i < 60; ++i)
+    {
       myTIA->update();
-    myDisplayFormat = myTIA->isPAL() ? "PAL" : "NTSC";
+      if(i >= 30 && myTIA->scanlines() > 285)
+        ++palFrames;
+    }
+    myDisplayFormat = palFrames >= 15 ? "PAL" : "NTSC";
     if(myProperties.get(Display_Format) == "AUTO")
     {
       autodetected = "*";
