@@ -2295,9 +2295,9 @@ def test_retro_vec_env_atari_crop_mask_area_matches_scalar_reference():
     crop_fill = 0
     common = {
         "obs_layout": "hwc",
-        "frame_skip": 1,
-        "frame_stack": 1,
-        "maxpool_last_two": False,
+        "frame_skip": 4,
+        "frame_stack": 4,
+        "maxpool_last_two": True,
     }
     source_env = _make_breakout_vec_env(
         obs_resize=None,
@@ -2366,6 +2366,46 @@ def test_retro_vec_env_atari_crop_mask_area_matches_scalar_reference():
         source_env.close()
         masked_env.close()
         unmasked_env.close()
+
+
+def test_retro_vec_env_atari_crop_mask_area_indexed_matches_framebuffer(monkeypatch):
+    common = {
+        "obs_resize": (84, 84),
+        "obs_crop": (17, 0, 0, 0),
+        "obs_crop_mode": "mask",
+        "obs_crop_fill": 0,
+        "obs_resize_algorithm": "area",
+        "obs_layout": "chw",
+        "frame_skip": 4,
+        "frame_stack": 4,
+        "maxpool_last_two": True,
+        "info_filter": "all",
+    }
+
+    def trace(*, indexed: bool):
+        if indexed:
+            monkeypatch.delenv("STABLE_RETRO_DISABLE_ATARI_INDEXED_VIDEO", raising=False)
+        else:
+            monkeypatch.setenv("STABLE_RETRO_DISABLE_ATARI_INDEXED_VIDEO", "1")
+        env = _make_breakout_vec_env(**common)
+        actions = np.zeros((1, env.num_buttons), dtype=np.uint8)
+        try:
+            observations = [env.reset(seed=123)[0].copy()]
+            for step in range(8):
+                actions[:, 0] = int(step == 0)
+                observations.append(env.step(actions)[0].copy())
+            return observations
+        finally:
+            env.close()
+
+    framebuffer_trace = trace(indexed=False)
+    indexed_trace = trace(indexed=True)
+    for indexed_obs, framebuffer_obs in zip(
+        indexed_trace,
+        framebuffer_trace,
+        strict=True,
+    ):
+        np.testing.assert_array_equal(indexed_obs, framebuffer_obs)
 
 
 def test_stella_breakout_autodetects_ntsc_palette():

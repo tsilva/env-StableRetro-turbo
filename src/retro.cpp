@@ -1365,12 +1365,28 @@ void processNativeGrayscaleAreaPlanToBuffer(
 	long rawW,
 	long rawH,
 	const AreaResizePlan& plan,
+	const NativeCrop& crop,
+	const NativeCrop& maskCrop,
+	uint8_t cropFill,
 	std::vector<uint8_t>& scratch,
 	uint8_t* dst
 ) {
+	const bool hasMask = cropMaskHasAny(maskCrop);
+	const long srcH = rawH - crop.top - crop.bottom;
+	const long srcW = rawW - crop.left - crop.right;
+	auto masked = [&](long sy, long sx) {
+		return hasMask && cropMaskContains(
+			maskCrop,
+			srcH,
+			srcW,
+			sy - crop.top,
+			sx - crop.left
+		);
+	};
 	if (depth == 16) {
 		if (maxRaw) {
 			processAreaResizePlanToBuffer(plan, [&](long sy, long sx) {
+				if (masked(sy, sx)) return cropFill;
 				const uint8_t* row = raw + static_cast<size_t>(sy) * pitch;
 				const uint8_t* maxRow = maxRaw + static_cast<size_t>(sy) * pitch;
 				uint16_t rgb;
@@ -1381,6 +1397,7 @@ void processNativeGrayscaleAreaPlanToBuffer(
 			}, dst);
 		} else {
 			processAreaResizePlanToBuffer(plan, [&](long sy, long sx) {
+				if (masked(sy, sx)) return cropFill;
 				const uint8_t* row = raw + static_cast<size_t>(sy) * pitch;
 				uint16_t rgb;
 				std::memcpy(&rgb, row + static_cast<size_t>(sx) * 2, sizeof(rgb));
@@ -1391,19 +1408,23 @@ void processNativeGrayscaleAreaPlanToBuffer(
 	}
 	if (depth == 32) {
 #ifdef STABLE_RETRO_ARM_NEON
-		processXrgb8888GrayscaleAreaPlanToBuffer(
-			raw,
-			maxRaw,
-			rawW,
-			rawH,
-			pitch,
-			plan,
-			scratch,
-			dst
-		);
-#else
+		if (!hasMask) {
+			processXrgb8888GrayscaleAreaPlanToBuffer(
+				raw,
+				maxRaw,
+				rawW,
+				rawH,
+				pitch,
+				plan,
+				scratch,
+				dst
+			);
+			return;
+		}
+#endif
 		if (maxRaw) {
 			processAreaResizePlanToBuffer(plan, [&](long sy, long sx) {
+				if (masked(sy, sx)) return cropFill;
 				const uint8_t* row = raw + static_cast<size_t>(sy) * pitch;
 				const uint8_t* maxRow = maxRaw + static_cast<size_t>(sy) * pitch;
 				uint32_t xrgb;
@@ -1414,13 +1435,13 @@ void processNativeGrayscaleAreaPlanToBuffer(
 			}, dst);
 		} else {
 			processAreaResizePlanToBuffer(plan, [&](long sy, long sx) {
+				if (masked(sy, sx)) return cropFill;
 				const uint8_t* row = raw + static_cast<size_t>(sy) * pitch;
 				uint32_t xrgb;
 				std::memcpy(&xrgb, row + static_cast<size_t>(sx) * 4, sizeof(xrgb));
 				return xrgb8888Gray(xrgb);
 			}, dst);
 		}
-#endif
 		return;
 	}
 	throw std::runtime_error("Unsupported image depth from core");
@@ -1431,20 +1452,37 @@ void processIndexedGrayscaleAreaPlanToBuffer(
 	const uint8_t* maxRaw,
 	IndexedPaletteCache* cache,
 	const AreaResizePlan& plan,
+	const NativeCrop& crop,
+	const NativeCrop& maskCrop,
+	uint8_t cropFill,
 	uint8_t* dst
 ) {
+	const bool hasMask = cropMaskHasAny(maskCrop);
+	const long srcH = static_cast<long>(frame.height) - crop.top - crop.bottom;
+	const long srcW = static_cast<long>(frame.width) - crop.left - crop.right;
+	auto masked = [&](long sy, long sx) {
+		return hasMask && cropMaskContains(
+			maskCrop,
+			srcH,
+			srcW,
+			sy - crop.top,
+			sx - crop.left
+		);
+	};
 	if (cache) {
 		updateIndexedPaletteCache(frame, *cache);
 		const uint8_t* gray = cache->gray.data();
 		const uint8_t* maxGray = cache->maxGray.data();
 		if (maxRaw) {
 			processAreaResizePlanToBuffer(plan, [&](long sy, long sx) {
+				if (masked(sy, sx)) return cropFill;
 				const uint8_t* row = frame.data + static_cast<size_t>(sy) * frame.pitch;
 				const uint8_t* maxRow = maxRaw + static_cast<size_t>(sy) * frame.pitch;
 				return maxGray[(static_cast<size_t>(row[sx]) << 8) | maxRow[sx]];
 			}, dst);
 		} else {
 			processAreaResizePlanToBuffer(plan, [&](long sy, long sx) {
+				if (masked(sy, sx)) return cropFill;
 				const uint8_t* row = frame.data + static_cast<size_t>(sy) * frame.pitch;
 				return gray[row[sx]];
 			}, dst);
@@ -1453,7 +1491,9 @@ void processIndexedGrayscaleAreaPlanToBuffer(
 	}
 	processAreaResizePlanToBuffer(
 		plan,
-		[&](long sy, long sx) { return indexedGray(frame, maxRaw, sy, sx); },
+		[&](long sy, long sx) {
+			return masked(sy, sx) ? cropFill : indexedGray(frame, maxRaw, sy, sx);
+		},
 		dst
 	);
 }
@@ -1658,10 +1698,10 @@ public:
 		const bool indexedVideoEnabled = !envFlagEnabled("STABLE_RETRO_DISABLE_INDEXED_VIDEO");
 		const bool atariIndexedVideoEnabled =
 			!envFlagEnabled("STABLE_RETRO_DISABLE_ATARI_INDEXED_VIDEO");
-		// Indexed video bypasses the CPU framebuffer, so only enable it when the
-		// downstream area plan consumes indexed frames directly.
+		// Indexed video bypasses the CPU framebuffer. The downstream area plan
+		// applies remove and mask crops directly to indexed pixels.
 		const bool grayscaleAreaPlanEligible =
-			m_grayscale && m_algorithm == "area" && !cropMaskHasAny(m_cropMask);
+			m_grayscale && m_algorithm == "area";
 		m_slots.reserve(numEnvs);
 		for (size_t i = 0; i < numEnvs; ++i) {
 			auto slot = std::make_unique<Slot>(romPath, dataPath, scenarioPath, constructionInitialState, i);
@@ -2541,6 +2581,9 @@ private:
 					nullptr,
 					&slot.indexedPaletteCache,
 					m_grayscaleAreaPlan,
+					m_crop,
+					m_cropMask,
+					m_cropFill,
 					slot.singleObs.data()
 				);
 				return;
@@ -2559,6 +2602,9 @@ private:
 					slot.emulator->m_re.getImageWidth(),
 					slot.emulator->m_re.getImageHeight(),
 					m_grayscaleAreaPlan,
+					m_crop,
+					m_cropMask,
+					m_cropFill,
 					slot.grayscaleScratch,
 					slot.singleObs.data()
 				);
@@ -2970,6 +3016,9 @@ private:
 						maxIndexed,
 						&slot.indexedPaletteCache,
 						m_grayscaleAreaPlan,
+						m_crop,
+						m_cropMask,
+						m_cropFill,
 						slot.singleObs.data()
 					);
 					const bool observationWritten = pushFrame(
@@ -3021,6 +3070,9 @@ private:
 						slot.emulator->m_re.getImageWidth(),
 						slot.emulator->m_re.getImageHeight(),
 						m_grayscaleAreaPlan,
+						m_crop,
+						m_cropMask,
+						m_cropFill,
 						slot.grayscaleScratch,
 						slot.singleObs.data()
 					);
