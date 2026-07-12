@@ -813,6 +813,15 @@ bool TIA::driveUnusedPinsRandom(uint8_t mode)
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void TIA::updateFrame(int32_t clock)
 {
+  if(myRenderPixels)
+    updateFrameMode<true>(clock);
+  else
+    updateFrameMode<false>(clock);
+}
+
+template<bool RenderPixels>
+void TIA::updateFrameMode(int32_t clock)
+{
   // See if we've already updated this portion of the screen
   if((clock < myClockStartDisplay) ||
      (myClockAtLastUpdate >= myClockStopDisplay) ||
@@ -925,7 +934,8 @@ void TIA::updateFrame(int32_t clock)
       // See if we're in the vertical blank region
       if(myVBLANK & 0x02)
       {
-        memset(myFramePointer, 0, clocksToUpdate);
+        if(RenderPixels)
+          memset(myFramePointer, 0, clocksToUpdate);
       }
       // Handle all other possible combinations
       else
@@ -1015,8 +1025,9 @@ void TIA::updateFrame(int32_t clock)
             enabled |= M0Bit;
 
           myCollision |= TIATables::CollisionMask[enabled];
-          *myFramePointer = myColorPtr[myPriorityEncoder[hpos < 80 ? 0 : 1]
-              [enabled | myPlayfieldPriorityAndScore]];
+          if(RenderPixels)
+            *myFramePointer = myColorPtr[myPriorityEncoder[hpos < 80 ? 0 : 1]
+                [enabled | myPlayfieldPriorityAndScore]];
         }
       }
       myFramePointer = ending;
@@ -1027,7 +1038,8 @@ void TIA::updateFrame(int32_t clock)
         (clocksFromStartOfScanLine < (HBLANK + 8)))
     {
       int32_t blanks = (HBLANK + 8) - clocksFromStartOfScanLine;
-      memset(oldFramePointer, myColorPtr[HBLANKColor], blanks);
+      if(RenderPixels)
+        memset(oldFramePointer, myColorPtr[HBLANKColor], blanks);
 
       if((clocksToUpdate + clocksFromStartOfScanLine) >= (HBLANK + 8))
         myHMOVEBlankEnabled = false;

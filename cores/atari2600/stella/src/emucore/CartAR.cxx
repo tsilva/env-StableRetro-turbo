@@ -96,6 +96,7 @@ void CartridgeAR::install(System& system)
   uint16_t shift = mySystem->pageShift();
 
   my6502       = &(mySystem->m6502());
+  my6502->enableDistinctAccessTracking();
 
   // Map all of the accesses to call peek and poke (we don't yet indicate RAM areas)
   System::PageAccess access(0, 0, 0, this, System::PA_READ);

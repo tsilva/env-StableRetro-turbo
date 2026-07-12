@@ -147,6 +147,9 @@ class TIA : public Device
     */
     void update();
 
+    /** Select whether updateFrame writes pixels; timing and collisions remain active. */
+    void setRenderPixels(bool enabled) { myRenderPixels = enabled; }
+
     /**
       Answers the current frame buffer
 
@@ -334,6 +337,9 @@ class TIA : public Device
     // Update the current frame buffer to the specified color clock
     void updateFrame(int32_t clock);
 
+    template<bool RenderPixels>
+    void updateFrameMode(int32_t clock);
+
     // Waste cycles until the current scanline is finished
     void waitHorizontalSync();
 
@@ -380,6 +386,8 @@ class TIA : public Device
 
     // Pointer to the previous frame buffer
     uint8_t* myPreviousFrameBuffer;
+
+    bool myRenderPixels{true};
 
     // Pointer to the next pixel that will be drawn in the current frame buffer
     uint8_t* myFramePointer;

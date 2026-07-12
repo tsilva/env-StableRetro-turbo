@@ -37,6 +37,7 @@ M6502::M6502(uint32_t systemCyclesPerProcessorCycle, const Settings& settings)
     myLastAccessWasRead(true),
     myTotalInstructionCount(0),
     myNumberOfDistinctAccesses(0),
+    myTrackDistinctAccesses(false),
     myLastAddress(0),
     myLastPeekAddress(0),
     myLastPokeAddress(0),
@@ -107,7 +108,7 @@ inline uint8_t M6502::peek(uint16_t address, uint8_t flags)
 {
   ////////////////////////////////////////////////
   // TODO - move this logic directly into CartAR
-  if(address != myLastAddress)
+  if(myTrackDistinctAccesses && address != myLastAddress)
   {
     myNumberOfDistinctAccesses++;
     myLastAddress = address;
@@ -126,7 +127,7 @@ inline void M6502::poke(uint16_t address, uint8_t value)
 {
   ////////////////////////////////////////////////
   // TODO - move this logic directly into CartAR
-  if(address != myLastAddress)
+  if(myTrackDistinctAccesses && address != myLastAddress)
   {
     myNumberOfDistinctAccesses++;
     myLastAddress = address;

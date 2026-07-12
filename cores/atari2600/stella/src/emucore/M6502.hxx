@@ -170,6 +170,9 @@ class M6502 : public Serializable
     */
     uint32_t distinctAccesses() const { return myNumberOfDistinctAccesses; }
 
+    /** Enable address-transition counting required by the Supercharger. */
+    void enableDistinctAccessTracking() { myTrackDistinctAccesses = true; }
+
     /**
       Saves the current state of this device to the given Serializer.
 
@@ -306,6 +309,9 @@ class M6502 : public Serializable
 
     /// Indicates the numer of distinct memory accesses
     uint32_t myNumberOfDistinctAccesses;
+
+    // Only the Supercharger (CartridgeAR) consumes distinctAccesses().
+    bool myTrackDistinctAccesses;
 
     /// Indicates the last address which was accessed
     uint16_t myLastAddress;

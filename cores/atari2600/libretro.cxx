@@ -1841,7 +1841,9 @@ static void stable_retro_run_internal(bool skip_render)
 
    //EMULATE
    TIA& tia = console->tia();
+   tia.setRenderPixels(!skip_render);
    tia.update();
+   tia.setRenderPixels(true);
 
    //VIDEO
    //Get the frame info from stella
