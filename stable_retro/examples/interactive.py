@@ -438,16 +438,12 @@ class RetroInteractive(Interactive):
             **env_kwargs,
         )
         self._buttons = env.buttons
-        reset_action = None
-        if env.system == "Atari2600" and "BUTTON" in env.buttons:
-            reset_action = np.zeros(env.num_buttons, dtype=np.uint8)
-            reset_action[env.buttons.index("BUTTON")] = 1
         super().__init__(
             env=env,
             sync=False,
             tps=60,
             show_obs=show_obs,
-            reset_action=reset_action,
+            reset_action=None,
         )
 
     def get_image(self, _obs, env):

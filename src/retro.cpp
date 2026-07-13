@@ -37,6 +37,7 @@ static inline T _hypot(T x, T y) {
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #if defined(__ARM_NEON) && defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
@@ -63,11 +64,14 @@ static bool envFlagEnabled(const char* name) {
 struct AreaResizeSpan {
 	long begin = 0;
 	long end = 0;
+	long visibleBegin = 0;
+	long visibleEnd = 0;
 };
 
 struct AreaResizePlan {
 	long dstH = 0;
 	long dstW = 0;
+	bool masked = false;
 	std::vector<AreaResizeSpan> rows;
 	std::vector<AreaResizeSpan> columns;
 };
@@ -1285,7 +1289,13 @@ static void processXrgb8888GrayscaleAreaPlanToBuffer(
 	}
 }
 
-AreaResizePlan buildAreaResizePlan(long rawW, long rawH, const NativeCrop& crop, const NativeResize& resize) {
+AreaResizePlan buildAreaResizePlan(
+	long rawW,
+	long rawH,
+	const NativeCrop& crop,
+	const NativeCrop& maskCrop,
+	const NativeResize& resize
+) {
 	if (crop.top + crop.bottom >= rawH || crop.left + crop.right >= rawW) {
 		throw std::runtime_error("crop removes the entire observation");
 	}
@@ -1299,21 +1309,60 @@ AreaResizePlan buildAreaResizePlan(long rawW, long rawH, const NativeCrop& crop,
 	AreaResizePlan plan;
 	plan.dstH = dstH;
 	plan.dstW = dstW;
+	plan.masked = cropMaskHasAny(maskCrop);
 	plan.rows.reserve(static_cast<size_t>(dstH));
+	const long visibleYBegin = crop.top + maskCrop.top;
+	const long visibleYEnd = crop.top + srcH - maskCrop.bottom;
 	for (long dy = 0; dy < dstH; ++dy) {
 		long y0 = (dy * srcH) / dstH;
 		long y1 = std::max<long>(((dy + 1) * srcH) / dstH, y0 + 1);
 		y1 = std::min(y1, srcH);
-		plan.rows.push_back({crop.top + y0, crop.top + y1});
+		AreaResizeSpan span;
+		span.begin = crop.top + y0;
+		span.end = crop.top + y1;
+		span.visibleBegin = std::max(span.begin, visibleYBegin);
+		span.visibleEnd = std::max(
+			span.visibleBegin,
+			std::min(span.end, visibleYEnd)
+		);
+		plan.rows.push_back(span);
 	}
 	plan.columns.reserve(static_cast<size_t>(dstW));
+	const long visibleXBegin = crop.left + maskCrop.left;
+	const long visibleXEnd = crop.left + srcW - maskCrop.right;
 	for (long dx = 0; dx < dstW; ++dx) {
 		long x0 = (dx * srcW) / dstW;
 		long x1 = std::max<long>(((dx + 1) * srcW) / dstW, x0 + 1);
 		x1 = std::min(x1, srcW);
-		plan.columns.push_back({crop.left + x0, crop.left + x1});
+		AreaResizeSpan span;
+		span.begin = crop.left + x0;
+		span.end = crop.left + x1;
+		span.visibleBegin = std::max(span.begin, visibleXBegin);
+		span.visibleEnd = std::max(
+			span.visibleBegin,
+			std::min(span.end, visibleXEnd)
+		);
+		plan.columns.push_back(span);
 	}
 	return plan;
+}
+
+static inline uint8_t exactAreaAverage(uint32_t sum, uint32_t count) {
+	// Area downscaling repeatedly uses a small set of cell sizes. Keeping
+	// those divisors compile-time constants lets release compilers replace
+	// integer division with shifts or multiply-high sequences while
+	// preserving the exact floor(sum / count) result.
+	switch (count) {
+	case 1: return static_cast<uint8_t>(sum);
+	case 2: return static_cast<uint8_t>(sum / 2);
+	case 3: return static_cast<uint8_t>(sum / 3);
+	case 4: return static_cast<uint8_t>(sum / 4);
+	case 5: return static_cast<uint8_t>(sum / 5);
+	case 6: return static_cast<uint8_t>(sum / 6);
+	case 7: return static_cast<uint8_t>(sum / 7);
+	case 8: return static_cast<uint8_t>(sum / 8);
+	default: return static_cast<uint8_t>(sum / count);
+	}
 }
 
 template <typename PixelReader>
@@ -1322,23 +1371,6 @@ void processAreaResizePlanToBuffer(
 	PixelReader&& readPixel,
 	uint8_t* dst
 ) {
-	auto exactAverage = [](uint32_t sum, uint32_t count) -> uint8_t {
-		// Area downscaling repeatedly uses a small set of cell sizes. Keeping
-		// those divisors compile-time constants lets release compilers replace
-		// integer division with shifts or multiply-high sequences while
-		// preserving the exact floor(sum / count) result.
-		switch (count) {
-		case 1: return static_cast<uint8_t>(sum);
-		case 2: return static_cast<uint8_t>(sum / 2);
-		case 3: return static_cast<uint8_t>(sum / 3);
-		case 4: return static_cast<uint8_t>(sum / 4);
-		case 5: return static_cast<uint8_t>(sum / 5);
-		case 6: return static_cast<uint8_t>(sum / 6);
-		case 7: return static_cast<uint8_t>(sum / 7);
-		case 8: return static_cast<uint8_t>(sum / 8);
-		default: return static_cast<uint8_t>(sum / count);
-		}
-	};
 	for (size_t dy = 0; dy < plan.rows.size(); ++dy) {
 		const AreaResizeSpan& rowSpan = plan.rows[dy];
 		for (size_t dx = 0; dx < plan.columns.size(); ++dx) {
@@ -1352,9 +1384,64 @@ void processAreaResizePlanToBuffer(
 			const uint32_t count = static_cast<uint32_t>(
 				(rowSpan.end - rowSpan.begin) * (columnSpan.end - columnSpan.begin)
 			);
-			dst[dy * plan.columns.size() + dx] = exactAverage(sum, count);
+			dst[dy * plan.columns.size() + dx] = exactAreaAverage(sum, count);
 		}
 	}
+}
+
+template <typename PixelReader>
+void processMaskedAreaResizePlanToBuffer(
+	const AreaResizePlan& plan,
+	uint8_t cropFill,
+	PixelReader&& readPixel,
+	uint8_t* dst
+) {
+	for (size_t dy = 0; dy < plan.rows.size(); ++dy) {
+		const AreaResizeSpan& rowSpan = plan.rows[dy];
+		const uint32_t readHeight = static_cast<uint32_t>(
+			rowSpan.visibleEnd - rowSpan.visibleBegin
+		);
+		for (size_t dx = 0; dx < plan.columns.size(); ++dx) {
+			const AreaResizeSpan& columnSpan = plan.columns[dx];
+			const uint32_t readWidth = static_cast<uint32_t>(
+				columnSpan.visibleEnd - columnSpan.visibleBegin
+			);
+			const uint32_t count = static_cast<uint32_t>(
+				(rowSpan.end - rowSpan.begin) * (columnSpan.end - columnSpan.begin)
+			);
+			const uint32_t readCount = readHeight * readWidth;
+			uint32_t sum = static_cast<uint32_t>(cropFill) * (count - readCount);
+			for (long sy = rowSpan.visibleBegin; sy < rowSpan.visibleEnd; ++sy) {
+				for (long sx = columnSpan.visibleBegin; sx < columnSpan.visibleEnd; ++sx) {
+					sum += readPixel(sy, sx);
+				}
+			}
+			dst[dy * plan.columns.size() + dx] = exactAreaAverage(sum, count);
+		}
+	}
+}
+
+template <typename PixelReader>
+void processMaybeMaskedAreaResizePlanToBuffer(
+	const AreaResizePlan& plan,
+	uint8_t cropFill,
+	PixelReader&& readPixel,
+	uint8_t* dst
+) {
+	if (plan.masked) {
+		processMaskedAreaResizePlanToBuffer(
+			plan,
+			cropFill,
+			std::forward<PixelReader>(readPixel),
+			dst
+		);
+		return;
+	}
+	processAreaResizePlanToBuffer(
+		plan,
+		std::forward<PixelReader>(readPixel),
+		dst
+	);
 }
 
 void processNativeGrayscaleAreaPlanToBuffer(
@@ -1365,28 +1452,13 @@ void processNativeGrayscaleAreaPlanToBuffer(
 	long rawW,
 	long rawH,
 	const AreaResizePlan& plan,
-	const NativeCrop& crop,
-	const NativeCrop& maskCrop,
 	uint8_t cropFill,
 	std::vector<uint8_t>& scratch,
 	uint8_t* dst
 ) {
-	const bool hasMask = cropMaskHasAny(maskCrop);
-	const long srcH = rawH - crop.top - crop.bottom;
-	const long srcW = rawW - crop.left - crop.right;
-	auto masked = [&](long sy, long sx) {
-		return hasMask && cropMaskContains(
-			maskCrop,
-			srcH,
-			srcW,
-			sy - crop.top,
-			sx - crop.left
-		);
-	};
 	if (depth == 16) {
 		if (maxRaw) {
-			processAreaResizePlanToBuffer(plan, [&](long sy, long sx) {
-				if (masked(sy, sx)) return cropFill;
+			processMaybeMaskedAreaResizePlanToBuffer(plan, cropFill, [&](long sy, long sx) {
 				const uint8_t* row = raw + static_cast<size_t>(sy) * pitch;
 				const uint8_t* maxRow = maxRaw + static_cast<size_t>(sy) * pitch;
 				uint16_t rgb;
@@ -1396,8 +1468,7 @@ void processNativeGrayscaleAreaPlanToBuffer(
 				return rgb565MaxGray(rgb, maxRgb);
 			}, dst);
 		} else {
-			processAreaResizePlanToBuffer(plan, [&](long sy, long sx) {
-				if (masked(sy, sx)) return cropFill;
+			processMaybeMaskedAreaResizePlanToBuffer(plan, cropFill, [&](long sy, long sx) {
 				const uint8_t* row = raw + static_cast<size_t>(sy) * pitch;
 				uint16_t rgb;
 				std::memcpy(&rgb, row + static_cast<size_t>(sx) * 2, sizeof(rgb));
@@ -1408,7 +1479,7 @@ void processNativeGrayscaleAreaPlanToBuffer(
 	}
 	if (depth == 32) {
 #ifdef STABLE_RETRO_ARM_NEON
-		if (!hasMask) {
+		if (!plan.masked) {
 			processXrgb8888GrayscaleAreaPlanToBuffer(
 				raw,
 				maxRaw,
@@ -1423,8 +1494,7 @@ void processNativeGrayscaleAreaPlanToBuffer(
 		}
 #endif
 		if (maxRaw) {
-			processAreaResizePlanToBuffer(plan, [&](long sy, long sx) {
-				if (masked(sy, sx)) return cropFill;
+			processMaybeMaskedAreaResizePlanToBuffer(plan, cropFill, [&](long sy, long sx) {
 				const uint8_t* row = raw + static_cast<size_t>(sy) * pitch;
 				const uint8_t* maxRow = maxRaw + static_cast<size_t>(sy) * pitch;
 				uint32_t xrgb;
@@ -1434,8 +1504,7 @@ void processNativeGrayscaleAreaPlanToBuffer(
 				return xrgb8888MaxGray(xrgb, maxXrgb);
 			}, dst);
 		} else {
-			processAreaResizePlanToBuffer(plan, [&](long sy, long sx) {
-				if (masked(sy, sx)) return cropFill;
+			processMaybeMaskedAreaResizePlanToBuffer(plan, cropFill, [&](long sy, long sx) {
 				const uint8_t* row = raw + static_cast<size_t>(sy) * pitch;
 				uint32_t xrgb;
 				std::memcpy(&xrgb, row + static_cast<size_t>(sx) * 4, sizeof(xrgb));
@@ -1452,47 +1521,32 @@ void processIndexedGrayscaleAreaPlanToBuffer(
 	const uint8_t* maxRaw,
 	IndexedPaletteCache* cache,
 	const AreaResizePlan& plan,
-	const NativeCrop& crop,
-	const NativeCrop& maskCrop,
 	uint8_t cropFill,
 	uint8_t* dst
 ) {
-	const bool hasMask = cropMaskHasAny(maskCrop);
-	const long srcH = static_cast<long>(frame.height) - crop.top - crop.bottom;
-	const long srcW = static_cast<long>(frame.width) - crop.left - crop.right;
-	auto masked = [&](long sy, long sx) {
-		return hasMask && cropMaskContains(
-			maskCrop,
-			srcH,
-			srcW,
-			sy - crop.top,
-			sx - crop.left
-		);
-	};
 	if (cache) {
 		updateIndexedPaletteCache(frame, *cache);
 		const uint8_t* gray = cache->gray.data();
 		const uint8_t* maxGray = cache->maxGray.data();
 		if (maxRaw) {
-			processAreaResizePlanToBuffer(plan, [&](long sy, long sx) {
-				if (masked(sy, sx)) return cropFill;
+			processMaybeMaskedAreaResizePlanToBuffer(plan, cropFill, [&](long sy, long sx) {
 				const uint8_t* row = frame.data + static_cast<size_t>(sy) * frame.pitch;
 				const uint8_t* maxRow = maxRaw + static_cast<size_t>(sy) * frame.pitch;
 				return maxGray[(static_cast<size_t>(row[sx]) << 8) | maxRow[sx]];
 			}, dst);
 		} else {
-			processAreaResizePlanToBuffer(plan, [&](long sy, long sx) {
-				if (masked(sy, sx)) return cropFill;
+			processMaybeMaskedAreaResizePlanToBuffer(plan, cropFill, [&](long sy, long sx) {
 				const uint8_t* row = frame.data + static_cast<size_t>(sy) * frame.pitch;
 				return gray[row[sx]];
 			}, dst);
 		}
 		return;
 	}
-	processAreaResizePlanToBuffer(
+	processMaybeMaskedAreaResizePlanToBuffer(
 		plan,
+		cropFill,
 		[&](long sy, long sx) {
-			return masked(sy, sx) ? cropFill : indexedGray(frame, maxRaw, sy, sx);
+			return indexedGray(frame, maxRaw, sy, sx);
 		},
 		dst
 	);
@@ -1741,7 +1795,13 @@ public:
 				m_stackedChannels = m_obsChannels * m_frameStack;
 				m_stackedObsSize = static_cast<size_t>(m_obsHeight) * static_cast<size_t>(m_obsWidth) * static_cast<size_t>(m_stackedChannels);
 				if (grayscaleAreaPlanEligible) {
-					m_grayscaleAreaPlan = buildAreaResizePlan(rawW, rawH, m_crop, m_resize);
+					m_grayscaleAreaPlan = buildAreaResizePlan(
+						rawW,
+						rawH,
+						m_crop,
+						m_cropMask,
+						m_resize
+					);
 					m_useGrayscaleAreaPlan = true;
 				}
 			}
@@ -2581,8 +2641,6 @@ private:
 					nullptr,
 					&slot.indexedPaletteCache,
 					m_grayscaleAreaPlan,
-					m_crop,
-					m_cropMask,
 					m_cropFill,
 					slot.singleObs.data()
 				);
@@ -2602,8 +2660,6 @@ private:
 					slot.emulator->m_re.getImageWidth(),
 					slot.emulator->m_re.getImageHeight(),
 					m_grayscaleAreaPlan,
-					m_crop,
-					m_cropMask,
 					m_cropFill,
 					slot.grayscaleScratch,
 					slot.singleObs.data()
@@ -3016,8 +3072,6 @@ private:
 						maxIndexed,
 						&slot.indexedPaletteCache,
 						m_grayscaleAreaPlan,
-						m_crop,
-						m_cropMask,
 						m_cropFill,
 						slot.singleObs.data()
 					);
@@ -3070,8 +3124,6 @@ private:
 						slot.emulator->m_re.getImageWidth(),
 						slot.emulator->m_re.getImageHeight(),
 						m_grayscaleAreaPlan,
-						m_crop,
-						m_cropMask,
 						m_cropFill,
 						slot.grayscaleScratch,
 						slot.singleObs.data()

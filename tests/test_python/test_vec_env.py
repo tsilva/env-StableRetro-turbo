@@ -2369,6 +2369,56 @@ def test_retro_vec_env_atari_crop_mask_area_matches_scalar_reference():
         unmasked_env.close()
 
 
+def test_retro_vec_env_atari_crop_mask_area_general_edges_matches_scalar_reference():
+    mask_crop = (3, 4, 5, 6)
+    crop_fill = 37
+    common = {
+        "obs_layout": "hwc",
+        "frame_skip": 4,
+        "frame_stack": 1,
+        "maxpool_last_two": True,
+    }
+    source_env = _make_breakout_vec_env(
+        obs_resize=None,
+        obs_crop=None,
+        obs_resize_algorithm="nearest",
+        **common,
+    )
+    masked_env = _make_breakout_vec_env(
+        obs_resize=(84, 84),
+        obs_crop=mask_crop,
+        obs_crop_mode="mask",
+        obs_crop_fill=crop_fill,
+        obs_resize_algorithm="area",
+        **common,
+    )
+    actions = np.zeros((1, source_env.num_buttons), dtype=np.uint8)
+    try:
+        source_obs = source_env.reset(seed=123)[0]
+        masked_obs = masked_env.reset(seed=123)[0]
+        for step in range(4):
+            source_gray = source_obs[0, :, :, 0]
+            masked_source = source_gray.copy()
+            top, bottom, left, right = mask_crop
+            masked_source[:top, :] = crop_fill
+            masked_source[-bottom:, :] = crop_fill
+            masked_source[:, :left] = crop_fill
+            masked_source[:, -right:] = crop_fill
+            expected = _scalar_area_resize_grayscale(masked_source, (84, 84))
+
+            np.testing.assert_array_equal(masked_obs[0, :, :, 0], expected)
+            assert np.any(expected != crop_fill)
+
+            if step == 3:
+                break
+            actions[:, 0] = int(step == 0)
+            source_obs = source_env.step(actions)[0]
+            masked_obs = masked_env.step(actions)[0]
+    finally:
+        source_env.close()
+        masked_env.close()
+
+
 def test_retro_vec_env_atari_crop_mask_area_indexed_matches_framebuffer(monkeypatch):
     common = {
         "obs_resize": (84, 84),

@@ -10,6 +10,6 @@ Key guardrails:
 - Validate generated screenshots against NESMaps before treating a state as correct.
 - When checking a consumer repo's installed package, run Python from that consumer repo's cwd so this checkout does not shadow the installed wheel.
 
-## Clean Modal Benchmarking
+## Beast Benchmarking
 
-Use the repo-local `modal-benchmark` skill when benchmark timing needs to be independent of current local machine load. This is the preferred path when macOS security/indexing work, local CPU contention, or other host noise makes local timing untrustworthy.
+Run performance benchmarks on `beast-2` or `beast-3`, not Modal. Resolve and inspect both hosts through the sibling `rlab` machine registry and its machine-scoped commands (`rlab fleet ps --machine ...` and `rlab fleet watch --machine ... --once --no-color --no-tui`), then choose the freer reachable machine. Use the selected host's `rlab`-pinned runtime image or environment so the benchmark matches training. Do not stop, throttle, or otherwise disturb active training containers; if no host is idle, keep probes short and low-priority, label their absolute timing as contention-affected, and use live split throughput metrics as the authoritative full-loop evidence.

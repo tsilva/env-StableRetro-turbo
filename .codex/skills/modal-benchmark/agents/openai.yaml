@@ -1,4 +1,0 @@
-interface:
-  display_name: "Modal Benchmark"
-  short_description: "Run clean Modal CPU benchmarks."
-  default_prompt: "Use $modal-benchmark to run the clean Modal CPU benchmark for this checkout."

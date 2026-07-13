@@ -203,7 +203,7 @@ def test_retro_interactive_show_obs_uses_ppo_preprocessing(monkeypatch):
     assert interactive_kwargs["reset_action"] is None
 
 
-def test_retro_interactive_autofires_after_atari_reset(monkeypatch):
+def test_retro_interactive_does_not_fire_after_atari_reset(monkeypatch):
     interactive_kwargs = {}
 
     class Env:
@@ -225,7 +225,7 @@ def test_retro_interactive_autofires_after_atari_reset(monkeypatch):
         record=False,
     )
 
-    assert interactive_kwargs["reset_action"].tolist() == [1, 0, 0]
+    assert interactive_kwargs["reset_action"] is None
 
 
 def test_interactive_applies_reset_action_after_every_reset():
