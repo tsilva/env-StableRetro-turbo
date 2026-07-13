@@ -75,6 +75,7 @@ def test_should_ignore_root_build_but_not_skill_build_directory():
     release_build = _release_build_module()
 
     assert release_build.should_ignore(Path("build"))
+    assert release_build.should_ignore(Path(".ccache"))
     assert not release_build.should_ignore(Path(".codex/skills/build"))
 
 
@@ -125,5 +126,66 @@ def test_wheel_build_parallelizes_cores_without_rebuilding_native_snes():
     assert "cmake>=3.28" in pyproject["build-system"]["requires"]
     assert "JOB_SERVER_AWARE TRUE" in cmake_source
     assert "set(core_env_command env)" in cmake_source
+    assert "function(prepend_compiler_launcher" in cmake_source
+    assert "${CMAKE_C_COMPILER_LAUNCHER}" in cmake_source
+    assert "CC=${core_c_compiler}" in cmake_source
+    assert "CXX=${core_cxx_compiler}" in cmake_source
     assert "build_native_snes_core" not in setup_source
     assert '["lipo", str(asset), "-verify_arch", "arm64"]' in setup_source
+
+
+def test_release_wheel_builds_use_persistent_ccache():
+    root = Path(__file__).resolve().parents[2]
+    pyproject = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    workflow = (root / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8",
+    )
+
+    for platform_name in ("macos", "linux"):
+        platform = pyproject["tool"]["cibuildwheel"][platform_name]
+        assert "ccache" in platform["before-all"]
+        assert "ccache --zero-stats" in platform["before-all"]
+        assert "ccache --max-size 2G" in platform["before-all"]
+        assert "-DCMAKE_C_COMPILER_LAUNCHER=ccache" in platform["environment"]
+        assert "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache" in platform["environment"]
+        assert "ccache --show-stats" in platform["repair-wheel-command"]
+
+    assert "actions/cache@v4" in workflow
+    assert "path: .ccache" in workflow
+    assert (
+        "key: ccache-v1-${{ matrix.platform }}-${{ runner.arch }}-${{ github.sha }}"
+        in workflow
+    )
+    assert "ccache-v1-${{ matrix.platform }}-${{ runner.arch }}-" in workflow
+    assert "Install macOS system packages" not in workflow
+
+
+def test_release_cache_paths_are_platform_scoped(tmp_path):
+    release_build = _release_build_module()
+
+    macos = release_build.macos_env(tmp_path)
+    linux = release_build.linux_env(tmp_path)
+
+    assert macos["CCACHE_DIR"] == str(tmp_path / ".ccache")
+    assert macos["CCACHE_BASEDIR"] == str(tmp_path)
+    assert macos["CCACHE_COMPILERCHECK"] == "content"
+    assert macos["CCACHE_MAXSIZE"] == "2G"
+    assert linux["CIBW_CONTAINER_ENGINE"] == (
+        f"docker; create_args: --volume={(tmp_path / '.ccache').resolve()}:/ccache"
+    )
+
+
+def test_cleaning_wheel_outputs_preserves_compiler_cache(tmp_path, monkeypatch):
+    release_build = _release_build_module()
+    monkeypatch.setattr(release_build, "REPO_ROOT", tmp_path)
+    cache_marker = tmp_path / ".ccache" / "cache-entry"
+    cache_marker.parent.mkdir()
+    cache_marker.write_text("cached", encoding="utf-8")
+    (tmp_path / "build").mkdir()
+    (tmp_path / "dist").mkdir()
+
+    release_build.clean_output_paths("1.0.1.post27", "macos")
+
+    assert cache_marker.read_text(encoding="utf-8") == "cached"
+    assert not (tmp_path / "build").exists()
+    assert not (tmp_path / "dist").exists()

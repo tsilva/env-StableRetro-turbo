@@ -17,7 +17,6 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VERSION_PATH = REPO_ROOT / "stable_retro" / "VERSION.txt"
 PYTHON = REPO_ROOT / ".venv314" / "bin" / "python"
@@ -40,6 +39,8 @@ PUBLIC_DATA_PLATFORMS = (
 )
 MACOS_CMAKE_ARGS = (
     "-DCMAKE_BUILD_TYPE=Release "
+    "-DCMAKE_C_COMPILER_LAUNCHER=ccache "
+    "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache "
     "-DBUILD_CORES=gb;nes;snes;genesis;atari2600;gba;32x;saturn;ds "
     "-DBUILD_TESTS=OFF "
     "-DENABLE_CAPNPROTO=OFF "
@@ -47,6 +48,8 @@ MACOS_CMAKE_ARGS = (
 )
 LINUX_CMAKE_ARGS = (
     "-DCMAKE_BUILD_TYPE=Release "
+    "-DCMAKE_C_COMPILER_LAUNCHER=ccache "
+    "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache "
     "-DBUILD_MANYLINUX=ON "
     "-DBUILD_CORES=gb;nes;snes;genesis;atari2600;gba;32x;saturn;ds "
     "-DBUILD_TESTS=OFF "
@@ -61,7 +64,7 @@ IGNORED_DIR_NAMES_ANYWHERE = {
     ".pytest_cache",
     "CMakeFiles",
 }
-IGNORED_ROOT_DIR_NAMES = {"build", "dist", "env"}
+IGNORED_ROOT_DIR_NAMES = {".ccache", "build", "dist", "env"}
 IGNORED_FILE_NAMES = {"CMakeCache.txt"}
 IGNORED_FILE_SUFFIXES = {".o", ".a", ".so", ".dylib", ".d"}
 ROM_PAYLOAD_NAMES = {
@@ -107,7 +110,9 @@ def check_version(args: argparse.Namespace) -> None:
     if package_code != 0:
         failures.append(f"setup.py --name failed: {package_output}")
     if package_output != PACKAGE_NAME:
-        failures.append(f"package name is {package_output!r}, expected {PACKAGE_NAME!r}")
+        failures.append(
+            f"package name is {package_output!r}, expected {PACKAGE_NAME!r}",
+        )
     if args.version is not None and version != args.version:
         failures.append(f"expected version {args.version!r}, saw {version!r}")
     if failures:
@@ -175,7 +180,10 @@ def is_under(parts: tuple[str, ...], prefix: tuple[str, ...]) -> bool:
 
 def is_rom_payload(rel: Path) -> bool:
     parts = rel.parts
-    return is_under(parts, ("stable_retro", "data")) and rel.name.lower() in ROM_PAYLOAD_NAMES
+    return (
+        is_under(parts, ("stable_retro", "data"))
+        and rel.name.lower() in ROM_PAYLOAD_NAMES
+    )
 
 
 def should_ignore(rel: Path) -> bool:
@@ -196,7 +204,9 @@ def should_ignore(rel: Path) -> bool:
 def copy_clean_tree(destination: Path, *, force: bool = False) -> None:
     if destination.exists():
         if not force:
-            raise FileExistsError(f"{destination} already exists; pass --force to replace it")
+            raise FileExistsError(
+                f"{destination} already exists; pass --force to replace it",
+            )
         shutil.rmtree(destination)
 
     def ignore(directory: str, names: list[str]) -> set[str]:
@@ -266,20 +276,30 @@ def release_temp_root() -> Path:
     return root
 
 
-def macos_env() -> dict[str, str]:
+def compiler_cache_dir(root: Path = REPO_ROOT) -> Path:
+    return root / ".ccache"
+
+
+def macos_env(root: Path = REPO_ROOT) -> dict[str, str]:
     return {
         "MACOSX_DEPLOYMENT_TARGET": "14.0",
         "ARCHFLAGS": "-arch arm64",
+        "CCACHE_DIR": str(compiler_cache_dir(root)),
+        "CCACHE_BASEDIR": str(root),
+        "CCACHE_COMPILERCHECK": "content",
+        "CCACHE_MAXSIZE": "2G",
         "CMAKE_ARGS": MACOS_CMAKE_ARGS,
         "STABLE_RETRO_PUBLIC_CORES": ",".join(PUBLIC_CORES),
         "STABLE_RETRO_PUBLIC_DATA_PLATFORMS": PUBLIC_DATA_PLATFORMS,
     }
 
 
-def linux_env() -> dict[str, str]:
+def linux_env(root: Path = REPO_ROOT) -> dict[str, str]:
+    cache_dir = compiler_cache_dir(root).resolve()
     return {
         "CIBW_BUILD": " ".join(f"{tag}-manylinux_x86_64" for tag in PYTHON_TAGS),
         "CIBW_ARCHS_LINUX": "x86_64",
+        "CIBW_CONTAINER_ENGINE": (f"docker; create_args: --volume={cache_dir}:/ccache"),
     }
 
 
@@ -287,7 +307,10 @@ def prepare_sources(args: argparse.Namespace) -> None:
     version = args.version or read_version()
     post = post_number(version)
     root = args.root or Path(
-        tempfile.mkdtemp(prefix=f"stable-retro-turbo-post{post}-builds.", dir=release_temp_root())
+        tempfile.mkdtemp(
+            prefix=f"stable-retro-turbo-post{post}-builds.",
+            dir=release_temp_root(),
+        ),
     )
     root = root.resolve()
     macos_src = root / "macos-src"
@@ -327,7 +350,9 @@ def fetch_pypi_project() -> dict[str, object]:
 def release_has_non_yanked_file(files: object) -> bool:
     if not isinstance(files, list):
         return False
-    return any(isinstance(file, dict) and not file.get("yanked", False) for file in files)
+    return any(
+        isinstance(file, dict) and not file.get("yanked", False) for file in files
+    )
 
 
 def latest_non_yanked_pypi_version(releases: object) -> str | None:
@@ -353,12 +378,22 @@ def check_pypi(args: argparse.Namespace) -> None:
         data = fetch_pypi_project()
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
-            print(json.dumps({"package": PACKAGE_NAME, "exists": False, "version_exists": False}, indent=2))
+            print(
+                json.dumps(
+                    {"package": PACKAGE_NAME, "exists": False, "version_exists": False},
+                    indent=2,
+                ),
+            )
             return
         raise
     releases = data.get("releases", {})
     exists = version in releases and bool(releases[version])
-    print(json.dumps({"package": PACKAGE_NAME, "version": version, "version_exists": exists}, indent=2))
+    print(
+        json.dumps(
+            {"package": PACKAGE_NAME, "version": version, "version_exists": exists},
+            indent=2,
+        ),
+    )
     if exists:
         raise SystemExit(f"{PACKAGE_NAME} {version} already exists on PyPI")
 
@@ -368,7 +403,16 @@ def latest_pypi(args: argparse.Namespace) -> None:
         data = fetch_pypi_project()
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
-            print(json.dumps({"package": PACKAGE_NAME, "exists": False, "latest_non_yanked": None}, indent=2))
+            print(
+                json.dumps(
+                    {
+                        "package": PACKAGE_NAME,
+                        "exists": False,
+                        "latest_non_yanked": None,
+                    },
+                    indent=2,
+                ),
+            )
             return
         raise
     latest = latest_non_yanked_pypi_version(data.get("releases"))
@@ -382,7 +426,9 @@ def latest_pypi(args: argparse.Namespace) -> None:
     }
     print(json.dumps(result, indent=2))
     if args.fail_if_mismatch and latest != info_version:
-        raise SystemExit(f"PyPI info.version {info_version!r} does not match latest non-yanked {latest!r}")
+        raise SystemExit(
+            f"PyPI info.version {info_version!r} does not match latest non-yanked {latest!r}",
+        )
 
 
 def build_commands(args: argparse.Namespace) -> None:
@@ -394,15 +440,15 @@ def build_commands(args: argparse.Namespace) -> None:
     print("# macOS arm64")
     print(f"cd {shell_quote(macos_src)}")
     print(
-        f"{env_lines(macos_env())} {shell_quote(PYTHON)} -m cibuildwheel "
-        f"--platform macos --output-dir {shell_quote(macos_wheelhouse)}"
+        f"{env_lines(macos_env(macos_src))} {shell_quote(PYTHON)} -m cibuildwheel "
+        f"--platform macos --output-dir {shell_quote(macos_wheelhouse)}",
     )
     print()
     print("# Linux manylinux")
     print(f"cd {shell_quote(linux_src)}")
     print(
-        f"{env_lines(linux_env())} {shell_quote(PYTHON)} -m cibuildwheel "
-        f"--platform linux --output-dir {shell_quote(linux_wheelhouse)}"
+        f"{env_lines(linux_env(linux_src))} {shell_quote(PYTHON)} -m cibuildwheel "
+        f"--platform linux --output-dir {shell_quote(linux_wheelhouse)}",
     )
 
 
@@ -421,6 +467,7 @@ def clean_output_paths(version: str, platform_name: str) -> None:
 def build_platform(args: argparse.Namespace) -> None:
     version = args.version or read_version()
     parse_version(version)
+    compiler_cache_dir().mkdir(parents=True, exist_ok=True)
     clean_output_paths(version, args.platform)
     if args.platform == "macos":
         env = os.environ.copy()
@@ -486,7 +533,9 @@ def audit_wheel(wheel: Path, version: str, platform_name: str) -> dict[str, obje
         core_suffix = ".dylib"
     elif platform_name == "linux":
         expected_names = {path.name for path in expected_linux_wheels(version)}
-        expected_extension = f"stable_retro/_retro.cpython-{python_abi}-x86_64-linux-gnu.so"
+        expected_extension = (
+            f"stable_retro/_retro.cpython-{python_abi}-x86_64-linux-gnu.so"
+        )
         core_suffix = ".so"
     else:
         raise ValueError(f"unknown platform: {platform_name}")
@@ -497,7 +546,7 @@ def audit_wheel(wheel: Path, version: str, platform_name: str) -> dict[str, obje
             continue
         lower_name = name.lower()
         if Path(name).name.lower() in ROM_PAYLOAD_NAMES or lower_name.endswith(
-            GAME_PAYLOAD_SUFFIXES
+            GAME_PAYLOAD_SUFFIXES,
         ):
             rom_payloads.append(name)
     checks = {
@@ -528,8 +577,9 @@ def audit_wheel(wheel: Path, version: str, platform_name: str) -> dict[str, obje
             "does_not_define_retro_vector_env": "class RetroVectorEnv" not in vec_env,
             "no_legacy_vec_env_class": legacy_vec_env_name not in vec_env,
             "uses_private_retro_vec_env_binding": "_RetroVecEnv" in vec_env,
-            "does_not_use_public_retro_vec_env_binding": "_retro.RetroVecEnv" not in vec_env,
-        }
+            "does_not_use_public_retro_vec_env_binding": "_retro.RetroVecEnv"
+            not in vec_env,
+        },
     )
     return {
         "wheel": str(wheel),
@@ -575,7 +625,10 @@ def smoke_wheel(args: argparse.Namespace) -> None:
     temp_root = release_temp_root()
     uv_env = os.environ.copy()
     uv_env.setdefault("UV_CACHE_DIR", str(temp_root / "uv-cache-stable-retro-build"))
-    with tempfile.TemporaryDirectory(prefix="stable-retro-wheel-smoke.", dir=temp_root) as tmp:
+    with tempfile.TemporaryDirectory(
+        prefix="stable-retro-wheel-smoke.",
+        dir=temp_root,
+    ) as tmp:
         target = Path(tmp)
         if args.installer == "uv":
             run(
@@ -593,7 +646,18 @@ def smoke_wheel(args: argparse.Namespace) -> None:
                 env=uv_env,
             )
         elif args.installer == "pip":
-            run([str(python), "-m", "pip", "install", "--no-deps", "--target", str(target), str(wheel)])
+            run(
+                [
+                    str(python),
+                    "-m",
+                    "pip",
+                    "install",
+                    "--no-deps",
+                    "--target",
+                    str(target),
+                    str(wheel),
+                ],
+            )
         else:
             try:
                 run(
@@ -611,7 +675,18 @@ def smoke_wheel(args: argparse.Namespace) -> None:
                     env=uv_env,
                 )
             except (FileNotFoundError, subprocess.CalledProcessError):
-                run([str(python), "-m", "pip", "install", "--no-deps", "--target", str(target), str(wheel)])
+                run(
+                    [
+                        str(python),
+                        "-m",
+                        "pip",
+                        "install",
+                        "--no-deps",
+                        "--target",
+                        str(target),
+                        str(wheel),
+                    ],
+                )
 
         code = """
 import stable_retro
@@ -624,7 +699,9 @@ assert not hasattr(_retro, "RetroVecEnv")
 assert hasattr(stable_retro, "RetroVecEnv")
 assert not hasattr(stable_retro, "RetroVectorEnv")
 assert not hasattr(stable_retro, "StableRetro" + "Native" + "VecEnv")
-""".format(target=str(target))
+""".format(
+            target=str(target),
+        )
         env = os.environ.copy()
         env["PYTHONPATH"] = str(target)
         env.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-stable-retro")
@@ -650,8 +727,14 @@ def final_check(args: argparse.Namespace) -> None:
     version = args.version or read_version()
     wheels = [*expected_macos_wheels(version), *expected_linux_wheels(version)]
     results = [
-        *(audit_wheel(wheel, version, "macos") for wheel in expected_macos_wheels(version)),
-        *(audit_wheel(wheel, version, "linux") for wheel in expected_linux_wheels(version)),
+        *(
+            audit_wheel(wheel, version, "macos")
+            for wheel in expected_macos_wheels(version)
+        ),
+        *(
+            audit_wheel(wheel, version, "linux")
+            for wheel in expected_linux_wheels(version)
+        ),
     ]
     assert_audit_passed(results)
     run([str(PYTHON), "-m", "twine", "check", *(str(wheel) for wheel in wheels)])
@@ -665,20 +748,39 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    check = subparsers.add_parser("check-version", help="Validate package name and version")
+    check = subparsers.add_parser(
+        "check-version",
+        help="Validate package name and version",
+    )
     check.add_argument("--version")
     check.set_defaults(func=check_version)
 
-    bump = subparsers.add_parser("bump-version", help="Print or write the next post version")
-    bump.add_argument("--to", help="Set an explicit target version instead of incrementing")
-    bump.add_argument("--write", action="store_true", help="Write the target to stable_retro/VERSION.txt")
+    bump = subparsers.add_parser(
+        "bump-version",
+        help="Print or write the next post version",
+    )
+    bump.add_argument(
+        "--to",
+        help="Set an explicit target version instead of incrementing",
+    )
+    bump.add_argument(
+        "--write",
+        action="store_true",
+        help="Write the target to stable_retro/VERSION.txt",
+    )
     bump.set_defaults(func=bump_version)
 
-    pypi = subparsers.add_parser("check-pypi", help="Check whether a PyPI version is still unused")
+    pypi = subparsers.add_parser(
+        "check-pypi",
+        help="Check whether a PyPI version is still unused",
+    )
     pypi.add_argument("--version")
     pypi.set_defaults(func=check_pypi)
 
-    latest = subparsers.add_parser("latest-pypi", help="Print the latest non-yanked PyPI version")
+    latest = subparsers.add_parser(
+        "latest-pypi",
+        help="Print the latest non-yanked PyPI version",
+    )
     latest.add_argument(
         "--fail-if-mismatch",
         action="store_true",
@@ -686,24 +788,36 @@ def main() -> None:
     )
     latest.set_defaults(func=latest_pypi)
 
-    prepare = subparsers.add_parser("prepare-sources", help="Create clean macOS/Linux source copies")
+    prepare = subparsers.add_parser(
+        "prepare-sources",
+        help="Create clean macOS/Linux source copies",
+    )
     prepare.add_argument("--version")
     prepare.add_argument("--root", type=Path)
     prepare.add_argument("--force", action="store_true")
     prepare.set_defaults(func=prepare_sources)
 
-    commands = subparsers.add_parser("build-commands", help="Print platform build commands")
+    commands = subparsers.add_parser(
+        "build-commands",
+        help="Print platform build commands",
+    )
     commands.add_argument("--version")
     commands.add_argument("--macos-src")
     commands.add_argument("--linux-src")
     commands.set_defaults(func=build_commands)
 
-    build = subparsers.add_parser("build-platform", help="Build one release wheel platform")
+    build = subparsers.add_parser(
+        "build-platform",
+        help="Build one release wheel platform",
+    )
     build.add_argument("--platform", choices=("macos", "linux"), required=True)
     build.add_argument("--version")
     build.set_defaults(func=build_platform)
 
-    audit = subparsers.add_parser("audit-wheels", help="Audit macOS and Linux wheel contents")
+    audit = subparsers.add_parser(
+        "audit-wheels",
+        help="Audit macOS and Linux wheel contents",
+    )
     audit.add_argument("--version")
     audit.add_argument("--macos-wheel", type=Path, action="append")
     audit.add_argument("--linux-wheel", type=Path, action="append")
@@ -715,13 +829,23 @@ def main() -> None:
     smoke.add_argument("--installer", choices=("auto", "uv", "pip"), default="auto")
     smoke.set_defaults(func=smoke_wheel)
 
-    smoke_macos = subparsers.add_parser("smoke-macos-wheel", help="Install and import-test a macOS wheel")
+    smoke_macos = subparsers.add_parser(
+        "smoke-macos-wheel",
+        help="Install and import-test a macOS wheel",
+    )
     smoke_macos.add_argument("wheel", type=Path)
     smoke_macos.add_argument("--python", type=Path, default=PYTHON)
-    smoke_macos.add_argument("--installer", choices=("auto", "uv", "pip"), default="auto")
+    smoke_macos.add_argument(
+        "--installer",
+        choices=("auto", "uv", "pip"),
+        default="auto",
+    )
     smoke_macos.set_defaults(func=smoke_wheel)
 
-    final = subparsers.add_parser("final-check", help="Audit wheels, run twine check, hash, and print publishing handoff")
+    final = subparsers.add_parser(
+        "final-check",
+        help="Audit wheels, run twine check, hash, and print publishing handoff",
+    )
     final.add_argument("--version")
     final.set_defaults(func=final_check)
 

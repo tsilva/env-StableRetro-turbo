@@ -105,9 +105,13 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
 
-      - name: Install macOS system packages
-        if: matrix.platform == 'macos'
-        run: brew install pkg-config lua@5.4
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-v1-${{ matrix.platform }}-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: |
+            ccache-v1-${{ matrix.platform }}-${{ runner.arch }}-
 
       - name: Install release environment
         run: |

@@ -187,6 +187,17 @@ set(BUILD_CORES
       "Semicolon-separated platform/core names to build. Empty builds the default full set."
 )
 
+function(prepend_compiler_launcher output compiler launcher)
+  set(command "${compiler}")
+  if(launcher)
+    list(JOIN launcher " " launcher_command)
+    set(command "${launcher_command} ${command}")
+  endif()
+  set(${output}
+      "${command}"
+      PARENT_SCOPE)
+endfunction()
+
 function(add_core platform core_name)
   set(target_name ${core_name}_libretro${CMAKE_SHARED_LIBRARY_SUFFIX})
   get_filename_component(
@@ -232,6 +243,11 @@ function(add_core platform core_name)
     set(core_env_command env)
   endif()
 
+  prepend_compiler_launcher(core_c_compiler "${CMAKE_C_COMPILER}"
+                            "${CMAKE_C_COMPILER_LAUNCHER}")
+  prepend_compiler_launcher(core_cxx_compiler "${CMAKE_CXX_COMPILER}"
+                            "${CMAKE_CXX_COMPILER_LAUNCHER}")
+
   set(core_ldflags "-w ${STATIC_LDFLAGS}")
   # Vendored cores still rely on pre-C23 function declaration semantics.
   set(core_cflags "-w -std=gnu17")
@@ -269,8 +285,8 @@ function(add_core platform core_name)
     COMMAND
       ${core_env_command} CFLAGS=${core_cflags} CXXFLAGS=${core_cxxflags}
       LDFLAGS=${core_ldflags} ${core_archflags} $(MAKE) -f ${makefile}
-      CC="${CMAKE_C_COMPILER}" CXX="${CMAKE_CXX_COMPILER}"
-      fpic=${core_fpic_flags} ${libretro_platform}
+      CC=${core_c_compiler} CXX=${core_cxx_compiler} fpic=${core_fpic_flags}
+      ${libretro_platform}
     COMMAND ${CMAKE_COMMAND} -E copy "${core_name}_libretro${DYNLIB_SUFFIX}"
             "${TARGET_PATH}"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/cores/${platform}/${subdir}"
