@@ -139,42 +139,10 @@ def copy_public_core_assets(destination: Path):
             target = destination / asset.name
             if asset.resolve() != target.resolve():
                 shutil.copy2(asset, target)
-
-
-def should_build_native_snes():
-    return (
-        sys.platform == "darwin"
-        and platform.machine() == "arm64"
-        and "snes9x" in PUBLIC_CORE_NAMES
-    )
-
-
-def macos_min_flag(default: str):
-    min_version = os.environ.get("MACOSX_DEPLOYMENT_TARGET", default)
-    return f"-mmacosx-version-min={min_version}"
-
-
-def build_native_snes_core(destination: Path, jobs: str):
-    source_dir = SCRIPT_DIR / "cores" / "snes" / "libretro"
-    destination.mkdir(parents=True, exist_ok=True)
-    min_flag = macos_min_flag("11.0")
-    subprocess.check_call(["make", "-C", str(source_dir), "clean"])
-    subprocess.check_call(
-        [
-            "make",
-            "-C",
-            str(source_dir),
-            "platform=osx",
-            "CC=clang -arch arm64",
-            "CXX=clang++ -arch arm64",
-            f"fpic=-fPIC {min_flag}",
-            jobs,
-        ],
-    )
-    shutil.copy2(
-        source_dir / "snes9x_libretro.dylib",
-        destination / "snes9x_libretro.dylib",
-    )
+    if sys.platform == "darwin" and platform.machine() == "arm64":
+        for core in PUBLIC_CORE_NAMES:
+            asset = destination / f"{core}_libretro.dylib"
+            subprocess.check_call(["lipo", str(asset), "-verify_arch", "arm64"])
 
 
 class CMakeBuild(build_ext):
@@ -243,11 +211,6 @@ class CMakeBuild(build_ext):
         subprocess.check_call(["make", jobs, "all"])
         if package_dir is not None:
             copy_public_core_assets(package_dir / "cores")
-            if should_build_native_snes():
-                build_native_snes_core(package_dir / "cores", jobs)
-        else:
-            if should_build_native_snes():
-                build_native_snes_core(SCRIPT_DIR / "stable_retro" / "cores", jobs)
 
 
 setup(

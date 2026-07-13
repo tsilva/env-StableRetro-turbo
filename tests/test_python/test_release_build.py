@@ -1,4 +1,5 @@
 import importlib.util
+import tomllib
 from pathlib import Path
 
 
@@ -28,12 +29,18 @@ def test_version_file_is_the_single_source_of_truth():
     root = Path(__file__).resolve().parents[2]
     version_path = root / "stable_retro" / "VERSION.txt"
 
-    assert (root / "setup.py").read_text(encoding="utf-8").count("stable_retro\" / \"VERSION.txt") == 1
-    assert "../stable_retro/VERSION.txt" in (root / "docs" / "conf.py").read_text(encoding="utf-8")
-    assert "stable_retro/VERSION.txt" in (root / ".github" / "workflows" / "release.yml").read_text(
-        encoding="utf-8"
+    assert (root / "setup.py").read_text(encoding="utf-8").count(
+        'stable_retro" / "VERSION.txt',
+    ) == 1
+    assert "../stable_retro/VERSION.txt" in (root / "docs" / "conf.py").read_text(
+        encoding="utf-8",
     )
-    assert (root / "stable_retro" / "__init__.py").read_text(encoding="utf-8").count("VERSION.txt") == 1
+    assert "stable_retro/VERSION.txt" in (
+        root / ".github" / "workflows" / "release.yml"
+    ).read_text(encoding="utf-8")
+    assert (root / "stable_retro" / "__init__.py").read_text(encoding="utf-8").count(
+        "VERSION.txt",
+    ) == 1
     assert version_path.read_text(encoding="utf-8").strip()
 
 
@@ -76,7 +83,9 @@ def test_rom_payload_detection_is_path_scoped():
 
     assert release_build.is_rom_payload(Path("stable_retro/data/stable/Foo/rom.nes"))
     assert release_build.is_rom_payload(Path("stable_retro/data/stable/Foo/rom.md"))
-    assert not release_build.is_rom_payload(Path("stable_retro/data/stable/Foo/rom.sha"))
+    assert not release_build.is_rom_payload(
+        Path("stable_retro/data/stable/Foo/rom.sha"),
+    )
     assert not release_build.is_rom_payload(Path("docs/rom.nes"))
 
 
@@ -105,3 +114,16 @@ def test_expected_linux_wheels_match_auditwheel_policy_tag():
 
     assert len(names) == len(release_build.PYTHON_TAGS)
     assert all("manylinux_2_27_x86_64.manylinux_2_28_x86_64" in name for name in names)
+
+
+def test_wheel_build_parallelizes_cores_without_rebuilding_native_snes():
+    root = Path(__file__).resolve().parents[2]
+    pyproject = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    cmake_source = (root / "CMakeLists.txt").read_text(encoding="utf-8")
+    setup_source = (root / "setup.py").read_text(encoding="utf-8")
+
+    assert "cmake>=3.28" in pyproject["build-system"]["requires"]
+    assert "JOB_SERVER_AWARE TRUE" in cmake_source
+    assert "set(core_env_command env)" in cmake_source
+    assert "build_native_snes_core" not in setup_source
+    assert '["lipo", str(asset), "-verify_arch", "arm64"]' in setup_source

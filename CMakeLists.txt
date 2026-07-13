@@ -225,6 +225,11 @@ function(add_core platform core_name)
 
   if(WIN32)
     set(libretro_platform platform=win)
+    set(core_env_command ${CMAKE_COMMAND} -E env)
+  else()
+    # The native env command execs Make without closing GNU Make's jobserver
+    # descriptors. `cmake -E env` breaks nested parallelism on Unix runners.
+    set(core_env_command env)
   endif()
 
   set(core_ldflags "-w ${STATIC_LDFLAGS}")
@@ -262,7 +267,7 @@ function(add_core platform core_name)
   add_custom_command(
     OUTPUT "${TARGET_PATH}"
     COMMAND
-      ${CMAKE_COMMAND} -E env CFLAGS=${core_cflags} CXXFLAGS=${core_cxxflags}
+      ${core_env_command} CFLAGS=${core_cflags} CXXFLAGS=${core_cxxflags}
       LDFLAGS=${core_ldflags} ${core_archflags} $(MAKE) -f ${makefile}
       CC="${CMAKE_C_COMPILER}" CXX="${CMAKE_CXX_COMPILER}"
       fpic=${core_fpic_flags} ${libretro_platform}
@@ -270,7 +275,8 @@ function(add_core platform core_name)
             "${TARGET_PATH}"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/cores/${platform}/${subdir}"
     DEPENDS
-      "${CMAKE_CURRENT_SOURCE_DIR}/stable_retro/cores/${core_name}-version")
+      "${CMAKE_CURRENT_SOURCE_DIR}/stable_retro/cores/${core_name}-version"
+      JOB_SERVER_AWARE TRUE)
   unset(core_ldflags)
   add_custom_command(
     OUTPUT "${PYLIB_DIRECTORY}/stable_retro/cores/${core_name}.json"
@@ -521,12 +527,8 @@ if(BUILD_PYTHON)
     set(PYBIND_LIBS "${Python_LIBRARY}")
   endif()
 
-  target_link_libraries(
-    stable_retro
-    retro-base
-    ${LUA_LINK_LIBRARY}
-    ${PYBIND_LIBS}
-    ${STATIC_LDFLAGS})
+  target_link_libraries(stable_retro retro-base ${LUA_LINK_LIBRARY}
+                        ${PYBIND_LIBS} ${STATIC_LDFLAGS})
 endif()
 
 if(BUILD_TESTS)
