@@ -113,8 +113,20 @@ def test_expected_linux_wheels_match_auditwheel_policy_tag():
 
     names = {path.name for path in release_build.expected_linux_wheels("1.0.1.post11")}
 
+    assert release_build.PYTHON_TAGS == ("cp314",)
     assert len(names) == len(release_build.PYTHON_TAGS)
     assert all("manylinux_2_27_x86_64.manylinux_2_28_x86_64" in name for name in names)
+
+
+def test_package_and_wheel_metadata_target_python_314_only():
+    root = Path(__file__).resolve().parents[2]
+    pyproject = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    setup_source = (root / "setup.py").read_text(encoding="utf-8")
+
+    assert pyproject["project"]["requires-python"] == ">=3.14,<3.15"
+    assert pyproject["tool"]["cibuildwheel"]["build"] == "cp314-*"
+    assert 'python_requires=">=3.14,<3.15"' in setup_source
+    assert '"Programming Language :: Python :: 3.14"' in setup_source
 
 
 def test_wheel_build_parallelizes_cores_without_rebuilding_native_snes():

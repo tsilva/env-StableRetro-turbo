@@ -21,7 +21,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 VERSION_PATH = REPO_ROOT / "stable_retro" / "VERSION.txt"
 PYTHON = REPO_ROOT / ".venv314" / "bin" / "python"
 PACKAGE_NAME = "stable-retro-turbo"
-PYTHON_TAGS = ("cp311", "cp312", "cp313", "cp314")
+PYTHON_TAGS = ("cp314",)
 
 PUBLIC_CORES = (
     "gambatte",

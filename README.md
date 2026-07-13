@@ -370,9 +370,9 @@ Modal runs: full env benchmark
 - `RetroVecEnv` is the turbo-specific Gymnasium vector environment.
 - Atari uses the packaged Stella core through `RetroEnv` and `RetroVecEnv`.
 - `RetroVectorEnv` is not exposed; `RetroVecEnv` is the public native vector API.
-- Source builds and CI cover Python `3.11` through `3.14`; the repo-local
-  deterministic release helper publishes `cp311`, `cp312`, `cp313`, and `cp314`
-  wheels for the supported release platforms.
+- Source builds, CI, and release wheels target Python `3.14`; the repo-local
+  deterministic release helper publishes one `cp314` wheel for each supported
+  release platform.
   Building from source also requires CMake, a C/C++ compiler, and platform core
   build dependencies.
 - ROMs are not included. Import ROMs and read game/core docs through upstream
