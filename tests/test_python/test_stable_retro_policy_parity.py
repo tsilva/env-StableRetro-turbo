@@ -168,14 +168,6 @@ def level_was_cleared(info):
     if bool(info.get("level_complete")) or bool(info.get("completion_event")):
         return True
 
-    done_on_info = info.get("done_on_info")
-    if isinstance(done_on_info, dict) and "level_change" in done_on_info:
-        return True
-
-    info_events = info.get("info_events")
-    if isinstance(info_events, dict) and "level_change" in info_events:
-        return True
-
     return int(info.get("levelLo", 0)) > 0
 
 

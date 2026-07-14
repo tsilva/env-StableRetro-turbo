@@ -27,22 +27,14 @@ Compared with upstream Stable Retro's single-environment `RetroEnv` API,
   the Python boundary.
 - **🛤️ Multi-state training support**: Lanes can use fixed, sampled, and tracked
   start states for curricula or task-conditioned agents.
-- **🔁 Lane-local autoreset**: Finished lanes reset independently while keeping
-  Gymnasium same-step `final_obs` / `final_info` metadata.
-- **🚦 Info-transition terminals**: Episodes can end on changes in game info,
-  such as first life loss.
-- **🧾 Scenario-defined events**: Integrations can declare reusable named
-  events in `scenario.json`, including verbose multi-trigger events such as
-  `"op": "decrease"` or `"op": "change"`.
+- **🔁 Lane-local masked reset**: Finished lanes retain their terminal state
+  until the caller explicitly resets the selected lanes.
 - **🎛️ Rollout stochasticity controls**: Sticky actions and random no-op starts
   are available in the native path.
 - **🧩 Explicit ROM paths**: Benchmarks and integrations can run without relying
   on an imported ROM lookup.
 - **🍄 Expanded Mario saved states**: Mario Level 1 and Level 2 starts ship with
   the package.
-- **🍄 Super Mario event hooks**: `SuperMarioBros-Nes-v0` includes built-in
-  `life_loss` and `level_change` scenario events for policy evaluation and
-  curriculum terminals.
 
 ## Install
 
@@ -131,14 +123,12 @@ pip install stable-retro-turbo
 
 ```python
 import stable_retro as retro
-from gymnasium.vector import AutoresetMode
 
 env = retro.RetroVecEnv(
     "Breakout-Atari2600-v0",
     state="Start",
     num_envs=32,
     num_threads=16,
-    autoreset_mode=AutoresetMode.DISABLED,
     obs_resize=(84, 84),
     obs_grayscale=True,
     obs_resize_algorithm="area",
@@ -196,7 +186,6 @@ retro.RetroVecEnv(
     sticky_action_prob=0.0,      # chance to repeat the previous lane action
     reward_clip=False,           # clip rewards in the native path
     info_filter="all",           # "all", "terminal", "none", or mode/keys mapping
-    done_on=None,                # info-variable terminal rules
 )
 ```
 
@@ -211,7 +200,7 @@ one state per env lane, or a `{state_name: weight}` mapping sampled on reset.
 | `num_threads` | `None` (`num_envs`) | Native worker threads; when omitted, uses one worker per env lane. |
 | `rom_path` | `None` | Explicit ROM path for direct-ROM tests or external integrations. |
 | `obs_resize` | `None` | Native resize target as `(width, height)`. |
-| `obs_crop` | `None` | Native crop before resize, using the same crop contract as `RetroEnv`. |
+| `obs_crop` | `None` | Native crop before resize in the vector fast path. |
 | `obs_crop_mode` | `"remove"` | Crop behavior: `"remove"` keeps the historical geometry-changing crop, while `"mask"` preserves the full observation canvas and fills the cropped regions before resize, layout conversion, and frame stacking. |
 | `obs_crop_fill` | `0` | Scalar uint8 fill value for crop masking; RGB observations fill every channel with the same value. |
 | `obs_grayscale` | `False` | Convert image observations to grayscale natively. |
@@ -224,9 +213,8 @@ one state per env lane, or a `{state_name: weight}` mapping sampled on reset.
 | `noop_reset_max` | `0` | Apply up to this many random no-op frames after reset. |
 | `use_fire_reset` | `True` | Press and release FIRE for one native frame after each full-episode Atari reset when the action is available. |
 | `sticky_action_prob` | `0.0` | Probability of repeating the previous lane action instead of the requested action. |
-| `reward_clip` | `False` | Clip rewards with the same semantics as the single-env preprocessing path. |
+| `reward_clip` | `False` | Clip native vector rewards to `[-1, 1]` or explicit bounds. |
 | `info_filter` | `"all"` | Info payload filter: `"all"`, `"terminal"`, `"none"`, or `{"mode": ..., "keys": (...)}`. |
-| `done_on` | `None` | General per-lane terminal rules keyed by info-variable `change`, `increase`, or `decrease`. |
 
 Use crop masking when you want to hide HUDs or other static screen regions
 during initial training without changing the spatial observation contract. For
@@ -240,31 +228,22 @@ the full-canvas path for later fine-tuning on unmasked observations.
 Gymnasium vector API directly. It does not subclass SB3 `VecEnv`, and
 `stable-baselines3` is not a runtime dependency for the native vector path.
 
-The native env defaults to Gymnasium same-step autoreset semantics:
+The native env permanently uses Gymnasium disabled autoreset semantics:
 
 ```python
 obs, infos = env.reset(seed=seed)
 obs, rewards, terminations, truncations, infos = env.step(actions)
 ```
 
-When a lane terminates, the returned observation for that lane is already the
-reset observation. The final episode observation and info are exposed through
-`infos["final_obs"]` and `infos["final_info"]`. SB3 compatibility is a
-downstream responsibility; for example, use an adapter in `rlab` rather than
-expecting this package to emit SB3-only `terminal_observation`, `reset_infos`, or
-`TimeLimit.truncated` fields.
-
-For runtimes that own episode boundaries, select manual autoreset and reset only
-finished lanes:
+When a lane terminates, the returned observation and info are the genuine
+terminal transition. Reset only the finished lanes before stepping again:
 
 ```python
 import stable_retro
-from gymnasium.vector import AutoresetMode
 
 env = stable_retro.RetroVecEnv(
     "SuperMarioBros-Nes-v0",
     num_envs=16,
-    autoreset_mode=AutoresetMode.DISABLED,
 )
 obs, infos = env.reset(seed=list(range(16)))
 obs, rewards, terminations, truncations, infos = env.step(actions)
@@ -273,7 +252,7 @@ if done.any():
     obs, reset_infos = env.reset(options={"reset_mask": done})
 ```
 
-In disabled mode, terminal observations and infos are returned directly from
+Terminal observations and infos are returned directly from
 `step()`. A terminated lane cannot be stepped again until it is selected by a
 masked reset. Unselected lanes retain their emulator state, RNG stream,
 observation/frame stack, and sticky-action history. Reset infos are columnar and
@@ -305,7 +284,7 @@ selected lanes.
 uv run python scripts/benchmark_vec_env.py --list-profiles                         # show saved benchmark profiles
 uv run python scripts/benchmark_vec_env.py --profile supermario-level1-1 --dry-run # print resolved env benchmark config
 uv run python scripts/benchmark_vec_env.py --profile supermario-level1-1           # run native/classic rollout benchmark
-uv run python scripts/benchmark_vec_env.py --profile atari-breakout --autoreset-mode Disabled # benchmark Atari manual reset
+uv run python scripts/benchmark_vec_env.py --profile atari-breakout                       # benchmark Atari manual reset
 make benchmark-local BENCHMARK_ARGS=--dry-run GAME=MegaMan PLATFORM=Nes STATE=Level1
 make benchmark GAME=SuperMarioBros PLATFORM=Nes STATE=Level1-1
 uv run pytest tests/test_python/test_vec_env.py                                    # run focused RetroVecEnv tests
@@ -377,21 +356,8 @@ Modal runs: full env benchmark
   build dependencies.
 - ROMs are not included. Import ROMs and read game/core docs through upstream
   Stable Retro unless the work is specifically about this turbo layer.
-- `done_on` terminates and autoresets only lanes whose configured
-  info-variable rule fires. Supported ops are `change`, `increase`, and
-  `decrease`.
-- Named `done_on` events are resolved from the selected scenario's `events`
-  map, with legacy `metadata.json` `info_events` used only as a fallback.
-  Events may use compact `(variables, op)` pairs or verbose `triggers`; multiple
-  triggers for one event are OR'd together.
-- Use `done_on=["life_loss"]` or
-  `done_on={"life_loss": {"variables": "lives", "op": "decrease"}}` for
-  first-life-loss terminal transitions.
 - `active_state_indices()` returns a read-only `int32` NumPy view for
   task-conditioned training; copy it when you need a stable snapshot.
-- `set_state_policy(...)` accepts the same string, sequence, or weighted mapping
-  forms as constructor `state=` and updates the policy used by future
-  resets/autoresets without interrupting active lanes.
 - Third-party emulator cores carry their own licenses; see [`LICENSES.md`](LICENSES.md).
 
 ## Architecture

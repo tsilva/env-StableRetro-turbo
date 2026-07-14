@@ -121,8 +121,6 @@ def run_atari_benchmark(checkout_archive, integration_files, repeats, seconds, i
                 str(repeats),
                 "--seconds",
                 str(seconds),
-                "--autoreset-mode",
-                "Disabled",
                 "--info-filter",
                 info_filter,
                 "--output-json",

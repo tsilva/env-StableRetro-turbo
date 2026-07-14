@@ -88,38 +88,6 @@ Information pertaining to reward functions and done conditions can either be spe
 
 Scenario files contain information that is used to compute the reward function and done condition from variables defined in the information manifest. Each variable specified in the scenario file is multiplied by a `reward` value if positive and a `penalty` value if negative and then summed up to create the reward for that step. Similarly, states of these variables can be checked to see if the game is over. By default the scenario file will be loaded from `scenario.json`, but alternative scenario files can be specified in the {class}`stable_retro.RetroEnv` constructor.
 
-The optional `events` section names reusable info-variable transitions, such as a
-life loss or level change. Native vector environments can opt into these with
-`done_on=["event_name"]`; this keeps the canonical `done` condition focused on
-the scenario's normal episode boundary. Each event may be a compact
-`[variables, op]` pair or a verbose object with one or more triggers. Multiple
-triggers for a single event are OR'd together.
-
-For example:
-
-```json
-{
-  "events": {
-    "life_loss": {
-      "description": "Player lost a life.",
-      "triggers": [
-        {
-          "id": "lives_decrease",
-          "variables": ["lives"],
-          "op": "decrease",
-          "compare": "reset"
-        },
-        {
-          "id": "health_decrease",
-          "variables": ["health"],
-          "op": "decrease"
-        }
-      ]
-    }
-  }
-}
-```
-
 Scenario files are again JSON and specified with the following sections:
 
 The `reward` section used to calculate the reward function, and it split into the following subsections:

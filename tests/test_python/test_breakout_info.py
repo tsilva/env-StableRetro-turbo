@@ -33,7 +33,6 @@ def test_breakout_ball_y_reports_waiting_for_fire_and_active_ball():
         frame_stack=1,
         use_fire_reset=False,
         info_filter={"mode": "all", "keys": ["ball_y", "lives"]},
-        autoreset_mode="Disabled",
     )
     try:
         _observations, reset_infos = env.reset(seed=10024)

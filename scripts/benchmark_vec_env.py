@@ -736,19 +736,9 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--action-seed", type=int, default=0)
     parser.add_argument(
-        "--done-on",
-        default=None,
-        help="Comma-separated scenario events that terminate/autoreset lanes.",
-    )
-    parser.add_argument(
         "--obs-copy",
         choices=("copy", "safe_view", "unsafe_view"),
         default="safe_view",
-    )
-    parser.add_argument(
-        "--autoreset-mode",
-        choices=("SameStep", "Disabled"),
-        default="SameStep",
     )
     parser.add_argument(
         "--dry-run",
@@ -845,11 +835,6 @@ def main(argv=None) -> int:
     )
     maxpool_last_two = profile.maxpool_last_two and not args.no_maxpool_last_two
     obs_layout = profile.obs_layout if args.obs_layout is None else args.obs_layout
-    done_on = None
-    if args.done_on is not None:
-        done_on = [item.strip() for item in args.done_on.split(",")]
-        if not all(done_on):
-            raise SystemExit("--done-on must be a comma-separated list without empty entries")
     info_filter_keys = _parse_info_filter_keys(
         args.info_filter_keys,
         game=game,
@@ -870,10 +855,7 @@ def main(argv=None) -> int:
         "maxpool_last_two": maxpool_last_two,
         "info_filter": args.info_filter,
         "obs_layout": obs_layout,
-        "autoreset_mode": args.autoreset_mode,
     }
-    if done_on is not None:
-        env_kwargs["done_on"] = done_on
     if info_filter_keys is not None:
         env_kwargs["info_filter"] = {
             "mode": args.info_filter,
@@ -884,10 +866,6 @@ def main(argv=None) -> int:
     backend = _resolve_backend(args.backend)
     if states is not None and backend != "native":
         raise SystemExit("--states requires --backend=native")
-    if done_on is not None and backend != "native":
-        raise SystemExit("--done-on requires --backend=native")
-    if args.autoreset_mode == "Disabled" and backend != "native":
-        raise SystemExit("--autoreset-mode=Disabled requires --backend=native")
     action_names = _parse_actions(args.actions)
     if args.steps is not None and action_names is None:
         raise SystemExit("--steps requires --actions for deterministic fixed-step mode")
@@ -912,12 +890,12 @@ def main(argv=None) -> int:
         f"resize={resize} grayscale={grayscale} crop={obs_crop} "
         f"crop_mode={args.obs_crop_mode} resize_algorithm={resize_algorithm} "
         f"frame_skip={frame_skip} frame_stack={frame_stack} "
-        f"maxpool_last_two={maxpool_last_two} done_on={done_on} "
+        f"maxpool_last_two={maxpool_last_two} "
         f"info_filter={args.info_filter} "
         f"info_filter_keys={'default' if info_filter_keys is None else len(info_filter_keys)} "
         f"obs_layout={obs_layout} vec_transpose_image={args.vec_transpose_image} "
-            f"obs_copy={args.obs_copy} actions={action_names or action_label} "
-            f"autoreset_mode={args.autoreset_mode} "
+        f"obs_copy={args.obs_copy} actions={action_names or action_label} "
+        f"autoreset_mode={'Disabled' if backend == 'native' else 'backend-managed'} "
         f"steps={args.steps} repeats={args.repeats} seconds={args.seconds}",
     )
     if args.dry_run:
@@ -975,7 +953,7 @@ def main(argv=None) -> int:
                 args.seconds,
                 args.warmup_steps,
                 fixed_actions=fixed_actions,
-                manual_reset=args.autoreset_mode == "Disabled",
+                manual_reset=backend == "native",
             )
             results = [result]
         else:
@@ -987,7 +965,7 @@ def main(argv=None) -> int:
                 args.warmup_steps,
                 action_names,
                 args.action_seed,
-                manual_reset=args.autoreset_mode == "Disabled",
+                manual_reset=backend == "native",
             )
     finally:
         if old_disable_audio is None:

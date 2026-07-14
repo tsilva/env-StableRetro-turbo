@@ -205,8 +205,6 @@ def test_dry_run_prints_supermario_canonical_overrides(monkeypatch, capsys):
                 "noop,right",
                 "--action-seed",
                 "0",
-                "--done-on",
-                "life_loss,level_change",
                 "--obs-layout",
                 "chw",
                 "--obs-crop-mode",
@@ -222,7 +220,7 @@ def test_dry_run_prints_supermario_canonical_overrides(monkeypatch, capsys):
     assert "state=Level1-1,Level1-2,Level1-1,Level1-2 slot-assigned" in output
     assert "crop_mode=mask" in output
     assert "maxpool_last_two=False" in output
-    assert "done_on=['life_loss', 'level_change']" in output
+    assert "autoreset_mode=Disabled" in output
     assert "obs_layout=chw" in output
     assert "actions=('noop', 'right')" in output
     assert "steps=5 repeats=3" in output

@@ -12,6 +12,7 @@ import numpy as np
 
 from stable_retro.testing.hf_policy import (
     MARIO_SIMPLE_ACTIONS,
+    _event_payload,
     _single_vector_info,
     load_sb3_policy,
     make_mario_level1_policy_env,
@@ -74,7 +75,7 @@ def run(args: argparse.Namespace) -> int:
     previous_render_skip = os.environ.get("STABLE_RETRO_DISABLE_RENDER_SKIP")
     if not args.no_window:
         os.environ["STABLE_RETRO_DISABLE_RENDER_SKIP"] = "1"
-    env = make_mario_level1_policy_env(done_on=[args.event])
+    env = make_mario_level1_policy_env()
     viewer = None
     if not args.no_window:
         from stable_retro.rendering import SimpleImageViewer
@@ -85,7 +86,8 @@ def run(args: argparse.Namespace) -> int:
     try:
         for episode in range(args.episodes):
             env.seed(args.seed + episode)
-            obs, _infos = env.reset()
+            obs, reset_infos = env.reset()
+            previous_info = _single_vector_info(reset_infos, 0)
             for step in range(1, args.max_steps + 1):
                 started_at = time.monotonic()
                 if viewer is not None:
@@ -103,16 +105,17 @@ def run(args: argparse.Namespace) -> int:
                 ]
                 obs, rewards, terminations, truncations, infos = env.step(masks)
 
+                info = _single_vector_info(infos, 0)
+                payload = _event_payload(args.event, previous_info, info)
+                previous_info = info
+                if payload is not None:
+                    print(
+                        f"{args.event} episode={episode} step={step} "
+                        f"action={action_value} reward={float(rewards[0]):g} "
+                        f"payload={payload}",
+                    )
+                    return 0
                 if bool(terminations[0] or truncations[0]):
-                    info = _single_vector_info(infos, 0)
-                    payload = info.get("done_on_info", {})
-                    if args.event in payload:
-                        print(
-                            f"{args.event} episode={episode} step={step} "
-                            f"action={action_value} reward={float(rewards[0]):g} "
-                            f"payload={payload[args.event]}",
-                        )
-                        return 0
                     break
 
                 remaining = frame_delay - (time.monotonic() - started_at)

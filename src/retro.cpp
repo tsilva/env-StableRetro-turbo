@@ -403,25 +403,8 @@ struct PyRetroEmulator {
 		return arr;
 	}
 
-	py::array_t<uint8_t> getProcessedScreen(
-		py::object cropObj,
-		py::object resizeObj,
-		bool grayscale,
-		const string& algorithm,
-		py::object maskCropObj,
-		int cropFill
-	) {
-		std::vector<uint8_t> rgb;
-		readRgbFrame(rgb);
-		return processRgbFrame(rgb, cropObj, resizeObj, grayscale, algorithm, maskCropObj, cropFill);
-	}
-
 	double getScreenRate() {
 		return m_re.getFrameRate();
-	}
-
-	double getAspectRatio() {
-		return m_re.getAspectRatio();
 	}
 
 	py::array_t<int16_t> getAudio() {
@@ -466,18 +449,6 @@ struct PyRetroEmulator {
 	}
 
 	void configureData(PyGameData& data);
-	py::tuple stepRepeatAndProcess(
-		PyGameData& data,
-		py::array_t<uint8_t> mask,
-		int repeats,
-		py::object cropObj,
-		py::object resizeObj,
-		bool grayscale,
-		const string& algorithm,
-		bool maxpoolLastTwo,
-		py::object maskCropObj,
-		int cropFill
-	);
 	static bool loadCoreInfo(const string& json) {
 		return Retro::loadCoreInfo(json);
 	}
@@ -1664,12 +1635,10 @@ public:
 		bool unsafeView,
 		const string& obsLayout,
 		py::object infoFilterKeysObj,
-		py::object doneOnRulesObj = py::none(),
 		py::object initialStateLabelsObj = py::none(),
 		py::object initialStateWeightsObj = py::none(),
 		py::object maskCropObj = py::none(),
-		int cropFill = 0,
-		bool autoresetSameStep = true
+		int cropFill = 0
 	)
 		: m_numButtons(numButtons)
 		, m_frameSkip(frameSkip)
@@ -1691,7 +1660,6 @@ public:
 		, m_fullInfo(infoFilterMode == "all")
 		, m_noInfo(infoFilterMode == "none")
 		, m_unsafeZeroCopy(unsafeView)
-		, m_autoresetSameStep(autoresetSameStep)
 		, m_numThreads(numThreads) {
 		if (numEnvs == 0) {
 			throw std::runtime_error("num_envs must be positive");
@@ -1730,7 +1698,6 @@ public:
 		} else {
 			throw std::runtime_error("obs_layout must be hwc or chw");
 		}
-		parseDoneOnInfoRules(doneOnRulesObj);
 		if (!infoFilterKeysObj.is_none()) {
 			py::sequence infoKeys = py::reinterpret_borrow<py::sequence>(infoFilterKeysObj);
 			m_infoKeys.reserve(static_cast<size_t>(infoKeys.size()));
@@ -1771,7 +1738,6 @@ public:
 			}
 			if (i == 0) {
 				const auto variables = slot->data.m_data.listVariables();
-				resolveDoneOnInfoVariables(variables);
 				if (!m_infoKeys.empty()) {
 					for (const std::string& key : m_infoKeys) {
 						auto variable = variables.find(key);
@@ -1808,7 +1774,6 @@ public:
 			slot->frameStack.resize(static_cast<size_t>(m_frameStack) * m_singleObsSize);
 			slot->action.resize(static_cast<size_t>(m_numButtons));
 			slot->lastMask.assign(static_cast<size_t>(m_numButtons), 0);
-			slot->doneOnInfoBaselines.resize(m_doneOnInfoRules.size());
 			m_slots.emplace_back(std::move(slot));
 		}
 		const auto obsShape = observationBatchShape();
@@ -2074,70 +2039,6 @@ public:
 		return names;
 	}
 
-	py::tuple initialStatePolicyNames() const {
-		py::tuple names(m_initialStates.size());
-		for (size_t i = 0; i < m_initialStates.size(); ++i) {
-			names[static_cast<py::ssize_t>(i)] = py::str(m_initialStates[i].label);
-		}
-		return names;
-	}
-
-	py::tuple initialStateWeights() const {
-		if (m_initialStateMode != InitialStateMode::Sample) {
-			throw std::runtime_error("initial_state_weights are only available for weighted state sampling");
-		}
-		py::tuple weights(m_initialStates.size());
-		const double total = m_initialStateCumulative.empty() ? 0.0 : m_initialStateCumulative.back();
-		double previous = 0.0;
-		for (size_t i = 0; i < m_initialStates.size(); ++i) {
-			const double cumulative = m_initialStateCumulative[i];
-			const double weight = total > 0.0 ? (cumulative - previous) / total : 0.0;
-			weights[static_cast<py::ssize_t>(i)] = weight;
-			previous = cumulative;
-		}
-		return weights;
-	}
-
-	void setInitialStates(
-		py::object initialStateObj,
-		py::object labelsObj = py::none(),
-		py::object weightsObj = py::none()
-	) {
-		parseInitialStates(initialStateObj, labelsObj, weightsObj, m_slots.size());
-	}
-
-	void setInitialStateWeights(py::object weightsObj) {
-		if (m_initialStateMode != InitialStateMode::Sample) {
-			throw std::runtime_error("initial_state_weights can only be updated for weighted state sampling");
-		}
-		py::sequence weightsSeq = py::reinterpret_borrow<py::sequence>(weightsObj);
-		if (static_cast<size_t>(weightsSeq.size()) != m_initialStates.size()) {
-			throw std::runtime_error("initial_state_weights length must match initial_state length");
-		}
-
-		std::vector<double> weights(m_initialStates.size(), 0.0);
-		std::vector<double> cumulativeWeights;
-		cumulativeWeights.reserve(m_initialStates.size());
-		double cumulative = 0.0;
-		for (size_t i = 0; i < m_initialStates.size(); ++i) {
-			const double weight = py::float_(weightsSeq[static_cast<py::ssize_t>(i)]).cast<double>();
-			if (!std::isfinite(weight) || weight < 0.0) {
-				throw std::runtime_error("initial_state_weights must contain non-negative finite numbers");
-			}
-			weights[i] = weight;
-			cumulative += weight;
-			cumulativeWeights.push_back(cumulative);
-		}
-		if (!std::isfinite(cumulative) || cumulative <= 0.0) {
-			throw std::runtime_error("initial_state_weights must sum to a positive number");
-		}
-
-		for (size_t i = 0; i < weights.size(); ++i) {
-			m_initialStates[i].weight = weights[i];
-		}
-		m_initialStateCumulative = std::move(cumulativeWeights);
-	}
-
 	void addStartStateInfo(py::dict& info, const std::string& label) const {
 		if (label.empty()) {
 			return;
@@ -2147,14 +2048,14 @@ public:
 	}
 
 	py::list resetInfos(const std::vector<uint8_t>& resetMask) const {
-		if ((m_autoresetSameStep || m_noInfo) && !m_reportInitialState) {
+		if (m_noInfo && !m_reportInitialState) {
 			return m_emptyInfos;
 		}
 		py::list infos;
 		for (size_t i = 0; i < m_slots.size(); ++i) {
 			py::dict info = py::dict();
 			if (resetMask[i]) {
-				if (!m_autoresetSameStep && !m_noInfo) {
+				if (!m_noInfo) {
 					info = lookupInfo(*m_slots[i]);
 				}
 				addStartStateInfo(info, m_slots[i]->currentStartStateLabel);
@@ -2165,7 +2066,7 @@ public:
 	}
 
 	py::tuple step(py::array_t<uint8_t> masks) {
-		if (!m_autoresetSameStep && m_anyPendingReset) {
+		if (m_anyPendingReset) {
 			throw std::runtime_error("cannot step while a terminated lane is pending reset; call reset(options={'reset_mask': ...}) first");
 		}
 		auto mask = masks.unchecked<2>();
@@ -2194,8 +2095,7 @@ public:
 						*m_slots[index],
 						action,
 						obsData + index * m_stackedObsSize,
-						output,
-						!m_noInfo && m_autoresetSameStep
+						output
 					);
 				} catch (const std::exception& exc) {
 					m_errors[index] = exc.what();
@@ -2210,7 +2110,7 @@ public:
 		for (size_t i = 0; i < m_stepOutputs.size(); ++i) {
 			rewardData[i] = m_stepOutputs[i].reward;
 			doneData[i] = m_stepOutputs[i].done;
-			if (m_stepOutputs[i].done && !m_autoresetSameStep) {
+			if (m_stepOutputs[i].done) {
 				m_anyPendingReset = true;
 			}
 		}
@@ -2225,63 +2125,6 @@ public:
 			}
 			if (m_reportInitialState && (m_fullInfo || m_stepOutputs[i].done)) {
 				addStartStateInfo(info, m_stepOutputs[i].startStateLabel);
-			}
-			if (!m_stepOutputs[i].terminalObservation.empty()) {
-				py::array_t<uint8_t> terminal(observationShapeContainer());
-				std::memcpy(terminal.mutable_data(), m_stepOutputs[i].terminalObservation.data(), m_stackedObsSize);
-				info["terminal_observation"] = terminal;
-				info["terminal_info"] = terminalInfoDict(m_stepOutputs[i]);
-				py::dict resetInfo = py::dict();
-				addStartStateInfo(resetInfo, m_stepOutputs[i].resetStartStateLabel);
-				info["reset_info"] = resetInfo;
-				info["TimeLimit.truncated"] = false;
-			}
-			if (!m_stepOutputs[i].firedDoneOnInfoRules.empty()) {
-				py::dict doneOnInfo = py::dict();
-				for (const DoneOnInfoFiredRule& fired : m_stepOutputs[i].firedDoneOnInfoRules) {
-					py::dict triggerInfo = py::dict();
-					triggerInfo["trigger"] = py::str(fired.triggerId);
-					triggerInfo["compare"] = py::str(fired.compare);
-					triggerInfo["op"] = py::str(doneOnInfoOpName(fired.op));
-					py::list keys;
-					py::list previousValues;
-					py::list currentValues;
-					for (size_t keyIndex = 0; keyIndex < fired.keys.size(); ++keyIndex) {
-						keys.append(py::str(fired.keys[keyIndex]));
-					}
-					for (int64_t value : fired.previousValues) {
-						previousValues.append(value);
-					}
-					for (int64_t value : fired.currentValues) {
-						currentValues.append(value);
-					}
-					triggerInfo["keys"] = keys;
-					triggerInfo["variables"] = keys;
-					triggerInfo["prev"] = previousValues;
-					triggerInfo["next"] = currentValues;
-
-					py::str eventName(fired.name);
-					if (PyDict_Contains(doneOnInfo.ptr(), eventName.ptr()) == 1) {
-						py::dict eventInfo = doneOnInfo[eventName].cast<py::dict>();
-						py::list triggers = eventInfo["triggers"].cast<py::list>();
-						triggers.append(triggerInfo);
-						continue;
-					}
-
-					py::dict eventInfo = py::dict();
-					eventInfo["trigger"] = triggerInfo["trigger"];
-					eventInfo["compare"] = triggerInfo["compare"];
-					eventInfo["op"] = triggerInfo["op"];
-					eventInfo["keys"] = triggerInfo["keys"];
-					eventInfo["variables"] = triggerInfo["variables"];
-					eventInfo["prev"] = triggerInfo["prev"];
-					eventInfo["next"] = triggerInfo["next"];
-					py::list triggers;
-					triggers.append(triggerInfo);
-					eventInfo["triggers"] = triggers;
-					doneOnInfo[eventName] = eventInfo;
-				}
-				info["done_on_info"] = doneOnInfo;
 			}
 			infos.append(info);
 		}
@@ -2390,122 +2233,6 @@ private:
 		return m_obsArrays[index];
 	}
 
-	enum class DoneOnInfoOp {
-		Change,
-		Increase,
-		Decrease
-	};
-
-	struct DoneOnInfoRule {
-		std::string name;
-		std::string triggerId = "default";
-		std::string compare = "reset";
-		DoneOnInfoOp op = DoneOnInfoOp::Change;
-		std::vector<std::string> keyNames;
-		std::vector<Variable> variables;
-	};
-
-	struct DoneOnInfoFiredRule {
-		std::string name;
-		std::string triggerId = "default";
-		std::string compare = "reset";
-		DoneOnInfoOp op = DoneOnInfoOp::Change;
-		std::vector<std::string> keys;
-		std::vector<int64_t> previousValues;
-		std::vector<int64_t> currentValues;
-	};
-
-	const char* doneOnInfoOpName(DoneOnInfoOp op) const {
-		switch (op) {
-		case DoneOnInfoOp::Change:
-			return "change";
-		case DoneOnInfoOp::Increase:
-			return "increase";
-		case DoneOnInfoOp::Decrease:
-			return "decrease";
-		}
-		return "change";
-	}
-
-	DoneOnInfoOp parseDoneOnInfoOp(const std::string& op) const {
-		if (op == "change") {
-			return DoneOnInfoOp::Change;
-		}
-		if (op == "increase") {
-			return DoneOnInfoOp::Increase;
-		}
-		if (op == "decrease") {
-			return DoneOnInfoOp::Decrease;
-		}
-		throw std::runtime_error("done_on op must be change, increase, or decrease");
-	}
-
-	void parseDoneOnInfoRules(py::object doneOnInfoObj) {
-		if (doneOnInfoObj.is_none()) {
-			return;
-		}
-		py::sequence rules = py::reinterpret_borrow<py::sequence>(doneOnInfoObj);
-		m_doneOnInfoRules.reserve(static_cast<size_t>(rules.size()));
-		for (py::handle rawRule : rules) {
-			py::sequence rule = py::reinterpret_borrow<py::sequence>(rawRule);
-			const py::ssize_t ruleSize = rule.size();
-			if (ruleSize != 3 && ruleSize != 5) {
-				throw std::runtime_error("done_on native rules must be (name, keys, op) or (name, trigger, keys, op, compare)");
-			}
-			DoneOnInfoRule parsed;
-			parsed.name = py::str(rule[0]);
-			if (parsed.name.empty()) {
-				throw std::runtime_error("done_on rule names must not be empty");
-			}
-			const py::ssize_t triggerIndex = ruleSize == 5 ? 1 : -1;
-			const py::ssize_t keysIndex = ruleSize == 5 ? 2 : 1;
-			const py::ssize_t opIndex = ruleSize == 5 ? 3 : 2;
-			const py::ssize_t compareIndex = ruleSize == 5 ? 4 : -1;
-			if (triggerIndex >= 0) {
-				parsed.triggerId = py::str(rule[triggerIndex]);
-				if (parsed.triggerId.empty()) {
-					throw std::runtime_error("done_on trigger ids must not be empty");
-				}
-			}
-			if (compareIndex >= 0) {
-				parsed.compare = py::str(rule[compareIndex]);
-				if (parsed.compare != "reset") {
-					throw std::runtime_error("done_on compare must be reset");
-				}
-			}
-			py::sequence keys = py::reinterpret_borrow<py::sequence>(rule[keysIndex]);
-			if (keys.size() == 0) {
-				throw std::runtime_error("done_on rules must reference at least one key");
-			}
-			parsed.keyNames.reserve(static_cast<size_t>(keys.size()));
-			for (py::handle rawKey : keys) {
-				if (!PyUnicode_Check(rawKey.ptr())) {
-					throw std::runtime_error("done_on keys must contain only strings");
-				}
-				std::string key = py::str(rawKey);
-				if (key.empty()) {
-					throw std::runtime_error("done_on keys must not be empty");
-				}
-				parsed.keyNames.push_back(key);
-			}
-			parsed.op = parseDoneOnInfoOp(py::str(rule[opIndex]));
-			m_doneOnInfoRules.push_back(std::move(parsed));
-		}
-	}
-
-	void resolveDoneOnInfoVariables(const std::unordered_map<std::string, Variable>& variables) {
-		for (DoneOnInfoRule& rule : m_doneOnInfoRules) {
-			rule.variables.reserve(rule.keyNames.size());
-			for (const std::string& key : rule.keyNames) {
-				auto variable = variables.find(key);
-				if (variable == variables.end()) {
-					throw std::runtime_error("unknown done_on key: " + key);
-				}
-				rule.variables.push_back(variable->second);
-			}
-		}
-	}
-
 	struct Slot {
 		Slot(const string& romPath, const string& dataPath, const string& scenarioPath, const std::string& initialState, size_t index)
 			: emulator(std::make_unique<PyRetroEmulator>(romPath))
@@ -2551,7 +2278,6 @@ private:
 		bool hasLastMask = false;
 		bool pendingReset = false;
 		bool usesIndexedVideo = false;
-		std::vector<std::vector<int64_t>> doneOnInfoBaselines;
 		std::string currentStartStateLabel;
 		std::mt19937 rng;
 	};
@@ -2559,21 +2285,13 @@ private:
 	struct StepOutput {
 		float reward = 0.0f;
 		bool done = false;
-		std::vector<DoneOnInfoFiredRule> firedDoneOnInfoRules;
 		std::string startStateLabel;
-		std::string resetStartStateLabel;
-		std::vector<uint8_t> terminalObservation;
-		std::unordered_map<std::string, int64_t> terminalInfo;
 	};
 
 	void clearStepOutput(StepOutput& output) {
 		output.reward = 0.0f;
 		output.done = false;
-		output.firedDoneOnInfoRules.clear();
 		output.startStateLabel.clear();
-		output.resetStartStateLabel.clear();
-		output.terminalObservation.clear();
-		output.terminalInfo.clear();
 	}
 
 	py::dict lookupInfo(const Slot& slot) const {
@@ -2585,29 +2303,6 @@ private:
 			data[py::str(item.first)] = slot.data.m_data.lookupValue(item.second);
 		}
 		return data;
-	}
-
-	std::unordered_map<std::string, int64_t> captureInfo(const Slot& slot) const {
-		if (m_infoKeys.empty()) {
-			return slot.data.m_data.lookupAll();
-		}
-		std::unordered_map<std::string, int64_t> data;
-		data.reserve(m_infoVariables.size());
-		for (const auto& item : m_infoVariables) {
-			data[item.first] = slot.data.m_data.lookupValue(item.second);
-		}
-		return data;
-	}
-
-	py::dict terminalInfoDict(const StepOutput& output) const {
-		py::dict info = py::dict();
-		for (const auto& item : output.terminalInfo) {
-			info[py::str(item.first)] = item.second;
-		}
-		if (m_reportInitialState) {
-			addStartStateInfo(info, output.startStateLabel);
-		}
-		return info;
 	}
 
 	void clearKeys(Slot& slot) {
@@ -2882,75 +2577,10 @@ private:
 		readProcessedFrame(slot);
 		resetFrameStack(slot, slot.singleObs);
 		writeStackedObservation(slot, dst);
-		initializeDoneOnInfoBaselines(slot);
 	}
 
-	void initializeDoneOnInfoBaselines(Slot& slot) {
-		if (m_doneOnInfoRules.empty()) {
-			return;
-		}
-		slot.doneOnInfoBaselines.resize(m_doneOnInfoRules.size());
-		for (size_t ruleIndex = 0; ruleIndex < m_doneOnInfoRules.size(); ++ruleIndex) {
-			const DoneOnInfoRule& rule = m_doneOnInfoRules[ruleIndex];
-			std::vector<int64_t>& baseline = slot.doneOnInfoBaselines[ruleIndex];
-			baseline.resize(rule.variables.size());
-			for (size_t keyIndex = 0; keyIndex < rule.variables.size(); ++keyIndex) {
-				baseline[keyIndex] = slot.data.m_data.lookupValue(rule.variables[keyIndex]);
-			}
-		}
-	}
-
-	bool doneOnInfoValueFired(DoneOnInfoOp op, int64_t baseline, int64_t current) const {
-		switch (op) {
-		case DoneOnInfoOp::Change:
-			return current != baseline;
-		case DoneOnInfoOp::Increase:
-			return current > baseline;
-		case DoneOnInfoOp::Decrease:
-			return current < baseline;
-		}
-		return false;
-	}
-
-	bool checkDoneOnInfo(Slot& slot, StepOutput& output) {
-		if (m_doneOnInfoRules.empty()) {
-			return false;
-		}
-		bool firedAny = false;
-		for (size_t ruleIndex = 0; ruleIndex < m_doneOnInfoRules.size(); ++ruleIndex) {
-			const DoneOnInfoRule& rule = m_doneOnInfoRules[ruleIndex];
-			if (slot.doneOnInfoBaselines[ruleIndex].size() != rule.variables.size()) {
-				initializeDoneOnInfoBaselines(slot);
-			}
-			const std::vector<int64_t>& baseline = slot.doneOnInfoBaselines[ruleIndex];
-			bool fired = false;
-			std::vector<int64_t> currentValues(rule.variables.size());
-			for (size_t keyIndex = 0; keyIndex < rule.variables.size(); ++keyIndex) {
-				const int64_t current = slot.data.m_data.lookupValue(rule.variables[keyIndex]);
-				currentValues[keyIndex] = current;
-				if (doneOnInfoValueFired(rule.op, baseline[keyIndex], current)) {
-					fired = true;
-				}
-			}
-			if (!fired) {
-				continue;
-			}
-			firedAny = true;
-			output.firedDoneOnInfoRules.push_back({
-				rule.name,
-				rule.triggerId,
-				rule.compare,
-				rule.op,
-				rule.keyNames,
-				baseline,
-				std::move(currentValues),
-			});
-		}
-		return firedAny;
-	}
-
-	void stepSlot(Slot& slot, const std::vector<uint8_t>& requestedAction, uint8_t* dst, StepOutput& output, bool captureTerminalObservation) {
-		const bool preserveTerminalFrame = captureTerminalObservation || !m_autoresetSameStep;
+	void stepSlot(Slot& slot, const std::vector<uint8_t>& requestedAction, uint8_t* dst, StepOutput& output) {
+		const bool preserveTerminalFrame = true;
 		const std::vector<uint8_t>* action = &requestedAction;
 		if (m_stickyActionProb > 0.0) {
 			bool repeatPreviousAction = false;
@@ -2997,9 +2627,7 @@ private:
 			slot.data.m_data.updateRam();
 			slot.data.m_scen.update(1);
 			totalReward += slot.data.m_scen.currentReward();
-			const bool scenarioDone = slot.data.m_scen.isDone();
-			const bool doneOnInfo = checkDoneOnInfo(slot, output);
-			done = scenarioDone || doneOnInfo;
+			done = slot.data.m_scen.isDone();
 			if (done && skippedRender && preserveTerminalFrame && !slot.usesIndexedVideo) {
 				if (!slot.emulator->m_re.unserialize(preSkipState.data(), preSkipState.size())) {
 					throw std::runtime_error("failed to restore pre-render-skip terminal state");
@@ -3085,26 +2713,9 @@ private:
 					if (m_reportInitialState && (m_fullInfo || done)) {
 						output.startStateLabel = slot.currentStartStateLabel;
 					}
-					if (done && captureTerminalObservation) {
-						output.terminalObservation.resize(m_stackedObsSize);
-						writeStackedObservation(slot, output.terminalObservation.data());
-						if (!m_noInfo) output.terminalInfo = captureInfo(slot);
-						if (m_autoresetSameStep) {
-							resetSlot(slot, dst);
-						} else {
-							writeStackedObservation(slot, dst);
-							slot.pendingReset = true;
-						}
-						output.resetStartStateLabel = slot.currentStartStateLabel;
-					} else if (done) {
-						if (!m_noInfo) output.terminalInfo = captureInfo(slot);
-						if (m_autoresetSameStep) {
-							resetSlot(slot, dst);
-						} else {
-							writeStackedObservation(slot, dst);
-							slot.pendingReset = true;
-						}
-						output.resetStartStateLabel = slot.currentStartStateLabel;
+					if (done) {
+						writeStackedObservation(slot, dst);
+						slot.pendingReset = true;
 					} else if (!observationWritten) {
 						writeStackedObservation(slot, dst);
 					}
@@ -3174,26 +2785,9 @@ private:
 		if (m_reportInitialState && (m_fullInfo || done)) {
 			output.startStateLabel = slot.currentStartStateLabel;
 		}
-		if (done && captureTerminalObservation) {
-			output.terminalObservation.resize(m_stackedObsSize);
-			writeStackedObservation(slot, output.terminalObservation.data());
-			if (!m_noInfo) output.terminalInfo = captureInfo(slot);
-			if (m_autoresetSameStep) {
-				resetSlot(slot, dst);
-			} else {
-				writeStackedObservation(slot, dst);
-				slot.pendingReset = true;
-			}
-			output.resetStartStateLabel = slot.currentStartStateLabel;
-		} else if (done) {
-			if (!m_noInfo) output.terminalInfo = captureInfo(slot);
-			if (m_autoresetSameStep) {
-				resetSlot(slot, dst);
-			} else {
-				writeStackedObservation(slot, dst);
-				slot.pendingReset = true;
-			}
-			output.resetStartStateLabel = slot.currentStartStateLabel;
+		if (done) {
+			writeStackedObservation(slot, dst);
+			slot.pendingReset = true;
 		} else if (!observationWritten) {
 			writeStackedObservation(slot, dst);
 		}
@@ -3242,9 +2836,7 @@ private:
 	bool m_unsafeZeroCopy = false;
 	bool m_channelsFirst = false;
 	bool m_renderSkipEnabled = false;
-	bool m_autoresetSameStep = true;
 	bool m_anyPendingReset = false;
-	std::vector<DoneOnInfoRule> m_doneOnInfoRules;
 	std::vector<std::string> m_infoKeys;
 	std::vector<std::pair<std::string, Variable>> m_infoVariables;
 	int m_numThreads = 1;
@@ -3266,73 +2858,6 @@ private:
 	std::vector<std::string> m_errors;
 	std::vector<StepOutput> m_stepOutputs;
 };
-
-	py::tuple PyRetroEmulator::stepRepeatAndProcess(
-		PyGameData& data,
-		py::array_t<uint8_t> mask,
-		int repeats,
-		py::object cropObj,
-		py::object resizeObj,
-		bool grayscale,
-		const string& algorithm,
-		bool maxpoolLastTwo,
-		py::object maskCropObj,
-		int cropFill
-	) {
-	if (repeats <= 0) {
-		throw std::runtime_error("repeats must be positive");
-	}
-	if (mask.size() > N_BUTTONS) {
-		throw std::runtime_error("mask.size() > N_BUTTONS");
-	}
-	for (int key = 0; key < mask.size(); ++key) {
-		m_re.setKey(0, key, mask.data()[key]);
-	}
-
-	float totalReward = 0.0f;
-	bool done = false;
-	bool sawFrame = false;
-	std::vector<uint8_t> prevRgb;
-	std::vector<uint8_t> currRgb;
-
-	{
-		py::gil_scoped_release release;
-		for (int i = 0; i < repeats; ++i) {
-			m_re.run();
-			data.m_data.updateRam();
-			data.m_scen.update();
-			totalReward += data.m_scen.currentReward();
-			done = data.m_scen.isDone();
-			if (maxpoolLastTwo && (i >= repeats - 2 || done)) {
-				prevRgb.swap(currRgb);
-				readRgbFrame(currRgb);
-				sawFrame = true;
-			}
-			if (done) {
-				break;
-			}
-		}
-
-		if (!maxpoolLastTwo || !sawFrame) {
-			readRgbFrame(currRgb);
-		} else if (!prevRgb.empty()) {
-			for (size_t i = 0; i < currRgb.size(); ++i) {
-				currRgb[i] = std::max(currRgb[i], prevRgb[i]);
-			}
-		}
-	}
-
-	py::array_t<uint8_t> obs = processRgbFrame(
-		currRgb,
-		cropObj,
-		resizeObj,
-		grayscale,
-		algorithm,
-		maskCropObj,
-		cropFill
-	);
-	return py::make_tuple(obs, totalReward, done, data.lookupAll());
-}
 
 struct PyMovie {
 	std::unique_ptr<Retro::Movie> m_movie;
@@ -3409,32 +2934,7 @@ PYBIND11_MODULE(_retro, m) {
 		.def("get_state", &PyRetroEmulator::getState)
 		.def("set_state", &PyRetroEmulator::setState)
 		.def("get_screen", &PyRetroEmulator::getScreen)
-		.def(
-			"get_processed_screen",
-			&PyRetroEmulator::getProcessedScreen,
-			py::arg("crop"),
-			py::arg("resize"),
-			py::arg("grayscale"),
-			py::arg("algorithm"),
-			py::arg("mask_crop") = py::none(),
-			py::arg("crop_fill") = 0
-		)
-		.def(
-			"step_repeat_and_process",
-			&PyRetroEmulator::stepRepeatAndProcess,
-			py::arg("data"),
-			py::arg("mask"),
-			py::arg("repeats"),
-			py::arg("crop"),
-			py::arg("resize"),
-			py::arg("grayscale"),
-			py::arg("algorithm"),
-			py::arg("maxpool_last_two"),
-			py::arg("mask_crop") = py::none(),
-			py::arg("crop_fill") = 0
-		)
 		.def("get_rotation", &PyRetroEmulator::getRotation)
-		.def("get_aspect_ratio", &PyRetroEmulator::getAspectRatio)
 		.def("get_screen_rate", &PyRetroEmulator::getScreenRate)
 		.def("get_audio", &PyRetroEmulator::getAudio)
 		.def("get_audio_rate", &PyRetroEmulator::getAudioRate)
@@ -3528,9 +3028,7 @@ PYBIND11_MODULE(_retro, m) {
 				py::object,
 				py::object,
 				py::object,
-				py::object,
-				int,
-				bool>(),
+				int>(),
 			py::arg("num_envs"),
 			py::arg("rom_path"),
 			py::arg("data_path"),
@@ -3556,12 +3054,10 @@ PYBIND11_MODULE(_retro, m) {
 			py::arg("unsafe_view") = false,
 			py::arg("obs_layout") = "hwc",
 			py::arg("info_filter_keys") = py::none(),
-			py::arg("done_on_rules") = py::none(),
 			py::arg("initial_state_labels") = py::none(),
 			py::arg("initial_state_weights") = py::none(),
 			py::arg("mask_crop") = py::none(),
-			py::arg("crop_fill") = 0,
-			py::arg("autoreset_same_step") = true
+			py::arg("crop_fill") = 0
 		)
 		.def(
 			"reset",
@@ -3572,16 +3068,6 @@ PYBIND11_MODULE(_retro, m) {
 		)
 		.def("step", &PyRetroVecEnv::step)
 		.def("active_state_indices", &PyRetroVecEnv::activeStateIndices)
-		.def("initial_state_policy_names", &PyRetroVecEnv::initialStatePolicyNames)
-		.def("initial_state_weights", &PyRetroVecEnv::initialStateWeights)
-		.def(
-			"set_initial_states",
-			&PyRetroVecEnv::setInitialStates,
-			py::arg("initial_state"),
-			py::arg("initial_state_labels") = py::none(),
-			py::arg("initial_state_weights") = py::none()
-		)
-		.def("set_initial_state_weights", &PyRetroVecEnv::setInitialStateWeights)
 		.def("observation_shape", &PyRetroVecEnv::observationShape)
 		.def("get_screen", &PyRetroVecEnv::getScreen, py::arg("index") = 0)
 		.def_property_readonly("initial_state_names", &PyRetroVecEnv::initialStateNames)

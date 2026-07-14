@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import math
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -19,6 +18,110 @@ from stable_retro.retro_env import RetroEnv
 _SERIALIZED_UNSET = object()
 
 
+def _normalize_int(value, name):
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be an integer")
+    if isinstance(value, int):
+        return value
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if not math.isfinite(numeric) or not numeric.is_integer():
+        raise ValueError(f"{name} must be an integer")
+    return int(numeric)
+
+
+def _normalize_positive_int(value, name):
+    value = _normalize_int(value, name)
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+    return value
+
+
+def _normalize_nonnegative_int(value, name):
+    value = _normalize_int(value, name)
+    if value < 0:
+        raise ValueError(f"{name} must be non-negative")
+    return value
+
+
+def _normalize_probability(value, name):
+    try:
+        probability = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be between 0.0 and 1.0") from exc
+    if not math.isfinite(probability) or not 0.0 <= probability <= 1.0:
+        raise ValueError(f"{name} must be between 0.0 and 1.0")
+    return probability
+
+
+def _normalize_obs_resize(value):
+    if value is None:
+        return None
+    try:
+        height, width = tuple(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("obs_resize must be a (height, width) pair") from exc
+    return (
+        _normalize_positive_int(height, "obs_resize height"),
+        _normalize_positive_int(width, "obs_resize width"),
+    )
+
+
+def _normalize_obs_crop(value):
+    if value is None:
+        return None
+    try:
+        top, bottom, left, right = tuple(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "obs_crop must be a (top, bottom, left, right) tuple",
+        ) from exc
+    return tuple(
+        _normalize_nonnegative_int(item, name)
+        for item, name in zip(
+            (top, bottom, left, right),
+            ("obs_crop top", "obs_crop bottom", "obs_crop left", "obs_crop right"),
+            strict=True,
+        )
+    )
+
+
+def _normalize_obs_crop_fill(value):
+    fill = _normalize_int(value, "obs_crop_fill")
+    if not 0 <= fill <= 255:
+        raise ValueError("obs_crop_fill must be between 0 and 255")
+    return fill
+
+
+def _normalize_obs_resize_algorithm(value):
+    algorithm = str(value).lower()
+    if algorithm not in {"nearest", "bilinear", "area"}:
+        raise ValueError(
+            "obs_resize_algorithm must be one of: nearest, bilinear, area",
+        )
+    return algorithm
+
+
+def _normalize_reward_clip(value):
+    if value is False or value is True:
+        return value
+    try:
+        low, high = tuple(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("reward_clip must be a bool or (low, high) pair") from exc
+    try:
+        low, high = float(low), float(high)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("reward_clip bounds must be finite numbers") from exc
+    if not math.isfinite(low) or not math.isfinite(high) or low > high:
+        raise ValueError(
+            "reward_clip bounds must be finite numbers with low <= high",
+        )
+    return low, high
+
+
 class RetroVecEnv(VectorEnv):
     """Gymnasium vector env for stable-retro rollouts.
 
@@ -26,38 +129,25 @@ class RetroVecEnv(VectorEnv):
     frame skip, preprocessing, frame stacking, reward/done evaluation, and
     batched observation buffer.
 
-    ``autoreset_mode`` defaults to Gymnasium same-step autoreset for backwards
-    compatibility. With ``AutoresetMode.DISABLED``, terminated lanes keep their
-    terminal observation and cannot be stepped again until selected with
+    Terminated lanes keep their terminal observation and cannot be stepped
+    again until selected with
     ``reset(options={"reset_mask": mask})``. Masked reset leaves every
     unselected lane untouched.
 
     ``state`` accepts a single state name, a sequence of one state per env slot,
     or a mapping of state names to non-negative sampling weights. Mapping weights
     are normalized and sampled independently for each env on every episode reset.
-    Use ``set_state_policy()`` with the same shapes to update the reset policy
-    used by future resets and autoresets.
 
     On Stella-backed Atari environments, ``use_fire_reset=True`` presses FIRE
     for one native frame after each full-episode reset when FIRE is available,
     then releases it before reset no-ops.
-
-    Native info-transition termination is opt-in and game/config-specific.
-    Pass done_on={"name": ("key", "decrease")} to terminate only lanes whose
-    post-reset baseline changes as requested. In same-step mode those lanes are
-    autoreset; in disabled mode they remain terminal until explicitly reset.
-    Supported ops are "change", "increase", and "decrease"; variables may be a
-    sequence of strings. Named scenario events can also declare multiple
-    trigger objects. Fired rules are reported in info["done_on_info"] with
-    list-shaped "keys"/"variables", "prev", and "next" values, including
-    one-element lists for single-variable rules.
 
     obs_copy="safe_view" returns double-buffered observation views so the
     previous observation survives the next step for rollout collection.
     obs_copy="unsafe_view" restores single-buffer aliasing for benchmarks only.
     """
 
-    metadata = {"autoreset_mode": AutoresetMode.SAME_STEP}
+    metadata = {"autoreset_mode": AutoresetMode.DISABLED}
 
     def __init__(
         self,
@@ -91,45 +181,35 @@ class RetroVecEnv(VectorEnv):
         sticky_action_prob=0.0,
         reward_clip=False,
         info_filter="all",
-        done_on=None,
-        autoreset_mode: AutoresetMode | str = AutoresetMode.SAME_STEP,
     ):
         import stable_retro as retro
         from stable_retro import _retro
 
-        num_envs = RetroEnv._normalize_positive_int(num_envs, "num_envs")
+        num_envs = _normalize_positive_int(num_envs, "num_envs")
         if num_threads is not None:
-            num_threads = RetroEnv._normalize_positive_int(num_threads, "num_threads")
-        obs_resize = RetroEnv._normalize_obs_resize(obs_resize)
-        obs_crop = RetroEnv._normalize_obs_crop(obs_crop)
-        obs_crop_fill = RetroEnv._normalize_obs_crop_fill(obs_crop_fill)
-        obs_resize_algorithm = RetroEnv._normalize_obs_resize_algorithm(
-            obs_resize_algorithm,
-        )
-        frame_skip = RetroEnv._normalize_positive_int(frame_skip, "frame_skip")
-        frame_stack = RetroEnv._normalize_positive_int(frame_stack, "frame_stack")
-        noop_reset_max = RetroEnv._normalize_nonnegative_int(
+            num_threads = _normalize_positive_int(num_threads, "num_threads")
+        obs_resize = _normalize_obs_resize(obs_resize)
+        obs_crop = _normalize_obs_crop(obs_crop)
+        obs_crop_fill = _normalize_obs_crop_fill(obs_crop_fill)
+        obs_resize_algorithm = _normalize_obs_resize_algorithm(obs_resize_algorithm)
+        frame_skip = _normalize_positive_int(frame_skip, "frame_skip")
+        frame_stack = _normalize_positive_int(frame_stack, "frame_stack")
+        noop_reset_max = _normalize_nonnegative_int(
             noop_reset_max,
             "noop_reset_max",
         )
         use_fire_reset = bool(use_fire_reset)
-        sticky_action_prob = RetroEnv._normalize_probability(
+        sticky_action_prob = _normalize_probability(
             sticky_action_prob,
             "sticky_action_prob",
         )
-        reward_clip = RetroEnv._normalize_reward_clip(reward_clip)
-        autoreset_mode = self._normalize_autoreset_mode(autoreset_mode)
+        reward_clip = _normalize_reward_clip(reward_clip)
 
         self.closed = False
-        self.autoreset_mode = autoreset_mode
-        self.metadata = dict(type(self).metadata)
-        self.metadata["autoreset_mode"] = autoreset_mode
+        self.autoreset_mode = AutoresetMode.DISABLED
         self._observations = None
         self._seeds = [None for _ in range(num_envs)]
         self._options = [None for _ in range(num_envs)]
-        self._game = game
-        self._inttype = inttype
-        self._rom_path = rom_path
         self.use_fire_reset = use_fire_reset
 
         info_filter_mode, info_filter_keys = self._normalize_info_filter(info_filter)
@@ -143,24 +223,9 @@ class RetroVecEnv(VectorEnv):
             "players": players,
             "obs_type": obs_type,
             "render_mode": render_mode,
-            "obs_resize": obs_resize,
-            "obs_crop": obs_crop,
-            "obs_crop_mode": obs_crop_mode,
-            "obs_crop_fill": obs_crop_fill,
-            "obs_grayscale": obs_grayscale,
-            "obs_resize_algorithm": obs_resize_algorithm,
-            "frame_skip": frame_skip,
-            "frame_stack": frame_stack,
-            "maxpool_last_two": maxpool_last_two,
-            "noop_reset_max": noop_reset_max,
-            "sticky_action_prob": sticky_action_prob,
-            "reward_clip": reward_clip,
         }
         info_path = self._resolve_info_path(retro, game, info, inttype)
         scenario_path = self._resolve_scenario_path(retro, game, scenario, inttype)
-        self._info_path = info_path
-        self._scenario_path = scenario_path
-        self._env_kwargs = env_kwargs
         (
             state_values,
             state_labels,
@@ -171,13 +236,6 @@ class RetroVecEnv(VectorEnv):
             game,
             num_envs,
             state,
-        )
-        done_on_rules = self._normalize_done_on(
-            done_on,
-            label="done_on",
-            game=game,
-            inttype=inttype,
-            scenario_path=scenario_path,
         )
         obs_layout = str(obs_layout).lower()
         if obs_layout not in {"hwc", "chw"}:
@@ -217,12 +275,25 @@ class RetroVecEnv(VectorEnv):
                     "RetroVecEnv does not support rotated screens",
                 )
             width, height = template.em.get_resolution()
-            crop = template._effective_crop(0, height, width)
-            crop_mask = template._native_mask_crop()
-            initial_state = template.initial_state if template.initial_state else None
+            crop = self._effective_crop(
+                template,
+                height,
+                width,
+                obs_crop,
+                obs_crop_mode,
+            )
+            crop_mask = obs_crop if obs_crop_mode == "mask" else None
+            initial_state = self._initial_state(template)
             self.single_action_space = template.action_space
             self.single_observation_space = self._observation_space_for_layout(
-                template.observation_space,
+                self._vector_observation_space(
+                    height,
+                    width,
+                    crop,
+                    obs_resize,
+                    bool(obs_grayscale),
+                    frame_stack,
+                ),
                 obs_layout,
             )
             self.action_space = batch_space(self.single_action_space, int(num_envs))
@@ -237,7 +308,7 @@ class RetroVecEnv(VectorEnv):
             ]
             self.use_restricted_actions = template.use_restricted_actions
             self._filter_actions = self.use_restricted_actions == retro.Actions.FILTERED
-            reward_clip, reward_low, reward_high = self._reward_clip_config(template)
+            reward_clip, reward_low, reward_high = self._reward_clip_config(reward_clip)
         finally:
             template.close()
 
@@ -280,7 +351,7 @@ class RetroVecEnv(VectorEnv):
             crop,
             obs_resize,
             bool(obs_grayscale),
-            str(env_kwargs.get("obs_resize_algorithm", "nearest")),
+            obs_resize_algorithm,
             bool(maxpool_last_two),
             noop_reset_max,
             fire_button,
@@ -294,12 +365,10 @@ class RetroVecEnv(VectorEnv):
             unsafe_view,
             obs_layout,
             info_filter_keys,
-            done_on_rules,
             initial_state_labels,
             initial_state_weights,
             crop_mask,
             obs_crop_fill,
-            autoreset_mode is AutoresetMode.SAME_STEP,
         )
         self.num_envs = num_envs
         self.initial_state_names = tuple(self.native.initial_state_names)
@@ -327,80 +396,11 @@ class RetroVecEnv(VectorEnv):
             return fire_button
         return -1
 
-    @staticmethod
-    def _normalize_autoreset_mode(value):
-        if isinstance(value, AutoresetMode):
-            mode = value
-        else:
-            try:
-                mode = AutoresetMode(value)
-            except (TypeError, ValueError):
-                name = str(value).split(".")[-1].upper()
-                try:
-                    mode = AutoresetMode[name]
-                except KeyError as exc:
-                    raise ValueError(f"unsupported autoreset_mode: {value!r}") from exc
-        if mode not in (AutoresetMode.SAME_STEP, AutoresetMode.DISABLED):
-            raise ValueError(
-                "autoreset_mode must be AutoresetMode.SAME_STEP or AutoresetMode.DISABLED",
-            )
-        return mode
-
-    def set_state_policy(self, state):
-        """Update the reset policy used at future episode boundaries.
-
-        Accepts the same shapes as the constructor ``state`` argument: a single
-        state, a per-lane sequence, or a weighted mapping. Currently active lanes
-        are not interrupted; the new policy is used by the next explicit reset or
-        per-lane autoreset.
-        """
-        import stable_retro as retro
-
-        initial_state, initial_state_labels, initial_state_weights = (
-            self._resolve_initial_state_payload(
-                retro,
-                self._game,
-                self.num_envs,
-                state,
-                self._inttype,
-                self._rom_path,
-                self._info_path,
-                self._scenario_path,
-                self._env_kwargs,
-            )
-        )
-        self.native.set_initial_states(
-            initial_state,
-            initial_state_labels,
-            initial_state_weights,
-        )
-        self.initial_state_names = tuple(self.native.initial_state_names)
-
-    def set_state_sampling_weights(self, weights):
-        """Compatibility alias for updating a weighted state reset policy."""
-        if isinstance(weights, Mapping):
-            self.set_state_policy(weights)
-            return
-        self.set_state_policy(
-            dict(zip(self.native.initial_state_policy_names(), weights, strict=True)),
-        )
-
-    def state_sampling_weights(self):
-        """Return current normalized reset-sampling weights by state name."""
-        return dict(
-            zip(
-                self.native.initial_state_policy_names(),
-                self.native.initial_state_weights(),
-                strict=True,
-            ),
-        )
-
     def active_state_indices(self):
         """Return a read-only int32 NumPy view of active initial-state indices.
 
         The returned array is owned by this env and mutates in place
-        after ``reset()`` and after per-lane automatic resets inside
-        ``step()``. Copy it when a stable snapshot is needed.
+        after ``reset()``. Copy it when a stable snapshot is needed.
         Lanes without a serialized initial state report ``-1``.
         """
         return self._active_state_indices
@@ -525,229 +525,59 @@ class RetroVecEnv(VectorEnv):
             return None
         return [str(key) for key in info_filter_keys]
 
-    @classmethod
-    def _normalize_done_on(
-        cls,
-        done_on,
-        *,
-        label,
-        game=None,
-        inttype=None,
-        scenario_path=None,
-    ):
-        rules = []
-        if done_on is not None:
-            if isinstance(done_on, Sequence) and not isinstance(
-                done_on,
-                (str, bytes, bytearray),
-            ):
-                done_on = {str(name): None for name in done_on}
-            if not isinstance(done_on, Mapping):
-                raise ValueError(
-                    f"{label} must be a mapping of rule names to event specs "
-                    "or a sequence of configured event names",
-                )
-            for raw_name, spec in done_on.items():
-                name = str(raw_name)
-                if not name:
-                    raise ValueError(f"{label} rule names must not be empty")
-                if spec is None:
-                    spec = cls.resolve_info_event_rules(
-                        game,
-                        (name,),
-                        inttype=inttype,
-                        label=label,
-                        scenario_path=scenario_path,
-                    )[name]
-                for trigger_id, variables, op, compare in cls._normalize_event_spec(
-                    name,
-                    spec,
-                    label=label,
-                ):
-                    rules.append((name, trigger_id, variables, op, compare))
-        if not rules:
-            return None
-        return tuple(rules)
-
-    @classmethod
-    def _normalize_event_spec(cls, name, spec, *, label):
-        if cls._is_compact_event_spec(spec):
-            return (cls._normalize_event_trigger(name, spec, label=label),)
-
-        if not isinstance(spec, Mapping):
-            raise ValueError(
-                f"{label} values must be compact (variables, op) pairs or "
-                "mappings with variables/op or triggers",
-            )
-
-        allowed = {"description", "triggers", "id", "variables", "keys", "op", "compare"}
-        unknown = set(spec) - allowed
-        if unknown:
-            names = ", ".join(sorted(str(key) for key in unknown))
-            raise ValueError(f"{label} event {name!r} has unknown keys: {names}")
-
-        if "triggers" not in spec:
-            return (cls._normalize_event_trigger(name, spec, label=label),)
-
-        raw_triggers = spec["triggers"]
-        if isinstance(raw_triggers, (str, bytes, bytearray)) or not isinstance(
-            raw_triggers,
-            Sequence,
-        ):
-            raise ValueError(f"{label} event {name!r} triggers must be a sequence")
-        if not raw_triggers:
-            raise ValueError(f"{label} event {name!r} must contain at least one trigger")
-
-        triggers = []
-        trigger_count = len(raw_triggers)
-        for index, raw_trigger in enumerate(raw_triggers):
-            triggers.append(
-                cls._normalize_event_trigger(
-                    name,
-                    raw_trigger,
-                    label=label,
-                    index=index,
-                    trigger_count=trigger_count,
-                ),
-            )
-        return tuple(triggers)
-
     @staticmethod
-    def _is_compact_event_spec(spec):
+    def _effective_crop(template, raw_height, raw_width, obs_crop, obs_crop_mode):
+        x, y, width, height = template.data.crop_info(0)
+        right_edge = raw_width if not width or x + width > raw_width else x + width
+        bottom_edge = (
+            raw_height if not height or y + height > raw_height else y + height
+        )
+        top, left = int(y), int(x)
+        if obs_crop is not None and obs_crop_mode == "remove":
+            obs_top, obs_bottom, obs_left, obs_right = obs_crop
+            top += obs_top
+            left += obs_left
+            bottom_edge -= obs_bottom
+            right_edge -= obs_right
+        if top >= bottom_edge or left >= right_edge:
+            raise ValueError("obs_crop removes the entire observation")
         return (
-            isinstance(spec, Sequence)
-            and not isinstance(spec, (str, bytes, bytearray))
-            and len(spec) == 2
+            top,
+            int(raw_height - bottom_edge),
+            left,
+            int(raw_width - right_edge),
         )
 
-    @classmethod
-    def _normalize_event_trigger(
-        cls,
-        event_name,
-        trigger,
-        *,
-        label,
-        index=0,
-        trigger_count=1,
+    @staticmethod
+    def _vector_observation_space(
+        raw_height,
+        raw_width,
+        crop,
+        obs_resize,
+        obs_grayscale,
+        frame_stack,
     ):
-        if cls._is_compact_event_spec(trigger):
-            raw_variables, raw_op = trigger
-            trigger_id = "default" if trigger_count == 1 else f"trigger_{index + 1}"
-            compare = "reset"
-        elif isinstance(trigger, Mapping):
-            allowed = {"description", "id", "variables", "keys", "op", "compare"}
-            unknown = set(trigger) - allowed
-            if unknown:
-                names = ", ".join(sorted(str(key) for key in unknown))
-                raise ValueError(
-                    f"{label} event {event_name!r} trigger has unknown keys: {names}",
-                )
-            if "variables" in trigger and "keys" in trigger:
-                raise ValueError(
-                    f"{label} event {event_name!r} trigger cannot use both "
-                    "variables and keys",
-                )
-            raw_variables = trigger.get("variables", trigger.get("keys"))
-            raw_op = trigger.get("op")
-            trigger_id = str(
-                trigger.get(
-                    "id",
-                    "default" if trigger_count == 1 else f"trigger_{index + 1}",
-                ),
-            )
-            compare = str(trigger.get("compare", "reset"))
-        else:
-            raise ValueError(
-                f"{label} event {event_name!r} triggers must be compact pairs "
-                "or mappings",
-            )
-
-        if not trigger_id:
-            raise ValueError(f"{label} event {event_name!r} trigger ids must not be empty")
-        variables = cls._normalize_event_variables(raw_variables, label=label)
-        op = cls._normalize_event_op(raw_op, label=label)
-        compare = cls._normalize_event_compare(compare, label=label)
-        return trigger_id, variables, op, compare
+        top, bottom, left, right = crop
+        height = raw_height - top - bottom
+        width = raw_width - left - right
+        if obs_resize is not None:
+            height, width = obs_resize
+        channels = (1 if obs_grayscale else 3) * frame_stack
+        return gym.spaces.Box(
+            low=0,
+            high=255,
+            shape=(height, width, channels),
+            dtype=np.uint8,
+        )
 
     @staticmethod
-    def _normalize_event_variables(raw_variables, *, label):
-        if isinstance(raw_variables, str):
-            variables = (raw_variables,)
-        elif (
-            isinstance(raw_variables, Sequence)
-            and not isinstance(raw_variables, (bytes, bytearray))
-        ):
-            variables = tuple(str(variable) for variable in raw_variables)
-        else:
-            raise ValueError(
-                f"{label} variables must be a string or sequence of strings",
-            )
-        if not variables or any(not variable for variable in variables):
-            raise ValueError(f"{label} rules must reference at least one variable")
-        return variables
+    def _initial_state(template):
+        initial_state = template.initial_state if template.initial_state else None
+        if initial_state is not None and template.system == "Atari2600":
+            from stable_retro.stella_state import migrate_legacy_state
 
-    @staticmethod
-    def _normalize_event_op(raw_op, *, label):
-        op = str(raw_op)
-        if op not in {"change", "increase", "decrease"}:
-            raise ValueError(
-                f"{label} ops must be 'change', 'increase', or 'decrease'",
-            )
-        return op
-
-    @staticmethod
-    def _normalize_event_compare(raw_compare, *, label):
-        compare = str(raw_compare)
-        if compare != "reset":
-            raise ValueError(f"{label} compare must be 'reset'")
-        return compare
-
-    @staticmethod
-    def scenario_events(scenario_path):
-        """Return named event rules declared by a scenario file."""
-
-        if not scenario_path:
-            return {}
-        try:
-            with open(scenario_path, encoding="utf-8") as handle:
-                scenario = json.load(handle)
-        except (OSError, json.JSONDecodeError):
-            return {}
-        events = scenario.get("events", {})
-        return events if isinstance(events, Mapping) else {}
-
-    @classmethod
-    def resolve_info_event_rules(
-        cls,
-        game,
-        names,
-        *,
-        inttype=None,
-        label="info_events",
-        scenario_path=None,
-    ):
-        """Resolve configured event names to raw done_on rule specs."""
-
-        if not scenario_path:
-            raise ValueError(f"{label} named events require a scenario")
-        event_rules = cls.scenario_events(scenario_path)
-        resolved = {}
-        missing = []
-        for raw_name in names:
-            name = str(raw_name)
-            if not name:
-                raise ValueError(f"{label} event names must not be empty")
-            if name not in event_rules:
-                missing.append(name)
-                continue
-            resolved[name] = event_rules[name]
-        if missing:
-            available = ", ".join(sorted(str(name) for name in event_rules)) or "none"
-            raise ValueError(
-                f"{label} unknown configured event(s) for {scenario_path}: "
-                f"{', '.join(missing)}. Available events: {available}",
-            )
-        return resolved
+            initial_state = migrate_legacy_state(template.em, initial_state)
+        return initial_state
 
     @staticmethod
     def _observation_space_for_layout(observation_space, obs_layout):
@@ -913,7 +743,7 @@ class RetroVecEnv(VectorEnv):
             env_kwargs,
         )
         try:
-            return template.initial_state if template.initial_state else None
+            return RetroVecEnv._initial_state(template)
         finally:
             template.close()
 
@@ -934,8 +764,7 @@ class RetroVecEnv(VectorEnv):
         return retro.data.get_file_path(game, str(scenario) + ".json", inttype)
 
     @staticmethod
-    def _reward_clip_config(template):
-        reward_clip = template._reward_clip
+    def _reward_clip_config(reward_clip):
         if not reward_clip:
             return False, -1.0, 1.0
         if reward_clip is True:
@@ -1064,27 +893,7 @@ class RetroVecEnv(VectorEnv):
         return vector_infos
 
     def _step_infos_to_dict(self, infos):
-        vector_infos = {}
-        for env_num, raw_info in enumerate(infos):
-            info = dict(raw_info)
-            terminal_observation = info.pop("terminal_observation", None)
-            reset_info = info.pop("reset_info", None)
-            terminal_info = info.pop("terminal_info", None)
-            info.pop("TimeLimit.truncated", None)
-
-            if terminal_observation is not None:
-                final_info = dict(terminal_info or info)
-                done_on_info = info.get("done_on_info")
-                if done_on_info is not None:
-                    final_info["done_on_info"] = done_on_info
-                if reset_info:
-                    info.update(dict(reset_info))
-                info["final_obs"] = terminal_observation
-                info["final_info"] = final_info
-
-            if info:
-                vector_infos = self._add_info(vector_infos, info, env_num)
-        return vector_infos
+        return self._list_infos_to_dict(infos)
 
     def reset(self, *, seed: int | Sequence[int | None] | None = None, options=None):
         super().reset(seed=None if isinstance(seed, Sequence) else seed)

@@ -1,33 +1,4 @@
 {
-  "events": {
-    "life_loss": {
-      "description": "Player lost a life.",
-      "triggers": [
-        {
-          "id": "lives_decrease",
-          "variables": [
-            "lives"
-          ],
-          "op": "decrease",
-          "compare": "reset"
-        }
-      ]
-    },
-    "level_change": {
-      "description": "Current level identifier changed.",
-      "triggers": [
-        {
-          "id": "level_bytes_changed",
-          "variables": [
-            "levelHi",
-            "levelLo"
-          ],
-          "op": "change",
-          "compare": "reset"
-        }
-      ]
-    }
-  },
   "done": {
     "variables": {
       "lives": {

@@ -101,7 +101,7 @@ def load_sb3_policy(path: str | os.PathLike[str], *, device: str = "cpu"):
         raise RuntimeError(f"failed to deserialize SB3 policy: {e}") from e
 
 
-def make_mario_level1_policy_env(*, done_on, info_filter="terminal") -> RetroVecEnv:
+def make_mario_level1_policy_env(*, info_filter="all") -> RetroVecEnv:
     """Create the Super Mario Bros Level1-1 env shape used by the HF policy."""
 
     rom_path = retro.data.get_original_romfile_path("SuperMarioBros-Nes-v0")
@@ -122,8 +122,27 @@ def make_mario_level1_policy_env(*, done_on, info_filter="terminal") -> RetroVec
         obs_layout="chw",
         num_threads=1,
         info_filter=info_filter,
-        done_on=done_on,
     )
+
+
+def _event_payload(event_name: str, previous: dict, current: dict) -> dict | None:
+    if event_name == "life_loss":
+        keys = ("lives",)
+        fired = int(current["lives"]) < int(previous["lives"])
+    elif event_name == "level_change":
+        keys = ("levelHi", "levelLo")
+        fired = tuple(int(current[key]) for key in keys) != tuple(
+            int(previous[key]) for key in keys
+        )
+    else:
+        raise ValueError(f"unsupported event {event_name!r}")
+    if not fired:
+        return None
+    return {
+        "keys": list(keys),
+        "prev": [int(previous[key]) for key in keys],
+        "next": [int(current[key]) for key in keys],
+    }
 
 
 def run_policy_until_event(
@@ -137,29 +156,29 @@ def run_policy_until_event(
     seed_start: int = 10007,
     deterministic: bool = False,
 ) -> PolicyEventResult | None:
-    """Run a discrete SB3 policy until a named done_on event fires."""
+    """Run a policy until a raw provider signal matches a diagnostic event."""
 
     for episode in range(int(episodes)):
         env.seed(int(seed_start) + episode)
-        obs, _infos = env.reset()
+        obs, reset_infos = env.reset()
+        previous_info = _single_vector_info(reset_infos, 0)
         for step in range(1, int(max_steps) + 1):
             action, _state = model.predict(obs, deterministic=deterministic)
             action_value = int(np.asarray(action).reshape(-1)[0])
             masks = action_map[np.asarray(action, dtype=np.int64).reshape(-1)]
             obs, _rewards, terminations, truncations, infos = env.step(masks)
-            if not bool(terminations[0] or truncations[0]):
-                continue
-
             info = _single_vector_info(infos, 0)
-            payload = info.get("done_on_info", {})
-            if event_name not in payload:
+            payload = _event_payload(event_name, previous_info, info)
+            previous_info = info
+            if payload is not None:
+                return PolicyEventResult(
+                    event_name=event_name,
+                    episode=episode,
+                    step=step,
+                    action=action_value,
+                    payload=payload,
+                    info=info,
+                )
+            if bool(terminations[0] or truncations[0]):
                 break
-            return PolicyEventResult(
-                event_name=event_name,
-                episode=episode,
-                step=step,
-                action=action_value,
-                payload=payload[event_name],
-                info=info,
-            )
     return None

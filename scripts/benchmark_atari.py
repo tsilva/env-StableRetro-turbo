@@ -1,4 +1,4 @@
-"""Benchmark Atari RetroVecEnv throughput with manual or same-step reset."""
+"""Benchmark Atari RetroVecEnv throughput with manual reset."""
 
 from __future__ import annotations
 
@@ -45,14 +45,13 @@ def _run(args) -> dict:
             frame_stack=4,
             maxpool_last_two=True,
             info_filter=args.info_filter,
-            autoreset_mode=args.autoreset_mode,
         )
         action = np.zeros((args.num_envs, env.num_buttons), dtype=np.uint8)
 
         def step_and_reset():
             _obs, _rewards, terminated, truncated, _infos = env.step(action)
             done = terminated | truncated
-            if args.autoreset_mode == "Disabled" and done.any():
+            if done.any():
                 env.reset(options={"reset_mask": done})
             return int(done.sum())
 
@@ -97,7 +96,7 @@ def _run(args) -> dict:
             "obs_layout": "chw",
             "obs_copy": args.obs_copy,
             "info_filter": args.info_filter,
-            "autoreset_mode": args.autoreset_mode,
+            "autoreset_mode": "Disabled",
             "action_policy": "fixed_noop",
             "warmup_steps": args.warmup_steps,
             "seconds": args.seconds,
@@ -126,11 +125,6 @@ def main(argv=None) -> int:
     parser.add_argument("--warmup-steps", type=int, default=64)
     parser.add_argument("--obs-copy", choices=("safe_view", "unsafe_view"), default="safe_view")
     parser.add_argument("--info-filter", choices=("all", "terminal", "none"), default="none")
-    parser.add_argument(
-        "--autoreset-mode",
-        choices=("SameStep", "Disabled"),
-        default="Disabled",
-    )
     parser.add_argument("--output-json", type=Path, default=None)
     args = parser.parse_args(argv)
     if args.num_envs <= 0 or args.num_threads <= 0:
