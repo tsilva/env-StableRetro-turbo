@@ -1,5 +1,9 @@
 # Project Notes
 
+## Product Specifications
+
+Before any task in this repository, use the `$specs-author` skill to read the root `SPECS.md`. Use `$specs-author` whenever reading or writing `SPECS.md`.
+
 ## Mario State Generation
 
 Use the repo-local `generate-mario-states` skill when creating, validating, or deploying `SuperMarioBros-Nes-v0` `Level*.state` files.
