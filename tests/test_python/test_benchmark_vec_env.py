@@ -150,18 +150,6 @@ def test_regular_preprocess_wrapper_supports_mask_crop():
     np.testing.assert_array_equal(cropped[1:3, 1:3, :], image[1:3, 1:3, :])
 
 
-def test_benchmark_round_robins_short_state_list():
-    bench = _load_benchmark_module()
-
-    assert bench._expand_round_robin_states(["Level1-1", "Level1-2"], 5) == [
-        "Level1-1",
-        "Level1-2",
-        "Level1-1",
-        "Level1-2",
-        "Level1-1",
-    ]
-
-
 def test_named_mario_action_sequence_is_deterministic():
     bench = _load_benchmark_module()
 
@@ -217,7 +205,7 @@ def test_dry_run_prints_supermario_canonical_overrides(monkeypatch, capsys):
     )
     output = capsys.readouterr().out
     assert "envs=4 threads=4" in output
-    assert "state=Level1-1,Level1-2,Level1-1,Level1-2 slot-assigned" in output
+    assert "state=catalog=Level1-1,Level1-2 default_index=0" in output
     assert "crop_mode=mask" in output
     assert "maxpool_last_two=False" in output
     assert "autoreset_mode=Disabled" in output

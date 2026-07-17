@@ -1636,7 +1636,6 @@ public:
 		const string& obsLayout,
 		py::object infoFilterKeysObj,
 		py::object initialStateLabelsObj = py::none(),
-		py::object initialStateWeightsObj = py::none(),
 		py::object maskCropObj = py::none(),
 		int cropFill = 0
 	)
@@ -1709,7 +1708,7 @@ public:
 			}
 		}
 		m_renderSkipEnabled = !envFlagEnabled("STABLE_RETRO_DISABLE_RENDER_SKIP");
-		parseInitialStates(initialStateObj, initialStateLabelsObj, initialStateWeightsObj, numEnvs);
+		parseInitialStates(initialStateObj, initialStateLabelsObj);
 		m_numThreads = std::max(1, std::min<int>(m_numThreads <= 0 ? static_cast<int>(numEnvs) : m_numThreads, static_cast<int>(numEnvs)));
 		const unsigned hardwareThreads = std::thread::hardware_concurrency();
 		if (hardwareThreads > 0) {
@@ -1790,28 +1789,10 @@ public:
 		m_stepOutputs.resize(m_slots.size());
 	}
 
-	enum class InitialStateMode {
-		None,
-		Single,
-		Slot,
-		Sample
-	};
-
 	struct InitialStateChoice {
 		std::string state;
 		std::string label;
-		double weight = 1.0;
-		int32_t nameIndex = -1;
 	};
-
-	int32_t internInitialStateName(const std::string& label) {
-		auto it = std::find(m_initialStateNames.begin(), m_initialStateNames.end(), label);
-		if (it != m_initialStateNames.end()) {
-			return static_cast<int32_t>(std::distance(m_initialStateNames.begin(), it));
-		}
-		m_initialStateNames.push_back(label);
-		return static_cast<int32_t>(m_initialStateNames.size() - 1);
-	}
 
 	std::vector<std::string> parseInitialStateLabels(py::object labelsObj, size_t stateCount) {
 		std::vector<std::string> labels(stateCount);
@@ -1828,25 +1809,22 @@ public:
 		return labels;
 	}
 
-	void parseInitialStates(py::object initialStateObj, py::object labelsObj, py::object weightsObj, size_t numEnvs) {
+	void parseInitialStates(py::object initialStateObj, py::object labelsObj) {
 		m_initialStates.clear();
-		m_initialStateNames.clear();
-		m_initialStateCumulative.clear();
-		m_initialStateMode = InitialStateMode::None;
+		m_stateCatalog.clear();
 		m_reportInitialState = false;
 		if (initialStateObj.is_none()) {
-			if (!labelsObj.is_none() || !weightsObj.is_none()) {
-				throw std::runtime_error("initial_state labels/weights require initial_state");
+			if (!labelsObj.is_none()) {
+				throw std::runtime_error("initial_state labels require initial_state");
 			}
-			m_initialStateMode = InitialStateMode::None;
 			return;
 		}
 		if (PyBytes_Check(initialStateObj.ptr())) {
 			std::string state = py::bytes(initialStateObj);
 			std::vector<std::string> labels = parseInitialStateLabels(labelsObj, 1);
-			const int32_t nameIndex = internInitialStateName(labels[0]);
-			m_initialStates.push_back({state, labels[0], 1.0, nameIndex});
-			m_initialStateMode = InitialStateMode::Single;
+			m_stateCatalog.push_back(labels[0]);
+			m_initialStates.push_back({state, labels[0]});
+			m_reportInitialState = !labelsObj.is_none();
 			return;
 		}
 
@@ -1861,41 +1839,14 @@ public:
 			m_reportInitialState = true;
 		}
 
-		std::vector<double> weights(stateCount, 1.0);
-		if (!weightsObj.is_none()) {
-			py::sequence weightsSeq = py::reinterpret_borrow<py::sequence>(weightsObj);
-			if (static_cast<size_t>(weightsSeq.size()) != stateCount) {
-				throw std::runtime_error("initial_state_weights length must match initial_state length");
-			}
-			double cumulative = 0.0;
-			for (size_t i = 0; i < stateCount; ++i) {
-				const double weight = py::float_(weightsSeq[static_cast<py::ssize_t>(i)]).cast<double>();
-				if (!std::isfinite(weight) || weight < 0.0) {
-					throw std::runtime_error("initial_state_weights must contain non-negative finite numbers");
-				}
-				weights[i] = weight;
-				cumulative += weight;
-				m_initialStateCumulative.push_back(cumulative);
-			}
-			if (!std::isfinite(cumulative) || cumulative <= 0.0) {
-				throw std::runtime_error("initial_state_weights must sum to a positive number");
-			}
-			m_initialStateMode = InitialStateMode::Sample;
-		} else {
-			if (stateCount != numEnvs) {
-				throw std::runtime_error("initial_state sequence length must match num_envs when initial_state_weights is not provided");
-			}
-			m_initialStateMode = InitialStateMode::Slot;
-		}
-
 		m_initialStates.reserve(stateCount);
 		for (size_t i = 0; i < stateCount; ++i) {
 			std::string state = py::bytes(states[static_cast<py::ssize_t>(i)]);
 			if (state.empty()) {
 				throw std::runtime_error("initial_state entries must not be empty");
 			}
-			const int32_t nameIndex = internInitialStateName(labels[i]);
-			m_initialStates.push_back({state, labels[i], weights[i], nameIndex});
+			m_stateCatalog.push_back(labels[i]);
+			m_initialStates.push_back({state, labels[i]});
 		}
 	}
 
@@ -1910,7 +1861,7 @@ public:
 	py::tuple reset(
 		py::object seedObj = py::none(),
 		py::object resetMaskObj = py::none(),
-		py::object startIndicesObj = py::none()
+		py::object stateIndicesObj = py::none()
 	) {
 		std::vector<uint8_t> resetMask(m_slots.size(), 1);
 		if (!resetMaskObj.is_none()) {
@@ -1929,22 +1880,22 @@ public:
 			}
 		}
 
-		std::vector<int32_t> startIndices(m_slots.size(), -1);
-		if (!startIndicesObj.is_none()) {
-			py::array startArray = py::cast<py::array>(startIndicesObj);
-			if (!py::isinstance<py::array_t<int32_t>>(startArray) || startArray.ndim() != 1 || static_cast<size_t>(startArray.shape(0)) != m_slots.size()) {
-				throw std::runtime_error("start_indices must be a one-dimensional int32 array with num_envs entries");
+		std::vector<int32_t> stateIndices(m_slots.size(), m_initialStates.empty() ? -1 : 0);
+		if (!stateIndicesObj.is_none()) {
+			py::array stateArray = py::cast<py::array>(stateIndicesObj);
+			if (!py::isinstance<py::array_t<int32_t>>(stateArray) || stateArray.ndim() != 1 || static_cast<size_t>(stateArray.shape(0)) != m_slots.size()) {
+				throw std::runtime_error("state_indices must be a one-dimensional int32 array with num_envs entries");
 			}
-			auto values = startArray.cast<py::array_t<int32_t>>().unchecked<1>();
+			auto values = stateArray.cast<py::array_t<int32_t>>().unchecked<1>();
 			for (size_t i = 0; i < m_slots.size(); ++i) {
 				if (!resetMask[i]) {
 					continue;
 				}
 				const int32_t value = values(static_cast<py::ssize_t>(i));
-				if (value < -1 || (value >= 0 && static_cast<size_t>(value) >= m_initialStates.size())) {
-					throw std::runtime_error("selected start_indices entries must be -1 or valid initial-state catalog indices");
+				if (m_initialStates.empty() ? value != -1 : value < 0 || static_cast<size_t>(value) >= m_initialStates.size()) {
+					throw std::runtime_error("selected state_indices entries must index state_catalog");
 				}
-				startIndices[i] = value;
+				stateIndices[i] = value;
 			}
 		}
 
@@ -2004,7 +1955,7 @@ public:
 					try {
 						if (resetMask[index]) {
 							if (hasSeed[index]) m_slots[index]->rng.seed(seedValues[index]);
-							resetSlot(*m_slots[index], obsData + index * m_stackedObsSize, startIndices[index]);
+							resetSlot(*m_slots[index], obsData + index * m_stackedObsSize, stateIndices[index]);
 						} else {
 							writeStackedObservation(*m_slots[index], obsData + index * m_stackedObsSize);
 						}
@@ -2031,10 +1982,10 @@ public:
 		);
 	}
 
-	py::tuple initialStateNames() const {
-		py::tuple names(m_initialStateNames.size());
-		for (size_t i = 0; i < m_initialStateNames.size(); ++i) {
-			names[static_cast<py::ssize_t>(i)] = py::str(m_initialStateNames[i]);
+	py::tuple stateCatalog() const {
+		py::tuple names(m_stateCatalog.size());
+		for (size_t i = 0; i < m_stateCatalog.size(); ++i) {
+			names[static_cast<py::ssize_t>(i)] = py::str(m_stateCatalog[i]);
 		}
 		return names;
 	}
@@ -2508,32 +2459,7 @@ private:
 		return std::max(m_rewardClipLow, std::min(m_rewardClipHigh, reward));
 	}
 
-	int32_t initialStateIndexForReset(Slot& slot) {
-		switch (m_initialStateMode) {
-		case InitialStateMode::None:
-			return -1;
-		case InitialStateMode::Single:
-			return m_initialStates.empty() ? -1 : 0;
-		case InitialStateMode::Slot:
-			return static_cast<int32_t>(slot.index);
-		case InitialStateMode::Sample: {
-			std::uniform_real_distribution<double> dist(0.0, m_initialStateCumulative.back());
-			const double sample = dist(slot.rng);
-			auto it = std::upper_bound(m_initialStateCumulative.begin(), m_initialStateCumulative.end(), sample);
-			size_t index = static_cast<size_t>(std::distance(m_initialStateCumulative.begin(), it));
-			if (index >= m_initialStates.size()) {
-				index = m_initialStates.size() - 1;
-			}
-			return static_cast<int32_t>(index);
-		}
-		}
-		return -1;
-	}
-
-	void resetSlot(Slot& slot, uint8_t* dst, int32_t explicitInitialStateIndex = -1) {
-		const int32_t initialStateIndex = explicitInitialStateIndex >= 0
-			? explicitInitialStateIndex
-			: initialStateIndexForReset(slot);
+	void resetSlot(Slot& slot, uint8_t* dst, int32_t initialStateIndex) {
 		const InitialStateChoice* initialState =
 			initialStateIndex >= 0 ? &m_initialStates[static_cast<size_t>(initialStateIndex)] : nullptr;
 		if (initialState && !initialState->state.empty()) {
@@ -2541,7 +2467,7 @@ private:
 				throw std::runtime_error("failed to load initial state");
 			}
 			slot.currentStartStateLabel = initialState->label;
-			m_activeInitialStateIndices[slot.index] = initialState->nameIndex;
+			m_activeInitialStateIndices[slot.index] = initialStateIndex;
 		} else {
 			slot.emulator->m_re.reset();
 			slot.currentStartStateLabel.clear();
@@ -2809,10 +2735,8 @@ private:
 
 	std::vector<std::unique_ptr<Slot>> m_slots;
 	std::vector<InitialStateChoice> m_initialStates;
-	std::vector<std::string> m_initialStateNames;
-	std::vector<double> m_initialStateCumulative;
+	std::vector<std::string> m_stateCatalog;
 	std::vector<int32_t> m_activeInitialStateIndices;
-	InitialStateMode m_initialStateMode = InitialStateMode::None;
 	bool m_reportInitialState = false;
 	int m_numButtons = 0;
 	int m_frameSkip = 1;
@@ -3027,7 +2951,6 @@ PYBIND11_MODULE(_retro, m) {
 				py::object,
 				py::object,
 				py::object,
-				py::object,
 				int>(),
 			py::arg("num_envs"),
 			py::arg("rom_path"),
@@ -3055,7 +2978,6 @@ PYBIND11_MODULE(_retro, m) {
 			py::arg("obs_layout") = "hwc",
 			py::arg("info_filter_keys") = py::none(),
 			py::arg("initial_state_labels") = py::none(),
-			py::arg("initial_state_weights") = py::none(),
 			py::arg("mask_crop") = py::none(),
 			py::arg("crop_fill") = 0
 		)
@@ -3064,13 +2986,13 @@ PYBIND11_MODULE(_retro, m) {
 			&PyRetroVecEnv::reset,
 			py::arg("seed") = py::none(),
 			py::arg("reset_mask") = py::none(),
-			py::arg("start_indices") = py::none()
+			py::arg("state_indices") = py::none()
 		)
 		.def("step", &PyRetroVecEnv::step)
 		.def("active_state_indices", &PyRetroVecEnv::activeStateIndices)
 		.def("observation_shape", &PyRetroVecEnv::observationShape)
 		.def("get_screen", &PyRetroVecEnv::getScreen, py::arg("index") = 0)
-		.def_property_readonly("initial_state_names", &PyRetroVecEnv::initialStateNames)
+		.def_property_readonly("state_catalog", &PyRetroVecEnv::stateCatalog)
 		.def_property_readonly("num_envs", &PyRetroVecEnv::numEnvs);
 
 	m.def("core_path", &::corePath, py::arg("hint") = py::none());

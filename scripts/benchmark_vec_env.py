@@ -442,12 +442,6 @@ def _sample_action_sequence(templates, count, seed):
     return tuple(templates[int(index)] for index in indices)
 
 
-def _expand_round_robin_states(states, num_envs):
-    if states is None or len(states) >= num_envs:
-        return states
-    return [states[index % len(states)] for index in range(num_envs)]
-
-
 def _step_and_reset(env, action, manual_reset):
     result = env.step(action)
     if manual_reset:
@@ -517,7 +511,6 @@ def _build_native_vec(
     game,
     state,
     states,
-    state_probs,
     inttype,
     num_envs,
     env_kwargs,
@@ -529,17 +522,12 @@ def _build_native_vec(
 ):
     from stable_retro.vec_env import RetroVecEnv
 
-    state_arg = state
+    state_kwargs = {"state": state}
     if states is not None:
-        state_arg = (
-            dict(zip(states, state_probs, strict=True))
-            if state_probs is not None
-            else list(states)
-        )
+        state_kwargs = {"state_catalog": tuple(states)}
 
     return RetroVecEnv(
         game,
-        state=state_arg,
         num_envs=num_envs,
         inttype=inttype,
         rom_path=rom_path,
@@ -547,6 +535,7 @@ def _build_native_vec(
         scenario=scenario,
         num_threads=num_threads,
         obs_copy=obs_copy,
+        **state_kwargs,
         **env_kwargs,
     )
 
@@ -663,12 +652,7 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--states",
         default=None,
-        help="Comma-separated native start states. Without --state-probs, count must match --num-envs.",
-    )
-    parser.add_argument(
-        "--state-probs",
-        default=None,
-        help="Comma-separated positive probabilities for --states; normalized before sampling.",
+        help="Comma-separated ordered native state catalog; resets default to catalog index zero.",
     )
     parser.add_argument("--rom-path", default=None)
     parser.add_argument("--info", default=None)
@@ -771,26 +755,11 @@ def main(argv=None) -> int:
     os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-stable-retro")
     if args.state is not None and args.states is not None:
         raise SystemExit("--state and --states are mutually exclusive")
-    if args.state_probs is not None and args.states is None:
-        raise SystemExit("--state-probs requires --states")
     states = None
-    state_probs = None
     if args.states is not None:
         states = [item.strip() for item in args.states.split(",")]
         if not all(states):
             raise SystemExit("--states must not contain empty entries")
-        if args.state_probs is not None:
-            try:
-                state_probs = [
-                    float(item.strip()) for item in args.state_probs.split(",")
-                ]
-            except ValueError as e:
-                raise SystemExit("--state-probs must be comma-separated numbers") from e
-        else:
-            states = _expand_round_robin_states(
-                states,
-                profile.num_envs if args.num_envs is None else args.num_envs,
-            )
         state = None
     else:
         state_value = profile.state if args.state is None else args.state
@@ -871,11 +840,7 @@ def main(argv=None) -> int:
         raise SystemExit("--steps requires --actions for deterministic fixed-step mode")
 
     if states is not None:
-        state_label = ",".join(states)
-        if state_probs is None:
-            state_label += " slot-assigned"
-        else:
-            state_label += f" probs={state_probs}"
+        state_label = f"catalog={','.join(states)} default_index=0"
     else:
         state_label = "State.NONE" if state is retro.State.NONE else str(state)
     action_label = "fixed" if args.fixed_actions else "sampled"
@@ -909,7 +874,6 @@ def main(argv=None) -> int:
                 game,
                 state,
                 states,
-                state_probs,
                 retro.data.Integrations.DEFAULT,
                 num_envs,
                 env_kwargs,

@@ -106,7 +106,7 @@ Benchmark definitions live in [`scripts/benchmark_vec_env.json`](scripts/benchma
 - The distribution is `stable-retro-turbo`; the Python package is `stable_retro`. The legacy `retro` import remains as a compatibility shim.
 - `RetroVecEnv` implements Gymnasium's vector API directly. It is not a Stable-Baselines3 `VecEnv`, and Stable-Baselines3 is not a runtime dependency.
 - A scalar reset seed expands to `seed + lane_index`. Seed sequences must contain one integer or `None` per lane.
-- Weighted state mappings and explicit per-lane state sequences can be passed through `state`; selected lanes can also be reset to catalog entries with `start_indices`.
+- `state_catalog` preloads an ordered saved-state catalog. Select reset lanes with `reset_mask` and their exact catalog entries with `state_indices`; Turbo does not sample states.
 - `active_state_indices()` returns a read-only NumPy view. Copy it when you need a stable snapshot.
 - [Stable Retro](https://stable-retro.farama.org/) remains the source for inherited game, integration, and emulator documentation.
 - Bundled emulator cores have their own licenses; see [`LICENSES.md`](LICENSES.md).

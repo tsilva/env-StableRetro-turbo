@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -16,6 +17,14 @@ from stable_retro.enums import Actions, Observations, State
 from stable_retro.retro_env import RetroEnv
 
 _SERIALIZED_UNSET = object()
+
+
+class _DefaultState:
+    def __repr__(self):
+        return "State.DEFAULT"
+
+
+_STATE_UNSET = _DefaultState()
 
 
 def _normalize_int(value, name):
@@ -134,9 +143,9 @@ class RetroVecEnv(VectorEnv):
     ``reset(options={"reset_mask": mask})``. Masked reset leaves every
     unselected lane untouched.
 
-    ``state`` accepts a single state name, a sequence of one state per env slot,
-    or a mapping of state names to non-negative sampling weights. Mapping weights
-    are normalized and sampled independently for each env on every episode reset.
+    ``state`` accepts one saved-state name. ``state_catalog`` accepts an ordered
+    collection of every saved state that may be selected for this env instance.
+    Selected lanes load catalog entries through ``options["state_indices"]``.
 
     On Stella-backed Atari environments, ``use_fire_reset=True`` presses FIRE
     for one native frame after each full-episode reset when FIRE is available,
@@ -152,7 +161,7 @@ class RetroVecEnv(VectorEnv):
     def __init__(
         self,
         game,
-        state=State.DEFAULT,
+        state=_STATE_UNSET,
         scenario=None,
         info=None,
         use_restricted_actions=Actions.FILTERED,
@@ -181,6 +190,7 @@ class RetroVecEnv(VectorEnv):
         sticky_action_prob=0.0,
         reward_clip=False,
         info_filter="all",
+        state_catalog=None,
     ):
         import stable_retro as retro
         from stable_retro import _retro
@@ -226,16 +236,11 @@ class RetroVecEnv(VectorEnv):
         }
         info_path = self._resolve_info_path(retro, game, info, inttype)
         scenario_path = self._resolve_scenario_path(retro, game, scenario, inttype)
-        (
-            state_values,
-            state_labels,
-            state_probs,
-            state_collection,
-        ) = self._resolve_state_config(
+        state_values, state_labels, explicit_catalog = self._resolve_state_config(
             retro,
             game,
-            num_envs,
             state,
+            state_catalog,
         )
         obs_layout = str(obs_layout).lower()
         if obs_layout not in {"hwc", "chw"}:
@@ -285,6 +290,8 @@ class RetroVecEnv(VectorEnv):
             crop_mask = obs_crop if obs_crop_mode == "mask" else None
             initial_state = self._initial_state(template)
             self.single_action_space = template.action_space
+            self.system = template.system
+            self.buttons = tuple(template.buttons)
             self.single_observation_space = self._observation_space_for_layout(
                 self._vector_observation_space(
                     height,
@@ -312,31 +319,40 @@ class RetroVecEnv(VectorEnv):
         finally:
             template.close()
 
-        initial_state, initial_state_labels, initial_state_weights = (
-            self._resolve_initial_state_payload(
-                retro,
-                game,
-                num_envs,
-                state,
-                inttype,
-                rom_path,
-                info_path,
-                scenario_path,
-                env_kwargs,
-                first_initial_state=initial_state,
-                resolved_config=(
-                    state_values,
-                    state_labels,
-                    state_probs,
-                    state_collection,
-                ),
-            )
+        initial_state, initial_state_labels = self._resolve_initial_state_payload(
+            retro,
+            game,
+            inttype,
+            rom_path,
+            info_path,
+            scenario_path,
+            env_kwargs,
+            first_initial_state=initial_state,
+            resolved_config=(state_values, state_labels, explicit_catalog),
+        )
+        if initial_state is None:
+            state_payloads = ()
+        elif isinstance(initial_state, Sequence) and not isinstance(
+            initial_state, (str, bytes, bytearray)
+        ):
+            state_payloads = tuple(bytes(payload) for payload in initial_state)
+        else:
+            state_payloads = (bytes(initial_state),)
+        labels = tuple(initial_state_labels or ())
+        if len(labels) != len(state_payloads):
+            labels = tuple(f"state-{index}" for index in range(len(state_payloads)))
+        self.initial_state_assets = tuple(
+            {"name": str(label), "sha256": hashlib.sha256(payload).hexdigest()}
+            for label, payload in zip(labels, state_payloads)
         )
 
         resolved_rom_path = rom_path or retro.data.get_original_romfile_path(
             game,
             inttype,
         )
+        self.rom_path = str(resolved_rom_path)
+        self.info_path = str(info_path)
+        self.scenario_path = str(scenario_path)
         if num_threads is None:
             num_threads = num_envs
         self.native = _retro._RetroVecEnv(
@@ -366,15 +382,13 @@ class RetroVecEnv(VectorEnv):
             obs_layout,
             info_filter_keys,
             initial_state_labels,
-            initial_state_weights,
             crop_mask,
             obs_crop_fill,
         )
         self.num_envs = num_envs
-        self.initial_state_names = tuple(self.native.initial_state_names)
+        self._state_catalog = tuple(self.native.state_catalog)
         self._active_state_indices = self.native.active_state_indices()
         self._active_state_indices.setflags(write=False)
-        self._active_state_names = [None for _ in range(self.num_envs)]
 
     @staticmethod
     def _fire_reset_button(template, enabled):
@@ -396,7 +410,12 @@ class RetroVecEnv(VectorEnv):
             return fire_button
         return -1
 
-    def active_state_indices(self):
+    @property
+    def state_catalog(self) -> tuple[str, ...]:
+        """Return the immutable ordered catalog of selectable saved states."""
+        return self._state_catalog
+
+    def active_state_indices(self) -> np.ndarray:
         """Return a read-only int32 NumPy view of active initial-state indices.
 
         The returned array is owned by this env and mutates in place
@@ -405,63 +424,6 @@ class RetroVecEnv(VectorEnv):
         """
         return self._active_state_indices
 
-    def active_states(self):
-        """Return active initial-state names for each lane."""
-        return tuple(self._active_state_names)
-
-    def _refresh_active_state_names(self, lanes=None):
-        if not hasattr(self, "initial_state_names"):
-            return
-        if not hasattr(self, "_active_state_names"):
-            self._active_state_names = [None for _ in range(self.num_envs)]
-        names = self.initial_state_names
-        if lanes is None:
-            lanes = range(self.num_envs)
-        for lane in lanes:
-            index = int(self._active_state_indices[lane])
-            self._active_state_names[lane] = None if index < 0 else names[index]
-
-    @staticmethod
-    def _normalize_state_sampling_weights(weights, state_names):
-        if not state_names:
-            raise ValueError("state sampling weights require named initial states")
-
-        if isinstance(weights, Mapping):
-            unknown = set(weights) - set(state_names)
-            missing = set(state_names) - set(weights)
-            if unknown:
-                names = ", ".join(sorted(str(name) for name in unknown))
-                raise ValueError(f"unknown state sampling weight names: {names}")
-            if missing:
-                names = ", ".join(sorted(str(name) for name in missing))
-                raise ValueError(f"missing state sampling weights: {names}")
-            raw_weights = [weights[name] for name in state_names]
-        elif isinstance(weights, Sequence) and not isinstance(
-            weights,
-            (str, bytes, bytearray),
-        ):
-            raw_weights = list(weights)
-            if len(raw_weights) != len(state_names):
-                raise ValueError(
-                    "state sampling weight sequence length must match initial_state_names",
-                )
-        else:
-            raise ValueError(
-                "state sampling weights must be a mapping or a sequence",
-            )
-
-        normalized_weights = []
-        for weight in raw_weights:
-            value = float(weight)
-            if not math.isfinite(value) or value < 0.0:
-                raise ValueError(
-                    "state sampling weights must contain non-negative finite numbers",
-                )
-            normalized_weights.append(value)
-        total = math.fsum(normalized_weights)
-        if not math.isfinite(total) or total <= 0.0:
-            raise ValueError("state sampling weights must sum to a positive number")
-        return [value / total for value in normalized_weights]
 
     @staticmethod
     def _normalize_obs_copy(obs_copy):
@@ -594,23 +556,29 @@ class RetroVecEnv(VectorEnv):
         )
 
     @staticmethod
-    def _resolve_state_config(retro, game, num_envs, state):
-        if isinstance(state, Mapping):
-            states = list(state.keys())
-            state_probs = list(state.values())
-            state_collection = True
-        elif (
-            isinstance(state, Sequence)
-            and not isinstance(state, (str, bytes, bytearray))
-        ):
-            states = list(state)
-            state_probs = None
-            state_collection = True
-        else:
-            return [state], [str(state)], None, False
+    def _resolve_state_config(retro, game, state, state_catalog):
+        if state_catalog is None:
+            if state is _STATE_UNSET:
+                state = retro.State.DEFAULT
+            if isinstance(state, Mapping) or (
+                isinstance(state, Sequence)
+                and not isinstance(state, (str, bytes, bytearray))
+            ):
+                raise TypeError(
+                    "state must be a single state; use state_catalog for multiple states",
+                )
+            return [state], [str(state)], False
 
+        if state is not _STATE_UNSET:
+            raise ValueError("state and state_catalog are mutually exclusive")
+        if isinstance(state_catalog, (str, bytes, bytearray)) or not isinstance(
+            state_catalog,
+            Sequence,
+        ):
+            raise TypeError("state_catalog must be a sequence of state names")
+        states = list(state_catalog)
         if not states:
-            raise ValueError("state must contain at least one state")
+            raise ValueError("state_catalog must contain at least one state")
 
         available_states = set(retro.data.list_states(game))
         state_values = []
@@ -627,39 +595,21 @@ class RetroVecEnv(VectorEnv):
                 raise ValueError(f"unknown state {label!r} for game {game}")
             state_values.append(value)
             state_labels.append(label)
-
-        if state_probs is None:
-            if len(state_values) != int(num_envs):
-                raise ValueError(
-                    "state sequence length must match num_envs",
-                )
-            return state_values, state_labels, None, state_collection
-
-        probs = list(state_probs)
-        if len(probs) != len(state_values):
-            raise ValueError("state weight count must match state count")
-
-        normalized_probs = []
-        for prob in probs:
-            value = float(prob)
-            if not math.isfinite(value) or value < 0.0:
-                raise ValueError(
-                    "state weights must contain non-negative finite numbers",
-                )
-            normalized_probs.append(value)
-        total = math.fsum(normalized_probs)
-        if not math.isfinite(total) or total <= 0.0:
-            raise ValueError("state weights must sum to a positive number")
-        normalized_probs = [value / total for value in normalized_probs]
-        return state_values, state_labels, normalized_probs, state_collection
+        duplicates = sorted(
+            label for label in set(state_labels) if state_labels.count(label) > 1
+        )
+        if duplicates:
+            names = ", ".join(repr(name) for name in duplicates)
+            raise ValueError(f"state_catalog contains duplicate states: {names}")
+        if any(value in (retro.State.NONE, None) for value in state_values):
+            raise ValueError("state_catalog entries must resolve to saved states")
+        return state_values, state_labels, True
 
     @classmethod
     def _resolve_initial_state_payload(
         cls,
         retro,
         game,
-        num_envs,
-        state,
         inttype,
         rom_path,
         info_path,
@@ -670,8 +620,8 @@ class RetroVecEnv(VectorEnv):
         resolved_config=None,
     ):
         if resolved_config is None:
-            resolved_config = cls._resolve_state_config(retro, game, num_envs, state)
-        state_values, state_labels, state_probs, state_collection = resolved_config
+            raise ValueError("resolved state configuration is required")
+        state_values, state_labels, explicit_catalog = resolved_config
 
         if first_initial_state is _SERIALIZED_UNSET:
             first_initial_state = cls._serialize_initial_state(
@@ -687,15 +637,9 @@ class RetroVecEnv(VectorEnv):
 
         initial_state = first_initial_state
         initial_state_labels = None
-        initial_state_weights = None
-        if state_collection:
+        if explicit_catalog:
             initial_states = [initial_state]
-            state_cache = {state_labels[0]: initial_state}
             for value, label in zip(state_values[1:], state_labels[1:]):
-                cached = state_cache.get(label)
-                if cached is not None:
-                    initial_states.append(cached)
-                    continue
                 serialized = cls._serialize_initial_state(
                     retro,
                     game,
@@ -710,16 +654,14 @@ class RetroVecEnv(VectorEnv):
                     raise ValueError(
                         f"state {label!r} did not resolve to a non-empty state",
                     )
-                state_cache[label] = serialized
                 initial_states.append(serialized)
             if any(not value for value in initial_states):
                 raise ValueError("states must resolve to non-empty start states")
             initial_state = initial_states
             initial_state_labels = state_labels
-            initial_state_weights = state_probs
         elif initial_state is not None:
             initial_state_labels = state_labels
-        return initial_state, initial_state_labels, initial_state_weights
+        return initial_state, initial_state_labels
 
     @staticmethod
     def _serialize_initial_state(
@@ -910,23 +852,31 @@ class RetroVecEnv(VectorEnv):
         elif not np.any(reset_mask):
             raise ValueError("options['reset_mask'] must select at least one lane")
 
-        start_indices = reset_options.pop("start_indices", None)
+        state_indices = reset_options.pop("state_indices", None)
         if reset_options:
             names = ", ".join(sorted(reset_options))
             raise ValueError(f"unsupported reset option(s): {names}")
-        if start_indices is None:
-            start_indices = np.full(self.num_envs, -1, dtype=np.int32)
-        elif not isinstance(start_indices, np.ndarray):
-            raise TypeError("options['start_indices'] must be a NumPy array")
-        elif start_indices.shape != (self.num_envs,):
-            raise ValueError(f"options['start_indices'] must have shape {(self.num_envs,)}")
-        elif start_indices.dtype != np.int32:
-            raise TypeError("options['start_indices'] must have dtype np.int32")
+        if state_indices is None:
+            default_index = 0 if self.state_catalog else -1
+            state_indices = np.full(self.num_envs, default_index, dtype=np.int32)
+        elif not isinstance(state_indices, np.ndarray):
+            raise TypeError("options['state_indices'] must be a NumPy array")
+        elif state_indices.shape != (self.num_envs,):
+            raise ValueError(f"options['state_indices'] must have shape {(self.num_envs,)}")
+        elif state_indices.dtype != np.int32:
+            raise TypeError("options['state_indices'] must have dtype np.int32")
+        if self.state_catalog:
+            selected = state_indices[reset_mask]
+            if np.any(selected < 0) or np.any(selected >= len(self.state_catalog)):
+                raise ValueError(
+                    "selected state_indices entries must index state_catalog",
+                )
+        elif np.any(state_indices[reset_mask] != -1):
+            raise ValueError("state_indices require a non-empty state_catalog")
 
         seeds = self._normalize_reset_seed(seed)
-        obs, infos = self.native.reset(seeds, reset_mask, start_indices)
+        obs, infos = self.native.reset(seeds, reset_mask, state_indices)
         self._observations = np.asarray(obs, dtype=np.uint8)
-        self._refresh_active_state_names(np.flatnonzero(reset_mask))
         self._reset_seeds()
         self._reset_options()
         vector_infos = (
@@ -934,6 +884,12 @@ class RetroVecEnv(VectorEnv):
             if getattr(self, "_info_filter_mode", "all") == "none"
             else self._list_infos_to_dict(infos)
         )
+        vector_infos["state_index"] = np.array(
+            self._active_state_indices,
+            dtype=np.int32,
+            copy=True,
+        )
+        vector_infos["_state_index"] = reset_mask.copy()
         return self._obs(), vector_infos
 
     def step(self, actions):
@@ -941,8 +897,6 @@ class RetroVecEnv(VectorEnv):
         obs, rewards, dones, infos = self.native.step(masks)
         self._observations = np.asarray(obs, dtype=np.uint8)
         terminations = np.array(dones, dtype=bool, copy=True)
-        if np.any(terminations):
-            self._refresh_active_state_names(np.flatnonzero(terminations))
         truncations = np.zeros(self.num_envs, dtype=bool)
         return (
             self._obs(),

@@ -6,9 +6,10 @@
 * make native `RetroVecEnv` permanently use disabled/manual autoreset
   * retain terminal observations until an explicit masked reset
   * reject stepping while any terminal lane remains pending reset
-  * keep per-lane seeds and explicit `start_indices` selection
-* remove provider-side task events, `done_on`, same-step terminal payloads, and
-  dynamic reset-policy mutation
+  * keep per-lane seeds and explicit `state_indices` selection from an immutable `state_catalog`
+  * leave saved-state sampling policy and reset routing to the caller
+* remove task events, `done_on`, same-step terminal payloads, and dynamic
+  reset-policy mutation from the core `RetroVecEnv` API
 
 ## 1.0.0
 

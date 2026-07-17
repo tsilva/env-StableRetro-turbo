@@ -9,5 +9,5 @@
 - `RetroVecEnv` must implement Gymnasium's vector-environment contract directly and expose batched observations, rewards, terminations, truncations, and infos without requiring Stable-Baselines3.
 - Each `RetroVecEnv` lane must preserve the corresponding `RetroEnv` emulator, action, saved-state, scenario reward and termination, and info semantics before configured vector-only transforms.
 - `RetroVecEnv` must use disabled autoreset: terminal lanes retain their terminal observations and cannot be stepped until selected for reset, while a masked reset leaves every unselected lane's emulator state, random stream, and observation history unchanged.
-- Per-lane saved-state starts and seeded state selection must be reproducible for identical inputs.
+- Saved-state catalogs must preserve declared order, and each selected lane must reset to an explicit caller-selected catalog index so execution is reproducible without provider-owned sampling.
 - Non-benchmark observation ownership modes must not expose results that a later environment call can unexpectedly mutate.

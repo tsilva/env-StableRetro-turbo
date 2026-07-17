@@ -55,6 +55,7 @@ def test_retro_vec_env_binding_is_private():
     assert not hasattr(_retro, "RetroVecEnv")
     assert hasattr(_retro, "_RetroVecEnv")
     for name in (
+        "initial_state_names",
         "initial_state_policy_names",
         "initial_state_weights",
         "set_initial_states",
@@ -523,12 +524,12 @@ def test_retro_vec_env_reset_mask_validation(tmp_path, options, error, message):
         env.close()
 
 
-def test_retro_vec_env_explicit_start_indices_and_per_lane_seeds():
+def test_retro_vec_env_explicit_state_indices_and_per_lane_seeds():
     from gymnasium.vector import AutoresetMode
 
     rom_path = _mario_rom_path_or_skip()
     kwargs = {
-        "state": {"Level1-1": 0.5, "Level1-2": 0.5},
+        "state_catalog": ("Level1-1", "Level1-4"),
         "info_filter": "all",
         "noop_reset_max": 3,
         "sticky_action_prob": 0.5,
@@ -546,23 +547,22 @@ def test_retro_vec_env_explicit_start_indices_and_per_lane_seeds():
             seed=[777, 999],
             options={
                 "reset_mask": mask,
-                "start_indices": np.array([1, 999], dtype=np.int32),
+                "state_indices": np.array([1, 999], dtype=np.int32),
             },
         )
-        assert env.active_states()[0] == "Level1-2"
+        assert env.active_state_indices()[0] == 1
         np.testing.assert_array_equal(reset_obs[1], lane_one_before)
-        assert _single_info(reset_infos, 0)["start_state"] == "Level1-2"
+        assert _single_info(reset_infos, 0)["start_state"] == "Level1-4"
         assert _single_info(reset_infos, 1) == {}
 
-        sampled_obs, _ = env.reset(
+        default_obs, _ = env.reset(
             seed=[888, None],
             options={
                 "reset_mask": mask,
-                "start_indices": np.array([-1, -1], dtype=np.int32),
             },
         )
-        assert env.active_states()[0] in {"Level1-1", "Level1-2"}
-        np.testing.assert_array_equal(sampled_obs[1], lane_one_before)
+        assert env.active_state_indices()[0] == 0
+        np.testing.assert_array_equal(default_obs[1], lane_one_before)
     finally:
         env.close()
         twin.close()
@@ -577,24 +577,41 @@ def test_retro_vec_env_manual_reset_validates_before_mutation(tmp_path):
 
         with pytest.raises(ValueError, match="seed sequence length"):
             env.reset(seed=[123], options={"reset_mask": invalid_mask})
-        with pytest.raises(TypeError, match="start_indices.*dtype"):
+        with pytest.raises(TypeError, match="state_indices.*dtype"):
             env.reset(
                 options={
                     "reset_mask": invalid_mask,
-                    "start_indices": np.array([0, -1], dtype=np.int64),
+                    "state_indices": np.array([-1, -1], dtype=np.int64),
                 },
             )
-        with pytest.raises(RuntimeError, match="valid initial-state catalog ind"):
+        with pytest.raises(ValueError, match="state_indices require"):
             env.reset(
                 options={
                     "reset_mask": invalid_mask,
-                    "start_indices": np.array([0, -1], dtype=np.int32),
+                    "state_indices": np.array([0, -1], dtype=np.int32),
                 },
             )
         with pytest.raises(ValueError, match="unsupported reset option"):
             env.reset(options={"reset_mask": invalid_mask, "unknown": True})
 
         np.testing.assert_array_equal(env._observations, before)
+    finally:
+        env.close()
+
+
+def test_retro_vec_env_direct_rom_reports_no_active_state(tmp_path):
+    env = _make_test_retro_vec_env(tmp_path)
+    try:
+        _observations, infos = env.reset()
+        assert env.state_catalog == ()
+        np.testing.assert_array_equal(
+            env.active_state_indices(),
+            np.full(env.num_envs, -1, dtype=np.int32),
+        )
+        np.testing.assert_array_equal(
+            infos["state_index"],
+            np.full(env.num_envs, -1, dtype=np.int32),
+        )
     finally:
         env.close()
 
@@ -788,24 +805,7 @@ def test_retro_vec_env_keyword_normalization():
         RetroVecEnv._normalize_info_filter("debug")
     with pytest.raises(ValueError, match="unknown info_filter keys"):
         RetroVecEnv._normalize_info_filter({"mode": "terminal", "extra": True})
-    assert RetroVecEnv._normalize_state_sampling_weights(
-        {"Level1-1": 1.0, "Level1-2": 3.0},
-        ("Level1-1", "Level1-2"),
-    ) == [0.25, 0.75]
-    assert RetroVecEnv._normalize_state_sampling_weights(
-        [0.0, 4.0],
-        ("Level1-1", "Level1-2"),
-    ) == [0.0, 1.0]
-    with pytest.raises(ValueError, match="missing state sampling weights"):
-        RetroVecEnv._normalize_state_sampling_weights(
-            {"Level1-1": 1.0},
-            ("Level1-1", "Level1-2"),
-        )
-    with pytest.raises(ValueError, match="positive number"):
-        RetroVecEnv._normalize_state_sampling_weights(
-            {"Level1-1": 0.0, "Level1-2": 0.0},
-            ("Level1-1", "Level1-2"),
-        )
+    assert not hasattr(RetroVecEnv, "_normalize_state_sampling_weights")
 
 
 def test_retro_vec_env_accepts_retro_env_keyword_shape(tmp_path):
@@ -905,94 +905,38 @@ def test_retro_vec_env_rejects_invalid_keyword_values(
 
 def test_retro_vec_env_validates_mixed_state_config():
     import stable_retro as retro
-    from stable_retro.vec_env import RetroVecEnv
+    from stable_retro.vec_env import RetroVecEnv, _STATE_UNSET
 
     resolve = RetroVecEnv._resolve_state_config
     game = "SuperMarioBros-Nes-v0"
 
-    with pytest.raises(ValueError, match="state sequence length must match num_envs"):
-        resolve(retro, game, 4, ["Level1-1", "Level1-2"])
-
-    with pytest.raises(ValueError, match="non-negative finite"):
-        resolve(
-            retro,
-            game,
-            4,
-            {"Level1-1": 1.0, "Level1-2": -0.1},
-        )
-
-    with pytest.raises(ValueError, match="positive number"):
-        resolve(
-            retro,
-            game,
-            4,
-            {"Level1-1": 0.0, "Level1-2": 0.0},
-        )
+    with pytest.raises(TypeError, match="single state"):
+        resolve(retro, game, ["Level1-1", "Level1-4"], None)
+    with pytest.raises(TypeError, match="single state"):
+        resolve(retro, game, {"Level1-1": 1.0}, None)
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        resolve(retro, game, "Level1-1", ("Level1-4",))
+    with pytest.raises(ValueError, match="at least one state"):
+        resolve(retro, game, _STATE_UNSET, ())
+    with pytest.raises(ValueError, match="duplicate states"):
+        resolve(retro, game, _STATE_UNSET, ("Level1-1", "Level1-1"))
 
     with pytest.raises(ValueError, match="unknown state"):
-        resolve(
-            retro,
-            game,
-            4,
-            {"Level1-1": 0.5, "DefinitelyMissing": 0.5},
-        )
+        resolve(retro, game, _STATE_UNSET, ("Level1-1", "DefinitelyMissing"))
 
     with pytest.raises(ValueError, match="empty state"):
-        resolve(
-            retro,
-            game,
-            4,
-            {"Level1-1": 0.5, "": 0.5},
-        )
+        resolve(retro, game, _STATE_UNSET, ("Level1-1", ""))
 
-    states, labels, probs, state_collection = resolve(
-        retro,
-        game,
-        4,
-        {"Level1-1": 1.0, "Level1-2": 3.0},
+    states, labels, state_collection = resolve(
+        retro, game, _STATE_UNSET, ("Level1-1", "Level1-4")
     )
-    assert states == ["Level1-1", "Level1-2"]
-    assert labels == ["Level1-1", "Level1-2"]
-    assert probs == [0.25, 0.75]
+    assert states == ["Level1-1", "Level1-4"]
+    assert labels == ["Level1-1", "Level1-4"]
     assert state_collection is True
 
-    states, labels, probs, state_collection = resolve(
-        retro,
-        game,
-        4,
-        {"Level1-1": 0.0, "Level1-2": 3.0},
-    )
-    assert states == ["Level1-1", "Level1-2"]
-    assert labels == ["Level1-1", "Level1-2"]
-    assert probs == [0.0, 1.0]
-    assert state_collection is True
-
-    states, labels, probs, state_collection = resolve(
-        retro,
-        game,
-        2,
-        ["Level1-1", "Level1-2"],
-    )
-    assert states == ["Level1-1", "Level1-2"]
-    assert labels == ["Level1-1", "Level1-2"]
-    assert probs is None
-    assert state_collection is True
-
-    states, labels, probs, state_collection = resolve(
-        retro,
-        game,
-        4,
-        ["Level1-1", "Level1-2", "Level1-1", "Level1-2"],
-    )
-    assert states == ["Level1-1", "Level1-2", "Level1-1", "Level1-2"]
-    assert labels == ["Level1-1", "Level1-2", "Level1-1", "Level1-2"]
-    assert probs is None
-    assert state_collection is True
-
-    states, labels, probs, state_collection = resolve(retro, game, 1, "Level1-1")
+    states, labels, state_collection = resolve(retro, game, "Level1-1", None)
     assert states == ["Level1-1"]
     assert labels == ["Level1-1"]
-    assert probs is None
     assert state_collection is False
 
     with pytest.raises(TypeError, match="unexpected keyword argument 'states'"):
@@ -1013,10 +957,11 @@ def _mario_rom_path_or_skip():
 def _make_mario_retro_vec_env(num_envs, rom_path, **kwargs):
     from stable_retro.vec_env import RetroVecEnv
 
-    state = kwargs.pop("state", "Level1-1")
+    state_kwargs = {}
+    if "state_catalog" not in kwargs:
+        state_kwargs["state"] = kwargs.pop("state", "Level1-1")
     return RetroVecEnv(
         "SuperMarioBros-Nes-v0",
-        state=state,
         num_envs=num_envs,
         rom_path=rom_path,
         obs_resize=(84, 84),
@@ -1025,6 +970,7 @@ def _make_mario_retro_vec_env(num_envs, rom_path, **kwargs):
         frame_stack=4,
         maxpool_last_two=True,
         num_threads=max(1, num_envs),
+        **state_kwargs,
         **kwargs,
     )
 
@@ -1042,11 +988,13 @@ def test_retro_vec_env_single_state_active_indices_if_rom_present():
         assert indices.shape == (4,)
         assert not indices.flags.writeable
         assert env.active_state_indices() is indices
-        assert env.initial_state_names == ("Level1-1",)
+        assert env.state_catalog == ("Level1-1",)
+        with pytest.raises(AttributeError):
+            env.state_catalog = ("Level1-4",)
 
         env.reset()
         np.testing.assert_array_equal(indices, np.zeros(4, dtype=np.int32))
-        assert env.active_states() == ("Level1-1",) * 4
+        assert not hasattr(env, "active_states")
         with pytest.raises(ValueError):
             indices[0] = 1
     finally:
@@ -1057,10 +1005,10 @@ def test_retro_vec_env_mixed_states_reset_infos_if_rom_present():
     from stable_retro.vec_env import RetroVecEnv
 
     rom_path = _mario_rom_path_or_skip()
-    states = ["Level1-1", "Level1-2", "Level1-3"]
+    states = ["Level1-1", "Level1-4", "Level2-1"]
     env = RetroVecEnv(
         "SuperMarioBros-Nes-v0",
-        state=states,
+        state_catalog=states,
         num_envs=3,
         rom_path=rom_path,
         obs_resize=(84, 84),
@@ -1072,14 +1020,14 @@ def test_retro_vec_env_mixed_states_reset_infos_if_rom_present():
         info_filter="terminal",
     )
     try:
-        _, reset_infos = env.reset()
+        requested = np.arange(len(states), dtype=np.int32)
+        _, reset_infos = env.reset(options={"state_indices": requested})
         reset_infos = _infos_to_list(reset_infos, env.num_envs)
         np.testing.assert_array_equal(
             env.active_state_indices(),
             np.arange(len(states), dtype=np.int32),
         )
-        assert env.initial_state_names == tuple(states)
-        assert env.active_states() == tuple(states)
+        assert env.state_catalog == tuple(states)
         assert [info["start_state"] for info in reset_infos] == states
         assert [info["state"] for info in reset_infos] == states
 
@@ -1087,53 +1035,35 @@ def test_retro_vec_env_mixed_states_reset_infos_if_rom_present():
         reset_infos = _infos_to_list(reset_infos, env.num_envs)
         np.testing.assert_array_equal(
             env.active_state_indices(),
-            np.arange(len(states), dtype=np.int32),
+            np.zeros(len(states), dtype=np.int32),
         )
-        assert [info["start_state"] for info in reset_infos] == states
+        assert [info["start_state"] for info in reset_infos] == [states[0]] * len(states)
     finally:
         env.close()
 
 
-def test_retro_vec_env_fixed_duplicate_states_are_canonical_if_rom_present():
+def test_retro_vec_env_duplicate_catalog_is_rejected_if_rom_present():
     from stable_retro.vec_env import RetroVecEnv
 
     rom_path = _mario_rom_path_or_skip()
-    states = ["Level1-1", "Level1-2", "Level1-1", "Level1-2"]
-    env = RetroVecEnv(
-        "SuperMarioBros-Nes-v0",
-        state=states,
-        num_envs=4,
-        rom_path=rom_path,
-        obs_resize=(84, 84),
-        obs_grayscale=True,
-        frame_skip=4,
-        frame_stack=4,
-        maxpool_last_two=True,
-        num_threads=4,
-        info_filter="terminal",
-    )
-    try:
-        _, reset_infos = env.reset()
-        reset_infos = _infos_to_list(reset_infos, env.num_envs)
-        assert env.initial_state_names == ("Level1-1", "Level1-2")
-        np.testing.assert_array_equal(
-            env.active_state_indices(),
-            np.array([0, 1, 0, 1], dtype=np.int32),
+    states = ["Level1-1", "Level1-4", "Level1-1", "Level1-4"]
+    with pytest.raises(ValueError, match="duplicate states"):
+        RetroVecEnv(
+            "SuperMarioBros-Nes-v0",
+            state_catalog=states,
+            num_envs=4,
+            rom_path=rom_path,
         )
-        assert env.active_states() == tuple(states)
-        assert [info["start_state"] for info in reset_infos] == states
-    finally:
-        env.close()
 
 
-def test_retro_vec_env_weighted_states_sample_on_reset_if_rom_present():
+def test_retro_vec_env_catalog_selection_is_explicit_if_rom_present():
     from stable_retro.vec_env import RetroVecEnv
 
     rom_path = _mario_rom_path_or_skip()
-    states = ["Level1-1", "Level1-2", "Level1-3"]
+    states = ["Level1-1", "Level1-4", "Level2-1"]
     env = RetroVecEnv(
         "SuperMarioBros-Nes-v0",
-        state={state: 1.0 for state in states},
+        state_catalog=states,
         num_envs=12,
         rom_path=rom_path,
         obs_resize=(84, 84),
@@ -1145,24 +1075,22 @@ def test_retro_vec_env_weighted_states_sample_on_reset_if_rom_present():
         info_filter="terminal",
     )
     try:
-        env.seed(20260620)
         indices = env.active_state_indices()
-        assert env.initial_state_names == tuple(states)
-        seen = set()
-        for _ in range(20):
-            _, reset_infos = env.reset()
+        assert env.state_catalog == tuple(states)
+        with pytest.raises(TypeError, match="single state"):
+            RetroVecEnv(
+                "SuperMarioBros-Nes-v0",
+                state={state: 1.0 for state in states},
+                num_envs=1,
+                rom_path=rom_path,
+            )
+        for selected in range(len(states)):
+            requested = np.full(env.num_envs, selected, dtype=np.int32)
+            _, reset_infos = env.reset(options={"state_indices": requested})
             reset_infos = _infos_to_list(reset_infos, env.num_envs)
-            reset_indices = indices.copy()
-            assert reset_indices.dtype == np.int32
-            assert np.all((0 <= reset_indices) & (reset_indices < len(states)))
+            np.testing.assert_array_equal(indices, requested)
             reset_states = [info["start_state"] for info in reset_infos]
-            assert set(reset_states).issubset(states)
-            assert tuple(reset_states) == env.active_states()
-            assert reset_states == [
-                env.initial_state_names[int(index)] for index in reset_indices
-            ]
-            seen.update(reset_states)
-        assert seen == set(states)
+            assert reset_states == [states[selected]] * env.num_envs
     finally:
         env.close()
 
@@ -1262,9 +1190,9 @@ def test_retro_vec_env_forwards_per_env_reset_seeds():
         def __init__(self):
             self.reset_calls = []
 
-        def reset(self, seed, reset_mask, start_indices):
+        def reset(self, seed, reset_mask, state_indices):
             self.reset_calls.append(
-                (seed, reset_mask.copy(), start_indices.copy()),
+                (seed, reset_mask.copy(), state_indices.copy()),
             )
             return np.zeros((3, 2, 2, 1), dtype=np.uint8), [{}, {}, {}]
 
@@ -1272,6 +1200,8 @@ def test_retro_vec_env_forwards_per_env_reset_seeds():
     env.native = FakeNative()
     env.num_envs = 3
     env._copy_obs = True
+    env._state_catalog = ()
+    env._active_state_indices = np.full(3, -1, dtype=np.int32)
     env._seeds = [11, None, 37]
     env._options = [{}, {}, {}]
 
@@ -1279,10 +1209,10 @@ def test_retro_vec_env_forwards_per_env_reset_seeds():
 
     assert obs.shape == (3, 2, 2, 1)
     assert len(env.native.reset_calls) == 1
-    seeds, reset_mask, start_indices = env.native.reset_calls[0]
+    seeds, reset_mask, state_indices = env.native.reset_calls[0]
     assert seeds == [11, None, 37]
     np.testing.assert_array_equal(reset_mask, np.ones(3, dtype=np.bool_))
-    np.testing.assert_array_equal(start_indices, np.full(3, -1, dtype=np.int32))
+    np.testing.assert_array_equal(state_indices, np.full(3, -1, dtype=np.int32))
     assert env._seeds == [None, None, None]
 
 
@@ -2443,7 +2373,7 @@ def test_retro_vec_env_masked_reset_preserves_unselected_lane_trajectory():
 
     rom_path = _mario_rom_path_or_skip()
     kwargs = dict(
-        state={"Level1-1": 1.0, "Level1-2": 1.0},
+        state_catalog=("Level1-1", "Level1-4"),
         info_filter="all",
         noop_reset_max=3,
         sticky_action_prob=0.5,
@@ -2481,34 +2411,34 @@ def test_retro_vec_env_masked_reset_preserves_unselected_lane_trajectory():
         control.close()
 
 
-def test_retro_vec_env_explicit_start_indices_and_validation_are_atomic():
+def test_retro_vec_env_explicit_state_indices_and_validation_are_atomic():
     from gymnasium.vector import AutoresetMode
 
     rom_path = _mario_rom_path_or_skip()
     env = _make_mario_retro_vec_env(
         3,
         rom_path,
-        state={"Level1-1": 1.0, "Level1-2": 1.0},
+        state_catalog=("Level1-1", "Level1-4"),
         info_filter="all",
     )
     try:
         obs, _ = env.reset(seed=7)
         before = obs.copy()
-        before_states = env.active_states()
+        before_states = env.active_state_indices().copy()
         mask = np.array([True, False, True], dtype=np.bool_)
         starts = np.array([1, 999, 0], dtype=np.int32)
-        _, infos = env.reset(options={"reset_mask": mask, "start_indices": starts})
-        assert env.active_states() == ("Level1-2", before_states[1], "Level1-1")
-        assert _single_info(infos, 0)["start_state"] == "Level1-2"
+        _, infos = env.reset(options={"reset_mask": mask, "state_indices": starts})
+        np.testing.assert_array_equal(env.active_state_indices(), [1, before_states[1], 0])
+        assert _single_info(infos, 0)["start_state"] == "Level1-4"
         assert _single_info(infos, 2)["start_state"] == "Level1-1"
 
         snapshot = env._observations.copy()
         active = env.active_state_indices().copy()
-        with pytest.raises((RuntimeError, ValueError), match="start_indices"):
+        with pytest.raises((RuntimeError, ValueError), match="state_indices"):
             env.reset(
                 options={
                     "reset_mask": np.array([True, False, False], dtype=np.bool_),
-                    "start_indices": np.array([9, -1, -1], dtype=np.int32),
+                    "state_indices": np.array([9, -1, -1], dtype=np.int32),
                 }
             )
         np.testing.assert_array_equal(env._observations, snapshot)
