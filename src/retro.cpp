@@ -56,9 +56,9 @@ static bool envFlagEnabled(const char* name) {
 		return false;
 	}
 	return std::strcmp(value, "0") != 0 &&
-		std::strcmp(value, "false") != 0 &&
-		std::strcmp(value, "False") != 0 &&
-		std::strcmp(value, "FALSE") != 0;
+		   std::strcmp(value, "false") != 0 &&
+		   std::strcmp(value, "False") != 0 &&
+		   std::strcmp(value, "FALSE") != 0;
 }
 
 struct AreaResizeSpan {
@@ -106,8 +106,7 @@ struct PyRetroEmulator {
 		if (!img) {
 			throw std::runtime_error(
 				"Core did not provide a CPU framebuffer. "
-				"This usually means the core is using hardware rendering, which stable-retro can't capture yet."
-			);
+				"This usually means the core is using hardware rendering, which stable-retro can't capture yet.");
 		}
 		Image in;
 		if (m_re.getImageDepth() == 16) {
@@ -133,8 +132,7 @@ struct PyRetroEmulator {
 		if (!img) {
 			throw std::runtime_error(
 				"Core did not provide a CPU framebuffer. "
-				"This usually means the core is using hardware rendering, which stable-retro can't capture yet."
-			);
+				"This usually means the core is using hardware rendering, which stable-retro can't capture yet.");
 		}
 		if (m_re.getImageDepth() != 16 && m_re.getImageDepth() != 32) {
 			throw std::runtime_error("Unsupported image depth from core");
@@ -148,8 +146,7 @@ struct PyRetroEmulator {
 		long top,
 		long bottom,
 		long left,
-		long right
-	) {
+		long right) {
 		const long width = m_re.getImageWidth();
 		const long height = m_re.getImageHeight();
 		const size_t pitch = static_cast<size_t>(m_re.getImagePitch());
@@ -164,8 +161,7 @@ struct PyRetroEmulator {
 		if (!img) {
 			throw std::runtime_error(
 				"Core did not provide a CPU framebuffer. "
-				"This usually means the core is using hardware rendering, which stable-retro can't capture yet."
-			);
+				"This usually means the core is using hardware rendering, which stable-retro can't capture yet.");
 		}
 		if (depth != 16 && depth != 32) {
 			throw std::runtime_error("Unsupported image depth from core");
@@ -182,8 +178,7 @@ struct PyRetroEmulator {
 			std::memcpy(
 				raw.data() + static_cast<size_t>(y) * pitch + rowOffset,
 				source + static_cast<size_t>(y) * pitch + rowOffset,
-				rowBytes
-			);
+				rowBytes);
 		}
 	}
 
@@ -194,8 +189,7 @@ struct PyRetroEmulator {
 		bool grayscale,
 		const string& algorithm,
 		py::object maskCropObj,
-		int cropFill
-	) {
+		int cropFill) {
 		long w = m_re.getImageWidth();
 		long h = m_re.getImageHeight();
 
@@ -258,10 +252,7 @@ struct PyRetroEmulator {
 		const uint8_t fill = static_cast<uint8_t>(cropFill);
 
 		auto isMasked = [&](long y, long x) -> bool {
-			return y < maskTop
-				|| (maskBottom > 0 && y >= srcH - maskBottom)
-				|| x < maskLeft
-				|| (maskRight > 0 && x >= srcW - maskRight);
+			return y < maskTop || (maskBottom > 0 && y >= srcH - maskBottom) || x < maskLeft || (maskRight > 0 && x >= srcW - maskRight);
 		};
 
 		auto srcPixel = [&](long y, long x, int c) -> uint8_t {
@@ -388,8 +379,7 @@ struct PyRetroEmulator {
 			throw std::runtime_error(
 				"Core did not provide a CPU framebuffer. "
 				"This usually means the core is using hardware rendering, which stable-retro can't capture yet. "
-				"For N64/parallel_n64, try forcing a software renderer (parallel-n64-gfxplugin=angrylion)."
-			);
+				"For N64/parallel_n64, try forcing a software renderer (parallel-n64-gfxplugin=angrylion).");
 		}
 		Image in;
 		if (m_re.getImageDepth() == 16) {
@@ -730,7 +720,7 @@ void PyRetroEmulator::configureData(PyGameData& data) {
 	m_re.configureData(&data.m_data);
 }
 
-	class BatchThreadPool {
+class BatchThreadPool {
 public:
 	explicit BatchThreadPool(int numThreads) {
 		for (int i = 0; i < numThreads; ++i) {
@@ -815,7 +805,7 @@ private:
 	std::function<void(size_t)> m_task;
 	size_t m_total = 0;
 	size_t m_chunkSize = 1;
-	std::atomic<size_t> m_next{0};
+	std::atomic<size_t> m_next{ 0 };
 	size_t m_remainingWorkers = 0;
 	uint64_t m_generation = 0;
 	uint64_t m_doneGeneration = 0;
@@ -838,6 +828,13 @@ struct NativeCrop {
 	long bottom = 0;
 	long left = 0;
 	long right = 0;
+};
+
+struct NativeViewport {
+	long x = 0;
+	long y = 0;
+	long width = 0;
+	long height = 0;
 };
 
 struct NativeResize {
@@ -865,6 +862,22 @@ NativeCrop parseNativeCrop(py::object cropObj) {
 	return crop;
 }
 
+NativeViewport parseNativeViewport(py::object viewportObj) {
+	auto tuple = py::tuple(viewportObj);
+	if (tuple.size() != 4) {
+		throw std::runtime_error("integration crop must be an (x, y, width, height) tuple");
+	}
+	NativeViewport viewport;
+	viewport.x = py::int_(tuple[0]);
+	viewport.y = py::int_(tuple[1]);
+	viewport.width = py::int_(tuple[2]);
+	viewport.height = py::int_(tuple[3]);
+	if (viewport.x < 0 || viewport.y < 0 || viewport.width < 0 || viewport.height < 0) {
+		throw std::runtime_error("integration crop values must be non-negative");
+	}
+	return viewport;
+}
+
 NativeResize parseNativeResize(py::object resizeObj) {
 	NativeResize resize;
 	if (resizeObj.is_none()) {
@@ -888,10 +901,7 @@ static inline bool cropMaskHasAny(const NativeCrop& mask) {
 }
 
 static inline bool cropMaskContains(const NativeCrop& mask, long height, long width, long y, long x) {
-	return y < mask.top
-		|| (mask.bottom > 0 && y >= height - mask.bottom)
-		|| x < mask.left
-		|| (mask.right > 0 && x >= width - mask.right);
+	return y < mask.top || (mask.bottom > 0 && y >= height - mask.bottom) || x < mask.left || (mask.right > 0 && x >= width - mask.right);
 }
 
 void processRgbFrameToBuffer(
@@ -904,8 +914,7 @@ void processRgbFrameToBuffer(
 	bool grayscale,
 	const string& algorithm,
 	uint8_t cropFill,
-	uint8_t* dst
-) {
+	uint8_t* dst) {
 	if (crop.top + crop.bottom >= rawH || crop.left + crop.right >= rawW) {
 		throw std::runtime_error("crop removes the entire observation");
 	}
@@ -1017,8 +1026,7 @@ static inline void nativePixelChannels(
 	long x,
 	uint8_t& r,
 	uint8_t& g,
-	uint8_t& b
-) {
+	uint8_t& b) {
 	const uint8_t* row = raw + static_cast<size_t>(y) * pitch;
 	if (depth == 16) {
 		uint16_t rgb;
@@ -1041,8 +1049,7 @@ static inline uint8_t nativeGray(
 	size_t pitch,
 	int depth,
 	long y,
-	long x
-) {
+	long x) {
 	uint8_t r;
 	uint8_t g;
 	uint8_t b;
@@ -1113,20 +1120,20 @@ void updateIndexedPaletteCache(const IndexedVideoFrame& frame, IndexedPaletteCac
 	cache.deemp = frame.deemp;
 	for (size_t i = 0; i < cache.palette.size(); ++i) {
 		const uint16_t rgb = frame.rawPalette
-			? static_cast<uint16_t>(frame.palette[i & 0x3F] | frame.deemp)
-			: frame.palette[i];
+								 ? static_cast<uint16_t>(frame.palette[i & 0x3F] | frame.deemp)
+								 : frame.palette[i];
 		cache.palette[i] = frame.palette[i];
 		cache.gray[i] = rgb565Gray(rgb);
 	}
 	for (size_t curr = 0; curr < 256; ++curr) {
 		const uint16_t currRgb = frame.rawPalette
-			? static_cast<uint16_t>(frame.palette[curr & 0x3F] | frame.deemp)
-			: frame.palette[curr];
+									 ? static_cast<uint16_t>(frame.palette[curr & 0x3F] | frame.deemp)
+									 : frame.palette[curr];
 		uint8_t* row = cache.maxGray.data() + curr * 256;
 		for (size_t prev = 0; prev < 256; ++prev) {
 			const uint16_t prevRgb = frame.rawPalette
-				? static_cast<uint16_t>(frame.palette[prev & 0x3F] | frame.deemp)
-				: frame.palette[prev];
+										 ? static_cast<uint16_t>(frame.palette[prev & 0x3F] | frame.deemp)
+										 : frame.palette[prev];
 			row[prev] = rgb565MaxGray(currRgb, prevRgb);
 		}
 	}
@@ -1136,8 +1143,7 @@ static inline uint8_t indexedGray(
 	const IndexedVideoFrame& frame,
 	const uint8_t* maxRaw,
 	long y,
-	long x
-) {
+	long x) {
 	const uint8_t pixel = frame.data[static_cast<size_t>(y) * frame.pitch + static_cast<size_t>(x)];
 	if (maxRaw) {
 		const uint8_t maxPixel = maxRaw[static_cast<size_t>(y) * frame.pitch + static_cast<size_t>(x)];
@@ -1166,8 +1172,7 @@ static void xrgb8888GrayscaleRow(
 	const uint8_t* raw,
 	const uint8_t* maxRaw,
 	long width,
-	uint8_t* dst
-) {
+	uint8_t* dst) {
 	long x = 0;
 #ifdef STABLE_RETRO_ARM_NEON
 	for (; x + 16 <= width; x += 16) {
@@ -1191,8 +1196,7 @@ static void xrgb8888GrayscaleRow(
 
 		vst1q_u8(
 			dst + x,
-			vcombine_u8(vshrn_n_u16(low, 8), vshrn_n_u16(high, 8))
-		);
+			vcombine_u8(vshrn_n_u16(low, 8), vshrn_n_u16(high, 8)));
 	}
 #endif
 	for (; x < width; ++x) {
@@ -1216,8 +1220,7 @@ static void processXrgb8888GrayscaleAreaPlanToBuffer(
 	size_t pitch,
 	const AreaResizePlan& plan,
 	std::vector<uint8_t>& scratch,
-	uint8_t* dst
-) {
+	uint8_t* dst) {
 	const bool direct =
 		plan.dstH == rawH && plan.dstW == rawW &&
 		!plan.rows.empty() && !plan.columns.empty() &&
@@ -1234,8 +1237,7 @@ static void processXrgb8888GrayscaleAreaPlanToBuffer(
 			raw + static_cast<size_t>(y) * pitch,
 			maxRaw ? maxRaw + static_cast<size_t>(y) * pitch : nullptr,
 			rawW,
-			gray + static_cast<size_t>(y) * static_cast<size_t>(rawW)
-		);
+			gray + static_cast<size_t>(y) * static_cast<size_t>(rawW));
 	}
 	if (direct) {
 		return;
@@ -1253,8 +1255,7 @@ static void processXrgb8888GrayscaleAreaPlanToBuffer(
 				}
 			}
 			const uint32_t count = static_cast<uint32_t>(
-				(rowSpan.end - rowSpan.begin) * (columnSpan.end - columnSpan.begin)
-			);
+				(rowSpan.end - rowSpan.begin) * (columnSpan.end - columnSpan.begin));
 			dst[dy * plan.columns.size() + dx] = static_cast<uint8_t>(sum / count);
 		}
 	}
@@ -1265,8 +1266,7 @@ AreaResizePlan buildAreaResizePlan(
 	long rawH,
 	const NativeCrop& crop,
 	const NativeCrop& maskCrop,
-	const NativeResize& resize
-) {
+	const NativeResize& resize) {
 	if (crop.top + crop.bottom >= rawH || crop.left + crop.right >= rawW) {
 		throw std::runtime_error("crop removes the entire observation");
 	}
@@ -1294,8 +1294,7 @@ AreaResizePlan buildAreaResizePlan(
 		span.visibleBegin = std::max(span.begin, visibleYBegin);
 		span.visibleEnd = std::max(
 			span.visibleBegin,
-			std::min(span.end, visibleYEnd)
-		);
+			std::min(span.end, visibleYEnd));
 		plan.rows.push_back(span);
 	}
 	plan.columns.reserve(static_cast<size_t>(dstW));
@@ -1311,8 +1310,7 @@ AreaResizePlan buildAreaResizePlan(
 		span.visibleBegin = std::max(span.begin, visibleXBegin);
 		span.visibleEnd = std::max(
 			span.visibleBegin,
-			std::min(span.end, visibleXEnd)
-		);
+			std::min(span.end, visibleXEnd));
 		plan.columns.push_back(span);
 	}
 	return plan;
@@ -1324,24 +1322,32 @@ static inline uint8_t exactAreaAverage(uint32_t sum, uint32_t count) {
 	// integer division with shifts or multiply-high sequences while
 	// preserving the exact floor(sum / count) result.
 	switch (count) {
-	case 1: return static_cast<uint8_t>(sum);
-	case 2: return static_cast<uint8_t>(sum / 2);
-	case 3: return static_cast<uint8_t>(sum / 3);
-	case 4: return static_cast<uint8_t>(sum / 4);
-	case 5: return static_cast<uint8_t>(sum / 5);
-	case 6: return static_cast<uint8_t>(sum / 6);
-	case 7: return static_cast<uint8_t>(sum / 7);
-	case 8: return static_cast<uint8_t>(sum / 8);
-	default: return static_cast<uint8_t>(sum / count);
+	case 1:
+		return static_cast<uint8_t>(sum);
+	case 2:
+		return static_cast<uint8_t>(sum / 2);
+	case 3:
+		return static_cast<uint8_t>(sum / 3);
+	case 4:
+		return static_cast<uint8_t>(sum / 4);
+	case 5:
+		return static_cast<uint8_t>(sum / 5);
+	case 6:
+		return static_cast<uint8_t>(sum / 6);
+	case 7:
+		return static_cast<uint8_t>(sum / 7);
+	case 8:
+		return static_cast<uint8_t>(sum / 8);
+	default:
+		return static_cast<uint8_t>(sum / count);
 	}
 }
 
-template <typename PixelReader>
+template<typename PixelReader>
 void processAreaResizePlanToBuffer(
 	const AreaResizePlan& plan,
 	PixelReader&& readPixel,
-	uint8_t* dst
-) {
+	uint8_t* dst) {
 	for (size_t dy = 0; dy < plan.rows.size(); ++dy) {
 		const AreaResizeSpan& rowSpan = plan.rows[dy];
 		for (size_t dx = 0; dx < plan.columns.size(); ++dx) {
@@ -1353,33 +1359,28 @@ void processAreaResizePlanToBuffer(
 				}
 			}
 			const uint32_t count = static_cast<uint32_t>(
-				(rowSpan.end - rowSpan.begin) * (columnSpan.end - columnSpan.begin)
-			);
+				(rowSpan.end - rowSpan.begin) * (columnSpan.end - columnSpan.begin));
 			dst[dy * plan.columns.size() + dx] = exactAreaAverage(sum, count);
 		}
 	}
 }
 
-template <typename PixelReader>
+template<typename PixelReader>
 void processMaskedAreaResizePlanToBuffer(
 	const AreaResizePlan& plan,
 	uint8_t cropFill,
 	PixelReader&& readPixel,
-	uint8_t* dst
-) {
+	uint8_t* dst) {
 	for (size_t dy = 0; dy < plan.rows.size(); ++dy) {
 		const AreaResizeSpan& rowSpan = plan.rows[dy];
 		const uint32_t readHeight = static_cast<uint32_t>(
-			rowSpan.visibleEnd - rowSpan.visibleBegin
-		);
+			rowSpan.visibleEnd - rowSpan.visibleBegin);
 		for (size_t dx = 0; dx < plan.columns.size(); ++dx) {
 			const AreaResizeSpan& columnSpan = plan.columns[dx];
 			const uint32_t readWidth = static_cast<uint32_t>(
-				columnSpan.visibleEnd - columnSpan.visibleBegin
-			);
+				columnSpan.visibleEnd - columnSpan.visibleBegin);
 			const uint32_t count = static_cast<uint32_t>(
-				(rowSpan.end - rowSpan.begin) * (columnSpan.end - columnSpan.begin)
-			);
+				(rowSpan.end - rowSpan.begin) * (columnSpan.end - columnSpan.begin));
 			const uint32_t readCount = readHeight * readWidth;
 			uint32_t sum = static_cast<uint32_t>(cropFill) * (count - readCount);
 			for (long sy = rowSpan.visibleBegin; sy < rowSpan.visibleEnd; ++sy) {
@@ -1392,27 +1393,24 @@ void processMaskedAreaResizePlanToBuffer(
 	}
 }
 
-template <typename PixelReader>
+template<typename PixelReader>
 void processMaybeMaskedAreaResizePlanToBuffer(
 	const AreaResizePlan& plan,
 	uint8_t cropFill,
 	PixelReader&& readPixel,
-	uint8_t* dst
-) {
+	uint8_t* dst) {
 	if (plan.masked) {
 		processMaskedAreaResizePlanToBuffer(
 			plan,
 			cropFill,
 			std::forward<PixelReader>(readPixel),
-			dst
-		);
+			dst);
 		return;
 	}
 	processAreaResizePlanToBuffer(
 		plan,
 		std::forward<PixelReader>(readPixel),
-		dst
-	);
+		dst);
 }
 
 void processNativeGrayscaleAreaPlanToBuffer(
@@ -1425,26 +1423,25 @@ void processNativeGrayscaleAreaPlanToBuffer(
 	const AreaResizePlan& plan,
 	uint8_t cropFill,
 	std::vector<uint8_t>& scratch,
-	uint8_t* dst
-) {
+	uint8_t* dst) {
 	if (depth == 16) {
 		if (maxRaw) {
-			processMaybeMaskedAreaResizePlanToBuffer(plan, cropFill, [&](long sy, long sx) {
+			processMaybeMaskedAreaResizePlanToBuffer(
+				plan, cropFill, [&](long sy, long sx) {
 				const uint8_t* row = raw + static_cast<size_t>(sy) * pitch;
 				const uint8_t* maxRow = maxRaw + static_cast<size_t>(sy) * pitch;
 				uint16_t rgb;
 				std::memcpy(&rgb, row + static_cast<size_t>(sx) * 2, sizeof(rgb));
 				uint16_t maxRgb;
 				std::memcpy(&maxRgb, maxRow + static_cast<size_t>(sx) * 2, sizeof(maxRgb));
-				return rgb565MaxGray(rgb, maxRgb);
-			}, dst);
+				return rgb565MaxGray(rgb, maxRgb); }, dst);
 		} else {
-			processMaybeMaskedAreaResizePlanToBuffer(plan, cropFill, [&](long sy, long sx) {
+			processMaybeMaskedAreaResizePlanToBuffer(
+				plan, cropFill, [&](long sy, long sx) {
 				const uint8_t* row = raw + static_cast<size_t>(sy) * pitch;
 				uint16_t rgb;
 				std::memcpy(&rgb, row + static_cast<size_t>(sx) * 2, sizeof(rgb));
-				return rgb565Gray(rgb);
-			}, dst);
+				return rgb565Gray(rgb); }, dst);
 		}
 		return;
 	}
@@ -1459,28 +1456,27 @@ void processNativeGrayscaleAreaPlanToBuffer(
 				pitch,
 				plan,
 				scratch,
-				dst
-			);
+				dst);
 			return;
 		}
 #endif
 		if (maxRaw) {
-			processMaybeMaskedAreaResizePlanToBuffer(plan, cropFill, [&](long sy, long sx) {
+			processMaybeMaskedAreaResizePlanToBuffer(
+				plan, cropFill, [&](long sy, long sx) {
 				const uint8_t* row = raw + static_cast<size_t>(sy) * pitch;
 				const uint8_t* maxRow = maxRaw + static_cast<size_t>(sy) * pitch;
 				uint32_t xrgb;
 				std::memcpy(&xrgb, row + static_cast<size_t>(sx) * 4, sizeof(xrgb));
 				uint32_t maxXrgb;
 				std::memcpy(&maxXrgb, maxRow + static_cast<size_t>(sx) * 4, sizeof(maxXrgb));
-				return xrgb8888MaxGray(xrgb, maxXrgb);
-			}, dst);
+				return xrgb8888MaxGray(xrgb, maxXrgb); }, dst);
 		} else {
-			processMaybeMaskedAreaResizePlanToBuffer(plan, cropFill, [&](long sy, long sx) {
+			processMaybeMaskedAreaResizePlanToBuffer(
+				plan, cropFill, [&](long sy, long sx) {
 				const uint8_t* row = raw + static_cast<size_t>(sy) * pitch;
 				uint32_t xrgb;
 				std::memcpy(&xrgb, row + static_cast<size_t>(sx) * 4, sizeof(xrgb));
-				return xrgb8888Gray(xrgb);
-			}, dst);
+				return xrgb8888Gray(xrgb); }, dst);
 		}
 		return;
 	}
@@ -1493,23 +1489,22 @@ void processIndexedGrayscaleAreaPlanToBuffer(
 	IndexedPaletteCache* cache,
 	const AreaResizePlan& plan,
 	uint8_t cropFill,
-	uint8_t* dst
-) {
+	uint8_t* dst) {
 	if (cache) {
 		updateIndexedPaletteCache(frame, *cache);
 		const uint8_t* gray = cache->gray.data();
 		const uint8_t* maxGray = cache->maxGray.data();
 		if (maxRaw) {
-			processMaybeMaskedAreaResizePlanToBuffer(plan, cropFill, [&](long sy, long sx) {
+			processMaybeMaskedAreaResizePlanToBuffer(
+				plan, cropFill, [&](long sy, long sx) {
 				const uint8_t* row = frame.data + static_cast<size_t>(sy) * frame.pitch;
 				const uint8_t* maxRow = maxRaw + static_cast<size_t>(sy) * frame.pitch;
-				return maxGray[(static_cast<size_t>(row[sx]) << 8) | maxRow[sx]];
-			}, dst);
+				return maxGray[(static_cast<size_t>(row[sx]) << 8) | maxRow[sx]]; }, dst);
 		} else {
-			processMaybeMaskedAreaResizePlanToBuffer(plan, cropFill, [&](long sy, long sx) {
+			processMaybeMaskedAreaResizePlanToBuffer(
+				plan, cropFill, [&](long sy, long sx) {
 				const uint8_t* row = frame.data + static_cast<size_t>(sy) * frame.pitch;
-				return gray[row[sx]];
-			}, dst);
+				return gray[row[sx]]; }, dst);
 		}
 		return;
 	}
@@ -1519,8 +1514,7 @@ void processIndexedGrayscaleAreaPlanToBuffer(
 		[&](long sy, long sx) {
 			return indexedGray(frame, maxRaw, sy, sx);
 		},
-		dst
-	);
+		dst);
 }
 
 void processNativeGrayscaleFrameToBuffer(
@@ -1535,8 +1529,7 @@ void processNativeGrayscaleFrameToBuffer(
 	const NativeResize& resize,
 	const string& algorithm,
 	uint8_t cropFill,
-	uint8_t* dst
-) {
+	uint8_t* dst) {
 	if (crop.top + crop.bottom >= rawH || crop.left + crop.right >= rawW) {
 		throw std::runtime_error("crop removes the entire observation");
 	}
@@ -1618,7 +1611,10 @@ public:
 		int numButtons,
 		int frameSkip,
 		int frameStack,
-		py::object cropObj,
+		py::object viewportObj,
+		py::object removeCropObj,
+		long sourceHeight,
+		long sourceWidth,
 		py::object resizeObj,
 		bool grayscale,
 		const string& algorithm,
@@ -1637,12 +1633,12 @@ public:
 		py::object infoFilterKeysObj,
 		py::object initialStateLabelsObj = py::none(),
 		py::object maskCropObj = py::none(),
-		int cropFill = 0
-	)
+		int cropFill = 0)
 		: m_numButtons(numButtons)
 		, m_frameSkip(frameSkip)
 		, m_frameStack(frameStack)
-		, m_crop(parseNativeCrop(cropObj))
+		, m_viewport(parseNativeViewport(viewportObj))
+		, m_removeCrop(parseNativeCrop(removeCropObj))
 		, m_cropMask(parseNativeCrop(maskCropObj))
 		, m_resize(parseNativeResize(resizeObj))
 		, m_cropFill(static_cast<uint8_t>(cropFill))
@@ -1671,6 +1667,9 @@ public:
 		}
 		if (frameStack <= 0) {
 			throw std::runtime_error("frame_stack must be positive");
+		}
+		if (sourceHeight <= 0 || sourceWidth <= 0) {
+			throw std::runtime_error("source observation height and width must be positive");
 		}
 		if (noopResetMax < 0) {
 			throw std::runtime_error("noop_reset_max must be non-negative");
@@ -1722,6 +1721,15 @@ public:
 		// applies remove and mask crops directly to indexed pixels.
 		const bool grayscaleAreaPlanEligible =
 			m_grayscale && m_algorithm == "area";
+		m_sourceHeight = sourceHeight;
+		m_sourceWidth = sourceWidth;
+		m_obsHeight = m_resize.enabled ? m_resize.height : m_sourceHeight;
+		m_obsWidth = m_resize.enabled ? m_resize.width : m_sourceWidth;
+		m_obsChannels = m_grayscale ? 1 : 3;
+		m_singleObsSize = static_cast<size_t>(m_obsHeight) * static_cast<size_t>(m_obsWidth) * static_cast<size_t>(m_obsChannels);
+		m_stackedChannels = m_obsChannels * m_frameStack;
+		m_stackedObsSize = static_cast<size_t>(m_obsHeight) * static_cast<size_t>(m_obsWidth) * static_cast<size_t>(m_stackedChannels);
+		m_useGrayscaleAreaPlan = grayscaleAreaPlanEligible;
 		m_slots.reserve(numEnvs);
 		for (size_t i = 0; i < numEnvs; ++i) {
 			auto slot = std::make_unique<Slot>(romPath, dataPath, scenarioPath, constructionInitialState, i);
@@ -1731,8 +1739,7 @@ public:
 			if (
 				indexedVideoEnabled &&
 				grayscaleAreaPlanEligible &&
-				(!atariCore || atariIndexedVideoEnabled)
-			) {
+				(!atariCore || atariIndexedVideoEnabled)) {
 				slot->usesIndexedVideo = slot->emulator->m_re.setIndexedVideoEnabled(true);
 			}
 			if (i == 0) {
@@ -1745,29 +1752,6 @@ public:
 						}
 						m_infoVariables.emplace_back(key, variable->second);
 					}
-				}
-				const long rawW = slot->emulator->m_re.getImageWidth();
-				const long rawH = slot->emulator->m_re.getImageHeight();
-				if (m_crop.top + m_crop.bottom >= rawH || m_crop.left + m_crop.right >= rawW) {
-					throw std::runtime_error("crop removes the entire observation");
-				}
-				const long srcH = rawH - m_crop.top - m_crop.bottom;
-				const long srcW = rawW - m_crop.left - m_crop.right;
-				m_obsHeight = m_resize.enabled ? m_resize.height : srcH;
-				m_obsWidth = m_resize.enabled ? m_resize.width : srcW;
-				m_obsChannels = m_grayscale ? 1 : 3;
-				m_singleObsSize = static_cast<size_t>(m_obsHeight) * static_cast<size_t>(m_obsWidth) * static_cast<size_t>(m_obsChannels);
-				m_stackedChannels = m_obsChannels * m_frameStack;
-				m_stackedObsSize = static_cast<size_t>(m_obsHeight) * static_cast<size_t>(m_obsWidth) * static_cast<size_t>(m_stackedChannels);
-				if (grayscaleAreaPlanEligible) {
-					m_grayscaleAreaPlan = buildAreaResizePlan(
-						rawW,
-						rawH,
-						m_crop,
-						m_cropMask,
-						m_resize
-					);
-					m_useGrayscaleAreaPlan = true;
 				}
 			}
 			slot->frameStack.resize(static_cast<size_t>(m_frameStack) * m_singleObsSize);
@@ -1823,7 +1807,7 @@ public:
 			std::string state = py::bytes(initialStateObj);
 			std::vector<std::string> labels = parseInitialStateLabels(labelsObj, 1);
 			m_stateCatalog.push_back(labels[0]);
-			m_initialStates.push_back({state, labels[0]});
+			m_initialStates.push_back({ state, labels[0] });
 			m_reportInitialState = !labelsObj.is_none();
 			return;
 		}
@@ -1846,7 +1830,7 @@ public:
 				throw std::runtime_error("initial_state entries must not be empty");
 			}
 			m_stateCatalog.push_back(labels[i]);
-			m_initialStates.push_back({state, labels[i]});
+			m_initialStates.push_back({ state, labels[i] });
 		}
 	}
 
@@ -1861,8 +1845,7 @@ public:
 	py::tuple reset(
 		py::object seedObj = py::none(),
 		py::object resetMaskObj = py::none(),
-		py::object stateIndicesObj = py::none()
-	) {
+		py::object stateIndicesObj = py::none()) {
 		std::vector<uint8_t> resetMask(m_slots.size(), 1);
 		if (!resetMaskObj.is_none()) {
 			py::array resetMaskArray = py::cast<py::array>(resetMaskObj);
@@ -1924,48 +1907,48 @@ public:
 				}
 			}
 		}
-			const bool hadPreviousObservation = m_hasPreviousObservation;
-			py::array_t<uint8_t>& obsArray = nextObservationArray();
-			uint8_t* obsData = obsArray.mutable_data();
-			std::vector<size_t> resetIndices;
-			resetIndices.reserve(m_slots.size());
-			for (size_t index = 0; index < resetMask.size(); ++index) {
-				if (resetMask[index]) {
-					resetIndices.push_back(index);
-				}
+		const bool hadPreviousObservation = m_hasPreviousObservation;
+		py::array_t<uint8_t>& obsArray = nextObservationArray();
+		uint8_t* obsData = obsArray.mutable_data();
+		std::vector<size_t> resetIndices;
+		resetIndices.reserve(m_slots.size());
+		for (size_t index = 0; index < resetMask.size(); ++index) {
+			if (resetMask[index]) {
+				resetIndices.push_back(index);
 			}
-			const bool partialReset = resetIndices.size() != m_slots.size();
-			if (partialReset && hadPreviousObservation && !m_unsafeZeroCopy) {
-				std::memcpy(
-					obsData,
-					m_obsArrays[m_previousObsArray].data(),
-					m_slots.size() * m_stackedObsSize
-				);
-			}
-			const size_t workCount = partialReset && !hadPreviousObservation
-				? m_slots.size()
-				: resetIndices.size();
-			clearErrors();
-			{
-				py::gil_scoped_release release;
-				batchThreadPool(m_numThreads).parallelFor(workCount, [&](size_t workIndex) {
-					const size_t index = partialReset && !hadPreviousObservation
-						? workIndex
-						: resetIndices[workIndex];
-					try {
-						if (resetMask[index]) {
-							if (hasSeed[index]) m_slots[index]->rng.seed(seedValues[index]);
-							resetSlot(*m_slots[index], obsData + index * m_stackedObsSize, stateIndices[index]);
-						} else {
-							writeStackedObservation(*m_slots[index], obsData + index * m_stackedObsSize);
-						}
-					} catch (const std::exception& exc) {
-						m_errors[index] = exc.what();
-					} catch (...) {
-						m_errors[index] = "unknown native vector reset error";
+		}
+		const bool partialReset = resetIndices.size() != m_slots.size();
+		if (partialReset && hadPreviousObservation && !m_unsafeZeroCopy) {
+			std::memcpy(
+				obsData,
+				m_obsArrays[m_previousObsArray].data(),
+				m_slots.size() * m_stackedObsSize);
+		}
+		const size_t workCount = partialReset && !hadPreviousObservation
+									 ? m_slots.size()
+									 : resetIndices.size();
+		clearErrors();
+		{
+			py::gil_scoped_release release;
+			batchThreadPool(m_numThreads).parallelFor(workCount, [&](size_t workIndex) {
+				const size_t index = partialReset && !hadPreviousObservation
+										 ? workIndex
+										 : resetIndices[workIndex];
+				try {
+					if (resetMask[index]) {
+						if (hasSeed[index])
+							m_slots[index]->rng.seed(seedValues[index]);
+						resetSlot(*m_slots[index], obsData + index * m_stackedObsSize, stateIndices[index]);
+					} else {
+						writeStackedObservation(*m_slots[index], obsData + index * m_stackedObsSize);
 					}
-				});
-			}
+				} catch (const std::exception& exc) {
+					m_errors[index] = exc.what();
+				} catch (...) {
+					m_errors[index] = "unknown native vector reset error";
+				}
+			});
+		}
 		throwFirstError(m_errors);
 		m_anyPendingReset = std::any_of(m_slots.begin(), m_slots.end(), [](const auto& slot) {
 			return slot->pendingReset;
@@ -1978,8 +1961,7 @@ public:
 			{ static_cast<py::ssize_t>(m_activeInitialStateIndices.size()) },
 			{ static_cast<py::ssize_t>(sizeof(int32_t)) },
 			m_activeInitialStateIndices.data(),
-			py::none()
-		);
+			py::none());
 	}
 
 	py::tuple stateCatalog() const {
@@ -2046,8 +2028,7 @@ public:
 						*m_slots[index],
 						action,
 						obsData + index * m_stackedObsSize,
-						output
-					);
+						output);
 				} catch (const std::exception& exc) {
 					m_errors[index] = exc.what();
 				} catch (...) {
@@ -2104,17 +2085,14 @@ public:
 			uint8_t* dst = screen.mutable_data();
 			for (unsigned y = 0; y < indexedFrame.height; ++y) {
 				for (unsigned x = 0; x < indexedFrame.width; ++x) {
-					const uint8_t pixel = indexedFrame.data[
-						static_cast<size_t>(y) * indexedFrame.pitch + static_cast<size_t>(x)
-					];
+					const uint8_t pixel = indexedFrame.data[static_cast<size_t>(y) * indexedFrame.pitch + static_cast<size_t>(x)];
 					uint8_t r = 0;
 					uint8_t g = 0;
 					uint8_t b = 0;
 					rgb565ToRgb888(indexedRgb565(indexedFrame, pixel), r, g, b);
-					const size_t offset = (
-						static_cast<size_t>(y) * static_cast<size_t>(indexedFrame.width) +
-						static_cast<size_t>(x)
-					) * 3;
+					const size_t offset = (static_cast<size_t>(y) * static_cast<size_t>(indexedFrame.width) +
+											  static_cast<size_t>(x)) *
+										  3;
 					dst[offset] = r;
 					dst[offset + 1] = g;
 					dst[offset + 2] = b;
@@ -2220,10 +2198,22 @@ private:
 		std::vector<uint8_t> prevRaw;
 		std::vector<uint8_t> currRaw;
 		bool hasPrevRaw = false;
+		long prevRawWidth = 0;
+		long prevRawHeight = 0;
+		size_t prevRawPitch = 0;
+		int prevRawDepth = 0;
 		std::vector<uint8_t> grayscaleScratch;
 		std::vector<uint8_t> prevIndexed;
 		bool hasPrevIndexed = false;
+		unsigned prevIndexedWidth = 0;
+		unsigned prevIndexedHeight = 0;
+		size_t prevIndexedPitch = 0;
 		IndexedPaletteCache indexedPaletteCache;
+		AreaResizePlan grayscaleAreaPlan;
+		NativeCrop grayscaleAreaCrop;
+		long grayscaleAreaRawWidth = 0;
+		long grayscaleAreaRawHeight = 0;
+		bool hasGrayscaleAreaPlan = false;
 		std::vector<uint8_t> action;
 		std::vector<uint8_t> lastMask;
 		bool hasLastMask = false;
@@ -2232,6 +2222,92 @@ private:
 		std::string currentStartStateLabel;
 		std::mt19937 rng;
 	};
+
+	NativeCrop cropForFrame(long rawWidth, long rawHeight) const {
+		if (rawWidth <= 0 || rawHeight <= 0) {
+			throw std::runtime_error("core reported a non-positive frame geometry");
+		}
+		if (m_viewport.x >= rawWidth || m_viewport.y >= rawHeight) {
+			throw std::runtime_error("integration crop origin is outside the current frame");
+		}
+		const long rightEdge =
+			m_viewport.width == 0 || m_viewport.width > rawWidth - m_viewport.x
+				? rawWidth
+				: m_viewport.x + m_viewport.width;
+		const long bottomEdge =
+			m_viewport.height == 0 || m_viewport.height > rawHeight - m_viewport.y
+				? rawHeight
+				: m_viewport.y + m_viewport.height;
+		const long top = m_viewport.y + m_removeCrop.top;
+		const long bottom = bottomEdge - m_removeCrop.bottom;
+		const long left = m_viewport.x + m_removeCrop.left;
+		const long right = rightEdge - m_removeCrop.right;
+		if (top >= bottom || left >= right) {
+			throw std::runtime_error("crop removes the entire current frame");
+		}
+		NativeCrop crop{
+			top,
+			rawHeight - bottom,
+			left,
+			rawWidth - right,
+		};
+		const long sourceHeight = rawHeight - crop.top - crop.bottom;
+		const long sourceWidth = rawWidth - crop.left - crop.right;
+		const long outputHeight = m_resize.enabled ? m_resize.height : sourceHeight;
+		const long outputWidth = m_resize.enabled ? m_resize.width : sourceWidth;
+		if (outputHeight != m_obsHeight || outputWidth != m_obsWidth) {
+			std::ostringstream message;
+			message << "current frame geometry " << rawHeight << "x" << rawWidth
+					<< " produces observation geometry " << outputHeight << "x" << outputWidth
+					<< ", but the native observation buffer is " << m_obsHeight << "x" << m_obsWidth;
+			throw std::runtime_error(message.str());
+		}
+		return crop;
+	}
+
+	const AreaResizePlan& grayscaleAreaPlanForFrame(
+		Slot& slot,
+		long rawWidth,
+		long rawHeight,
+		const NativeCrop& crop) const {
+		const bool sameCrop =
+			slot.grayscaleAreaCrop.top == crop.top &&
+			slot.grayscaleAreaCrop.bottom == crop.bottom &&
+			slot.grayscaleAreaCrop.left == crop.left &&
+			slot.grayscaleAreaCrop.right == crop.right;
+		if (
+			!slot.hasGrayscaleAreaPlan ||
+			slot.grayscaleAreaRawWidth != rawWidth ||
+			slot.grayscaleAreaRawHeight != rawHeight ||
+			!sameCrop) {
+			slot.grayscaleAreaPlan = buildAreaResizePlan(
+				rawWidth,
+				rawHeight,
+				crop,
+				m_cropMask,
+				m_resize);
+			slot.grayscaleAreaCrop = crop;
+			slot.grayscaleAreaRawWidth = rawWidth;
+			slot.grayscaleAreaRawHeight = rawHeight;
+			slot.hasGrayscaleAreaPlan = true;
+		}
+		return slot.grayscaleAreaPlan;
+	}
+
+	bool previousRawMatches(const Slot& slot, long width, long height, size_t pitch, int depth) const {
+		return slot.hasPrevRaw &&
+			   slot.prevRawWidth == width &&
+			   slot.prevRawHeight == height &&
+			   slot.prevRawPitch == pitch &&
+			   slot.prevRawDepth == depth;
+	}
+
+	bool previousIndexedMatches(const Slot& slot, const IndexedVideoFrame& frame) const {
+		return slot.hasPrevIndexed &&
+			   slot.prevIndexedWidth == frame.width &&
+			   slot.prevIndexedHeight == frame.height &&
+			   slot.prevIndexedPitch == frame.pitch;
+	}
 
 	struct StepOutput {
 		float reward = 0.0f;
@@ -2282,14 +2358,19 @@ private:
 		if (m_grayscale) {
 			IndexedVideoFrame indexedFrame;
 			if (slot.usesIndexedVideo && slot.emulator->m_re.getIndexedVideoFrame(indexedFrame) && m_useGrayscaleAreaPlan) {
+				const NativeCrop crop = cropForFrame(indexedFrame.width, indexedFrame.height);
+				const AreaResizePlan& plan = grayscaleAreaPlanForFrame(
+					slot,
+					indexedFrame.width,
+					indexedFrame.height,
+					crop);
 				processIndexedGrayscaleAreaPlanToBuffer(
 					indexedFrame,
 					nullptr,
 					&slot.indexedPaletteCache,
-					m_grayscaleAreaPlan,
+					plan,
 					m_cropFill,
-					slot.singleObs.data()
-				);
+					slot.singleObs.data());
 				return;
 			}
 			const uint8_t* raw = static_cast<const uint8_t*>(slot.emulator->m_re.getImageData());
@@ -2297,50 +2378,58 @@ private:
 				slot.emulator->readRawFrame(slot.currRaw);
 				raw = slot.currRaw.data();
 			}
+			const long rawWidth = slot.emulator->m_re.getImageWidth();
+			const long rawHeight = slot.emulator->m_re.getImageHeight();
+			const NativeCrop crop = cropForFrame(rawWidth, rawHeight);
 			if (m_useGrayscaleAreaPlan) {
+				const AreaResizePlan& plan = grayscaleAreaPlanForFrame(
+					slot,
+					rawWidth,
+					rawHeight,
+					crop);
 				processNativeGrayscaleAreaPlanToBuffer(
 					raw,
 					nullptr,
 					static_cast<size_t>(slot.emulator->m_re.getImagePitch()),
 					slot.emulator->m_re.getImageDepth(),
-					slot.emulator->m_re.getImageWidth(),
-					slot.emulator->m_re.getImageHeight(),
-					m_grayscaleAreaPlan,
+					rawWidth,
+					rawHeight,
+					plan,
 					m_cropFill,
 					slot.grayscaleScratch,
-					slot.singleObs.data()
-				);
+					slot.singleObs.data());
 				return;
 			}
 			processNativeGrayscaleFrameToBuffer(
 				raw,
 				nullptr,
-				slot.emulator->m_re.getImageWidth(),
-				slot.emulator->m_re.getImageHeight(),
+				rawWidth,
+				rawHeight,
 				static_cast<size_t>(slot.emulator->m_re.getImagePitch()),
 				slot.emulator->m_re.getImageDepth(),
-				m_crop,
+				crop,
 				m_cropMask,
 				m_resize,
 				m_algorithm,
 				m_cropFill,
-				slot.singleObs.data()
-			);
+				slot.singleObs.data());
 			return;
 		}
 		slot.emulator->readRgbFrame(slot.rgb);
+		const long rawWidth = slot.emulator->m_re.getImageWidth();
+		const long rawHeight = slot.emulator->m_re.getImageHeight();
+		const NativeCrop crop = cropForFrame(rawWidth, rawHeight);
 		processRgbFrameToBuffer(
 			slot.rgb,
-			slot.emulator->m_re.getImageWidth(),
-			slot.emulator->m_re.getImageHeight(),
-			m_crop,
+			rawWidth,
+			rawHeight,
+			crop,
 			m_cropMask,
 			m_resize,
 			m_grayscale,
 			m_algorithm,
 			m_cropFill,
-			slot.singleObs.data()
-		);
+			slot.singleObs.data());
 	}
 
 	void resetFrameStack(Slot& slot, const std::vector<uint8_t>& singleObs) {
@@ -2350,8 +2439,7 @@ private:
 			for (int frame = 0; frame < m_frameStack; ++frame) {
 				writeSingleObservationChannelsFirst(
 					singleObs,
-					slot.frameStack.data() + static_cast<size_t>(frame) * frameSize
-				);
+					slot.frameStack.data() + static_cast<size_t>(frame) * frameSize);
 			}
 			return;
 		}
@@ -2372,8 +2460,7 @@ private:
 			const size_t frameSize = m_singleObsSize;
 			writeSingleObservationChannelsFirst(
 				singleObs,
-				slot.frameStack.data() + slot.frameStackIndex * frameSize
-			);
+				slot.frameStack.data() + slot.frameStackIndex * frameSize);
 			slot.frameStackIndex = (slot.frameStackIndex + 1) % static_cast<size_t>(m_frameStack);
 			return false;
 		}
@@ -2425,13 +2512,11 @@ private:
 			std::memcpy(
 				dst,
 				slot.frameStack.data() + slot.frameStackIndex * frameSize,
-				tailSize
-			);
+				tailSize);
 			std::memcpy(
 				dst + tailSize,
 				slot.frameStack.data(),
-				slot.frameStackIndex * frameSize
-			);
+				slot.frameStackIndex * frameSize);
 			return;
 		}
 		std::memcpy(dst, slot.frameStack.data(), m_stackedObsSize);
@@ -2566,6 +2651,12 @@ private:
 					if (!done && i < m_frameSkip - 1) {
 						IndexedVideoFrame indexedFrame;
 						if (slot.usesIndexedVideo && slot.emulator->m_re.getIndexedVideoFrame(indexedFrame)) {
+							const NativeCrop crop = cropForFrame(indexedFrame.width, indexedFrame.height);
+							const AreaResizePlan& plan = grayscaleAreaPlanForFrame(
+								slot,
+								indexedFrame.width,
+								indexedFrame.height,
+								crop);
 							if (indexedFrame.previousData) {
 								// Stella retains both TIA framebuffers. After the final
 								// emulated frame, previousData is exactly this frame, so
@@ -2573,31 +2664,50 @@ private:
 								useIndexedFramePair = true;
 							} else {
 								slot.prevIndexed.resize(static_cast<size_t>(indexedFrame.pitch) * static_cast<size_t>(indexedFrame.height));
-								const long top = m_useGrayscaleAreaPlan ? m_grayscaleAreaPlan.rows.front().begin : 0;
-								const long bottom = m_useGrayscaleAreaPlan ? m_grayscaleAreaPlan.rows.back().end : indexedFrame.height;
-								const long left = m_useGrayscaleAreaPlan ? m_grayscaleAreaPlan.columns.front().begin : 0;
-								const long right = m_useGrayscaleAreaPlan ? m_grayscaleAreaPlan.columns.back().end : indexedFrame.width;
+								const long top = plan.rows.front().begin;
+								const long bottom = plan.rows.back().end;
+								const long left = plan.columns.front().begin;
+								const long right = plan.columns.back().end;
 								for (long row = top; row < bottom; ++row) {
 									std::memcpy(
 										slot.prevIndexed.data() + static_cast<size_t>(row) * indexedFrame.pitch + static_cast<size_t>(left),
 										indexedFrame.data + static_cast<size_t>(row) * indexedFrame.pitch + static_cast<size_t>(left),
-										static_cast<size_t>(right - left)
-									);
+										static_cast<size_t>(right - left));
 								}
 								slot.hasPrevIndexed = true;
+								slot.prevIndexedWidth = indexedFrame.width;
+								slot.prevIndexedHeight = indexedFrame.height;
+								slot.prevIndexedPitch = indexedFrame.pitch;
 							}
 						} else if (m_useGrayscaleAreaPlan) {
+							const long rawWidth = slot.emulator->m_re.getImageWidth();
+							const long rawHeight = slot.emulator->m_re.getImageHeight();
+							const size_t rawPitch = static_cast<size_t>(slot.emulator->m_re.getImagePitch());
+							const int rawDepth = slot.emulator->m_re.getImageDepth();
+							const NativeCrop crop = cropForFrame(rawWidth, rawHeight);
+							const AreaResizePlan& plan = grayscaleAreaPlanForFrame(
+								slot,
+								rawWidth,
+								rawHeight,
+								crop);
 							slot.emulator->readRawFrameRegion(
 								slot.prevRaw,
-								m_grayscaleAreaPlan.rows.front().begin,
-								m_grayscaleAreaPlan.rows.back().end,
-								m_grayscaleAreaPlan.columns.front().begin,
-								m_grayscaleAreaPlan.columns.back().end
-							);
+								plan.rows.front().begin,
+								plan.rows.back().end,
+								plan.columns.front().begin,
+								plan.columns.back().end);
 							slot.hasPrevRaw = true;
+							slot.prevRawWidth = rawWidth;
+							slot.prevRawHeight = rawHeight;
+							slot.prevRawPitch = rawPitch;
+							slot.prevRawDepth = rawDepth;
 						} else {
 							slot.emulator->readRawFrame(slot.prevRaw);
 							slot.hasPrevRaw = true;
+							slot.prevRawWidth = slot.emulator->m_re.getImageWidth();
+							slot.prevRawHeight = slot.emulator->m_re.getImageHeight();
+							slot.prevRawPitch = static_cast<size_t>(slot.emulator->m_re.getImagePitch());
+							slot.prevRawDepth = slot.emulator->m_re.getImageDepth();
 						}
 					}
 				} else {
@@ -2618,22 +2728,26 @@ private:
 			if (m_grayscale) {
 				IndexedVideoFrame indexedFrame;
 				if (slot.usesIndexedVideo && slot.emulator->m_re.getIndexedVideoFrame(indexedFrame) && m_useGrayscaleAreaPlan) {
-					const uint8_t* maxIndexed = slot.hasPrevIndexed
-						? slot.prevIndexed.data()
-						: (useIndexedFramePair ? indexedFrame.previousData : nullptr);
+					const NativeCrop crop = cropForFrame(indexedFrame.width, indexedFrame.height);
+					const AreaResizePlan& plan = grayscaleAreaPlanForFrame(
+						slot,
+						indexedFrame.width,
+						indexedFrame.height,
+						crop);
+					const uint8_t* maxIndexed = previousIndexedMatches(slot, indexedFrame)
+													? slot.prevIndexed.data()
+													: (useIndexedFramePair ? indexedFrame.previousData : nullptr);
 					processIndexedGrayscaleAreaPlanToBuffer(
 						indexedFrame,
 						maxIndexed,
 						&slot.indexedPaletteCache,
-						m_grayscaleAreaPlan,
+						plan,
 						m_cropFill,
-						slot.singleObs.data()
-					);
+						slot.singleObs.data());
 					const bool observationWritten = pushFrame(
 						slot,
 						slot.singleObs,
-						done ? nullptr : dst
-					);
+						done ? nullptr : dst);
 					output.reward = clipReward(totalReward);
 					output.done = done;
 					if (m_reportInitialState && (m_fullInfo || done)) {
@@ -2652,60 +2766,77 @@ private:
 					slot.emulator->readRawFrame(slot.currRaw);
 					raw = slot.currRaw.data();
 				}
+				const long rawWidth = slot.emulator->m_re.getImageWidth();
+				const long rawHeight = slot.emulator->m_re.getImageHeight();
+				const size_t rawPitch = static_cast<size_t>(slot.emulator->m_re.getImagePitch());
+				const int rawDepth = slot.emulator->m_re.getImageDepth();
+				const NativeCrop crop = cropForFrame(rawWidth, rawHeight);
+				const uint8_t* maxRaw = previousRawMatches(
+											slot,
+											rawWidth,
+											rawHeight,
+											rawPitch,
+											rawDepth)
+											? slot.prevRaw.data()
+											: nullptr;
 				if (m_useGrayscaleAreaPlan) {
+					const AreaResizePlan& plan = grayscaleAreaPlanForFrame(
+						slot,
+						rawWidth,
+						rawHeight,
+						crop);
 					processNativeGrayscaleAreaPlanToBuffer(
 						raw,
-						slot.hasPrevRaw ? slot.prevRaw.data() : nullptr,
-						static_cast<size_t>(slot.emulator->m_re.getImagePitch()),
-						slot.emulator->m_re.getImageDepth(),
-						slot.emulator->m_re.getImageWidth(),
-						slot.emulator->m_re.getImageHeight(),
-						m_grayscaleAreaPlan,
+						maxRaw,
+						rawPitch,
+						rawDepth,
+						rawWidth,
+						rawHeight,
+						plan,
 						m_cropFill,
 						slot.grayscaleScratch,
-						slot.singleObs.data()
-					);
+						slot.singleObs.data());
 				} else {
 					processNativeGrayscaleFrameToBuffer(
 						raw,
-						slot.hasPrevRaw ? slot.prevRaw.data() : nullptr,
-						slot.emulator->m_re.getImageWidth(),
-						slot.emulator->m_re.getImageHeight(),
-						static_cast<size_t>(slot.emulator->m_re.getImagePitch()),
-						slot.emulator->m_re.getImageDepth(),
-						m_crop,
+						maxRaw,
+						rawWidth,
+						rawHeight,
+						rawPitch,
+						rawDepth,
+						crop,
 						m_cropMask,
 						m_resize,
 						m_algorithm,
 						m_cropFill,
-						slot.singleObs.data()
-					);
+						slot.singleObs.data());
 				}
 			} else {
-				if (!prevRgb.empty()) {
+				if (!prevRgb.empty() && prevRgb.size() == currRgb.size()) {
 					for (size_t i = 0; i < currRgb.size(); ++i) {
 						currRgb[i] = std::max(currRgb[i], prevRgb[i]);
 					}
 				}
+				const long rawWidth = slot.emulator->m_re.getImageWidth();
+				const long rawHeight = slot.emulator->m_re.getImageHeight();
+				const NativeCrop crop = cropForFrame(rawWidth, rawHeight);
 				processRgbFrameToBuffer(
 					currRgb,
-					slot.emulator->m_re.getImageWidth(),
-					slot.emulator->m_re.getImageHeight(),
-					m_crop,
+					rawWidth,
+					rawHeight,
+					crop,
 					m_cropMask,
 					m_resize,
 					m_grayscale,
 					m_algorithm,
 					m_cropFill,
-					slot.singleObs.data()
-				);
+					slot.singleObs.data());
 			}
 		}
 		const bool observationWritten = pushFrame(
 			slot,
 			slot.singleObs,
-			done ? nullptr : dst
-		);
+			done ? nullptr : dst);
 		output.reward = clipReward(totalReward);
 		output.done = done;
 		if (m_reportInitialState && (m_fullInfo || done)) {
@@ -2741,7 +2872,8 @@ private:
 	int m_numButtons = 0;
 	int m_frameSkip = 1;
 	int m_frameStack = 1;
-	NativeCrop m_crop;
+	NativeViewport m_viewport;
+	NativeCrop m_removeCrop;
 	NativeCrop m_cropMask;
 	NativeResize m_resize;
 	uint8_t m_cropFill = 0;
@@ -2766,12 +2898,13 @@ private:
 	int m_numThreads = 1;
 	long m_obsHeight = 0;
 	long m_obsWidth = 0;
+	long m_sourceHeight = 0;
+	long m_sourceWidth = 0;
 	int m_obsChannels = 0;
 	int m_stackedChannels = 0;
 	size_t m_singleObsSize = 0;
 	size_t m_stackedObsSize = 0;
 	bool m_useGrayscaleAreaPlan = false;
-	AreaResizePlan m_grayscaleAreaPlan;
 	std::array<py::array_t<uint8_t>, 2> m_obsArrays;
 	size_t m_nextObsArray = 0;
 	size_t m_previousObsArray = 0;
@@ -2934,6 +3067,9 @@ PYBIND11_MODULE(_retro, m) {
 				int,
 				py::object,
 				py::object,
+				long,
+				long,
+				py::object,
 				bool,
 				const string&,
 				bool,
@@ -2960,7 +3096,10 @@ PYBIND11_MODULE(_retro, m) {
 			py::arg("num_buttons"),
 			py::arg("frame_skip"),
 			py::arg("frame_stack"),
-			py::arg("crop"),
+			py::arg("integration_crop"),
+			py::arg("remove_crop"),
+			py::arg("source_height"),
+			py::arg("source_width"),
 			py::arg("resize"),
 			py::arg("grayscale"),
 			py::arg("algorithm"),
@@ -2979,15 +3118,13 @@ PYBIND11_MODULE(_retro, m) {
 			py::arg("info_filter_keys") = py::none(),
 			py::arg("initial_state_labels") = py::none(),
 			py::arg("mask_crop") = py::none(),
-			py::arg("crop_fill") = 0
-		)
+			py::arg("crop_fill") = 0)
 		.def(
 			"reset",
 			&PyRetroVecEnv::reset,
 			py::arg("seed") = py::none(),
 			py::arg("reset_mask") = py::none(),
-			py::arg("state_indices") = py::none()
-		)
+			py::arg("state_indices") = py::none())
 		.def("step", &PyRetroVecEnv::step)
 		.def("active_state_indices", &PyRetroVecEnv::activeStateIndices)
 		.def("observation_shape", &PyRetroVecEnv::observationShape)
@@ -2997,4 +3134,4 @@ PYBIND11_MODULE(_retro, m) {
 
 	m.def("core_path", &::corePath, py::arg("hint") = py::none());
 	m.def("data_path", &::dataPath, py::arg("hint") = py::none());
-	}
+}

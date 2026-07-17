@@ -10,6 +10,10 @@
   * leave saved-state sampling policy and reset routing to the caller
 * remove task events, `done_on`, same-step terminal payloads, and dynamic
   reset-policy mutation from the core `RetroVecEnv` API
+* keep `RetroVecEnv` observation geometry stable when loading saved states that
+  change the libretro core's active frame geometry
+  * apply integration crops to each current frame instead of freezing cold-boot margins
+  * reject native frame/observation shape mismatches before writing observation buffers
 
 ## 1.0.0
 

@@ -217,6 +217,165 @@ def _make_test_retro_vec_env(tmp_path, **kwargs):
     )
 
 
+def _street_fighter_rom_path_or_skip():
+    import stable_retro as retro
+
+    try:
+        return retro.data.get_original_romfile_path(
+            "StreetFighterIISpecialChampionEdition-Genesis-v0",
+        )
+    except FileNotFoundError:
+        pytest.skip(
+            "StreetFighterIISpecialChampionEdition-Genesis-v0 ROM is not imported locally",
+        )
+
+
+@pytest.mark.parametrize("state", ["default", "none"])
+def test_retro_vec_env_genesis_geometry_matches_scalar_if_rom_present(state):
+    import stable_retro as retro
+
+    game = "StreetFighterIISpecialChampionEdition-Genesis-v0"
+    state_value = retro.State.DEFAULT if state == "default" else retro.State.NONE
+    rom_path = _street_fighter_rom_path_or_skip()
+    scalar = retro.make(game, state=state_value, render_mode="rgb_array")
+    env = retro.RetroVecEnv(
+        game,
+        state=state_value,
+        num_envs=1,
+        num_threads=1,
+        rom_path=rom_path,
+        render_mode="rgb_array",
+    )
+    try:
+        assert env.single_observation_space.shape == (200, 256, 3)
+        assert env.native.observation_shape() == (200, 256, 3)
+        for reset_index in range(3):
+            scalar_obs, _ = scalar.reset(seed=reset_index)
+            observations, _ = env.reset(seed=reset_index)
+            assert observations.shape == (1, 200, 256, 3)
+            assert env.observation_space.contains(observations)
+            np.testing.assert_array_equal(observations[0], scalar_obs)
+            assert np.asarray(env.render()).shape == (
+                224,
+                256 if state_value == retro.State.DEFAULT else 320,
+                3,
+            )
+
+            action = np.zeros((1, env.num_buttons), dtype=np.uint8)
+            for _ in range(3):
+                observations = env.step(action)[0]
+                scalar_obs = scalar.step(action[0])[0]
+                assert observations.shape == env.observation_space.shape
+                np.testing.assert_array_equal(observations[0], scalar_obs)
+    finally:
+        env.close()
+        scalar.close()
+
+
+@pytest.mark.parametrize("obs_copy", ["copy", "safe_view", "unsafe_view"])
+@pytest.mark.parametrize(
+    ("obs_layout", "preprocessing"),
+    [
+        ("hwc", {"obs_grayscale": False, "frame_stack": 1}),
+        (
+            "chw",
+            {
+                "obs_crop": (8, 4, 4, 4),
+                "obs_grayscale": True,
+                "frame_stack": 4,
+            },
+        ),
+        (
+            "hwc",
+            {
+                "obs_crop": (8, 4, 4, 4),
+                "obs_crop_mode": "mask",
+                "obs_grayscale": True,
+                "obs_resize": (84, 84),
+                "obs_resize_algorithm": "area",
+                "frame_skip": 2,
+                "frame_stack": 4,
+                "maxpool_last_two": True,
+            },
+        ),
+    ],
+)
+def test_retro_vec_env_genesis_saved_state_geometry_preprocessing_modes_if_rom_present(
+    obs_copy,
+    obs_layout,
+    preprocessing,
+):
+    import stable_retro as retro
+
+    env = retro.RetroVecEnv(
+        "StreetFighterIISpecialChampionEdition-Genesis-v0",
+        state=retro.State.DEFAULT,
+        num_envs=1,
+        num_threads=1,
+        rom_path=_street_fighter_rom_path_or_skip(),
+        obs_copy=obs_copy,
+        obs_layout=obs_layout,
+        **preprocessing,
+    )
+    try:
+        assert env.native.observation_shape() == env.single_observation_space.shape
+        actions = np.zeros((1, env.num_buttons), dtype=np.uint8)
+        for seed in range(2):
+            observations = env.reset(seed=seed)[0]
+            assert observations.shape == env.observation_space.shape
+            assert env.observation_space.contains(observations)
+            assert np.any(observations)
+            for _ in range(2):
+                observations = env.step(actions)[0]
+                assert observations.shape == env.observation_space.shape
+                assert env.observation_space.contains(observations)
+    finally:
+        env.close()
+
+
+def test_retro_vec_env_genesis_catalog_masked_reset_geometry_if_rom_present():
+    import stable_retro as retro
+
+    state = "Champion.Level1.RyuVsGuile"
+    env = retro.RetroVecEnv(
+        "StreetFighterIISpecialChampionEdition-Genesis-v0",
+        state_catalog=[state],
+        num_envs=2,
+        num_threads=2,
+        rom_path=_street_fighter_rom_path_or_skip(),
+        obs_copy="safe_view",
+        obs_grayscale=True,
+        frame_stack=2,
+    )
+    try:
+        observations, infos = env.reset(seed=[11, 22])
+        assert observations.shape == (2, 200, 256, 2)
+        assert env.state_catalog == (state,)
+        np.testing.assert_array_equal(infos["state_index"], [0, 0])
+
+        actions = np.zeros((2, env.num_buttons), dtype=np.uint8)
+        observations = env.step(actions)[0]
+        unselected = observations[1].copy()
+        observations, infos = env.reset(
+            seed=[33, None],
+            options={
+                "reset_mask": np.array([True, False], dtype=np.bool_),
+                "state_indices": np.array([0, 0], dtype=np.int32),
+            },
+        )
+        assert observations.shape == env.observation_space.shape
+        np.testing.assert_array_equal(observations[1], unselected)
+        np.testing.assert_array_equal(infos["state_index"], [0, 0])
+
+        for _ in range(2):
+            observations = env.reset()[0]
+            assert observations.shape == env.observation_space.shape
+            observations = env.step(actions)[0]
+            assert observations.shape == env.observation_space.shape
+    finally:
+        env.close()
+
+
 def test_retro_vec_env_gymnasium_contract(tmp_path):
     from gymnasium.vector import AutoresetMode
 
@@ -244,6 +403,76 @@ def test_retro_vec_env_gymnasium_contract(tmp_path):
         assert isinstance(infos, dict)
     finally:
         env.close()
+
+
+def test_native_retro_vec_env_rejects_frame_geometry_before_observation_write(tmp_path):
+    import stable_retro as retro
+    from stable_retro import _retro
+
+    root = Path(__file__).resolve().parents[1]
+    rom_path = root / "roms" / "Dr88-FamiconIntro.nes"
+    info_path = _empty_info_path(tmp_path)
+    num_buttons = len(retro.get_system_info("Nes")["buttons"])
+    native = _retro._RetroVecEnv(
+        1,
+        str(rom_path),
+        str(info_path),
+        str(info_path),
+        None,
+        num_buttons,
+        1,
+        1,
+        (0, 0, 0, 0),
+        None,
+        1,
+        1,
+        None,
+        False,
+        "nearest",
+        False,
+        0,
+        -1,
+        0.0,
+        False,
+        False,
+        -1.0,
+        1.0,
+        1,
+        "none",
+        False,
+        "hwc",
+        None,
+        None,
+        None,
+        0,
+    )
+
+    assert native.observation_shape() == (1, 1, 3)
+    with pytest.raises(RuntimeError, match="native observation buffer is 1x1"):
+        native.reset()
+
+
+@pytest.mark.parametrize(
+    "observations",
+    [
+        np.zeros((2, 2, 3, 1), dtype=np.uint8),
+        np.zeros((2, 2, 2, 1), dtype=np.float32),
+    ],
+)
+def test_retro_vec_env_rejects_native_observation_contract_mismatch(observations):
+    import gymnasium as gym
+    from stable_retro.vec_env import RetroVecEnv
+
+    env = RetroVecEnv.__new__(RetroVecEnv)
+    env.observation_space = gym.spaces.Box(
+        low=0,
+        high=255,
+        shape=(2, 2, 2, 1),
+        dtype=np.uint8,
+    )
+
+    with pytest.raises(RuntimeError, match="native test returned observations"):
+        env._set_observations(observations, "test")
 
 
 def _make_crop_retro_vec_env(tmp_path, **kwargs):
@@ -1184,6 +1413,7 @@ def test_retro_vec_env_unsafe_view_aliases_observations(tmp_path):
 
 
 def test_retro_vec_env_forwards_per_env_reset_seeds():
+    import gymnasium as gym
     from stable_retro.vec_env import RetroVecEnv
 
     class FakeNative:
@@ -1200,6 +1430,12 @@ def test_retro_vec_env_forwards_per_env_reset_seeds():
     env.native = FakeNative()
     env.num_envs = 3
     env._copy_obs = True
+    env.observation_space = gym.spaces.Box(
+        low=0,
+        high=255,
+        shape=(3, 2, 2, 1),
+        dtype=np.uint8,
+    )
     env._state_catalog = ()
     env._active_state_indices = np.full(3, -1, dtype=np.int32)
     env._seeds = [11, None, 37]

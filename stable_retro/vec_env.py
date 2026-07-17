@@ -280,6 +280,7 @@ class RetroVecEnv(VectorEnv):
                     "RetroVecEnv does not support rotated screens",
                 )
             width, height = template.em.get_resolution()
+            integration_crop = tuple(int(value) for value in template.data.crop_info(0))
             crop = self._effective_crop(
                 template,
                 height,
@@ -287,7 +288,10 @@ class RetroVecEnv(VectorEnv):
                 obs_crop,
                 obs_crop_mode,
             )
+            remove_crop = obs_crop if obs_crop_mode == "remove" else None
             crop_mask = obs_crop if obs_crop_mode == "mask" else None
+            source_height = height - crop[0] - crop[1]
+            source_width = width - crop[2] - crop[3]
             initial_state = self._initial_state(template)
             self.single_action_space = template.action_space
             self.system = template.system
@@ -364,7 +368,10 @@ class RetroVecEnv(VectorEnv):
             int(self.num_buttons),
             frame_skip,
             frame_stack,
-            crop,
+            integration_crop,
+            remove_crop,
+            source_height,
+            source_width,
             obs_resize,
             bool(obs_grayscale),
             obs_resize_algorithm,
@@ -385,6 +392,13 @@ class RetroVecEnv(VectorEnv):
             crop_mask,
             obs_crop_fill,
         )
+        native_shape = tuple(int(value) for value in self.native.observation_shape())
+        if native_shape != self.single_observation_space.shape:
+            raise RuntimeError(
+                "native observation shape does not match the declared "
+                f"single observation space: {native_shape} != "
+                f"{self.single_observation_space.shape}",
+            )
         self.num_envs = num_envs
         self._state_catalog = tuple(self.native.state_catalog)
         self._active_state_indices = self.native.active_state_indices()
@@ -423,7 +437,6 @@ class RetroVecEnv(VectorEnv):
         Lanes without a serialized initial state report ``-1``.
         """
         return self._active_state_indices
-
 
     @staticmethod
     def _normalize_obs_copy(obs_copy):
@@ -764,6 +777,17 @@ class RetroVecEnv(VectorEnv):
             return self._observations.copy()
         return self._observations
 
+    def _set_observations(self, observations, operation):
+        observations = np.asarray(observations)
+        expected_shape = self.observation_space.shape
+        if observations.dtype != np.uint8 or observations.shape != expected_shape:
+            raise RuntimeError(
+                f"native {operation} returned observations with shape "
+                f"{observations.shape} and dtype {observations.dtype}; expected "
+                f"shape {expected_shape} and dtype uint8",
+            )
+        self._observations = observations
+
     def _actions_to_masks(self, actions):
         import stable_retro as retro
 
@@ -876,7 +900,7 @@ class RetroVecEnv(VectorEnv):
 
         seeds = self._normalize_reset_seed(seed)
         obs, infos = self.native.reset(seeds, reset_mask, state_indices)
-        self._observations = np.asarray(obs, dtype=np.uint8)
+        self._set_observations(obs, "reset")
         self._reset_seeds()
         self._reset_options()
         vector_infos = (
@@ -895,7 +919,7 @@ class RetroVecEnv(VectorEnv):
     def step(self, actions):
         masks = self._actions_to_masks(actions)
         obs, rewards, dones, infos = self.native.step(masks)
-        self._observations = np.asarray(obs, dtype=np.uint8)
+        self._set_observations(obs, "step")
         terminations = np.array(dones, dtype=bool, copy=True)
         truncations = np.zeros(self.num_envs, dtype=bool)
         return (
