@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Nothing yet.
+
+## 1.0.1.post34 - 2026-07-20
+
 * unify built-in, game-owned preset, and inline exact action tables under
   `use_restricted_actions`, with validated controller labels, semantic action
   meanings, deterministic hashes, and scalar/vector parity
