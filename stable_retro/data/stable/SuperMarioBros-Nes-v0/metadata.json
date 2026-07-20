@@ -1,5 +1,42 @@
 {
   "default_state": "Level1-1",
+  "action_sets": {
+    "simple": [
+      [],
+      ["RIGHT"],
+      ["RIGHT", "B"],
+      ["RIGHT", "A"],
+      ["RIGHT", "A", "B"],
+      ["A"],
+      ["LEFT"]
+    ],
+    "simple-down": [
+      [],
+      ["RIGHT"],
+      ["RIGHT", "B"],
+      ["RIGHT", "A"],
+      ["RIGHT", "A", "B"],
+      ["A"],
+      ["LEFT"],
+      ["DOWN"]
+    ],
+    "right": [
+      ["RIGHT"],
+      ["RIGHT", "B"],
+      ["RIGHT", "A"],
+      ["RIGHT", "A", "B"]
+    ],
+    "full": [
+      [],
+      ["RIGHT"],
+      ["RIGHT", "B"],
+      ["RIGHT", "A"],
+      ["RIGHT", "A", "B"],
+      ["A"],
+      ["LEFT"],
+      ["START"]
+    ]
+  },
   "states": {
     "Level2-1": {
       "runs": [

@@ -9,6 +9,7 @@ from gymnasium.utils.ezpickle import EzPickle
 
 import stable_retro as retro
 import stable_retro.data
+from stable_retro.action_tables import resolve_action_spec
 
 __all__ = ["RetroEnv"]
 
@@ -142,12 +143,28 @@ class RetroEnv(gym.Env, EzPickle):
             raise
 
         self.button_combos = self.data.valid_actions()
-        if use_restricted_actions == retro.Actions.DISCRETE:
+        action_spec = resolve_action_spec(
+            use_restricted_actions,
+            game=game,
+            inttype=inttype,
+            buttons=self.buttons,
+            players=players,
+        )
+        self.action_mode = action_spec.mode
+        self.action_preset = action_spec.preset
+        self.action_table = action_spec.table
+        self.action_meanings = action_spec.meanings
+        self.action_table_hash = action_spec.table_hash
+        self._custom_action_masks = action_spec.masks
+        normalized_actions = action_spec.builtin or use_restricted_actions
+        if action_spec.mode == "custom_discrete":
+            self.action_space = gym.spaces.Discrete(len(self.action_table))
+        elif normalized_actions == retro.Actions.DISCRETE:
             combos = 1
             for combo in self.button_combos:
                 combos *= len(combo)
             self.action_space = gym.spaces.Discrete(combos**players)
-        elif use_restricted_actions == retro.Actions.MULTI_DISCRETE:
+        elif normalized_actions == retro.Actions.MULTI_DISCRETE:
             self.action_space = gym.spaces.MultiDiscrete(
                 [len(combos) for combos in self.button_combos] * players,
             )
@@ -166,7 +183,7 @@ class RetroEnv(gym.Env, EzPickle):
             dtype=np.uint8,
         )
 
-        self.use_restricted_actions = use_restricted_actions
+        self.use_restricted_actions = normalized_actions
         self.movie = None
         self.movie_id = 0
         self.movie_path = None
@@ -208,6 +225,20 @@ class RetroEnv(gym.Env, EzPickle):
 
     def action_to_array(self, a):
         """Convert an action-space value into per-player button-mask arrays."""
+        if self.action_mode == "custom_discrete":
+            try:
+                selected = self._custom_action_masks[int(a)]
+            except (IndexError, TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"custom discrete action must be in [0, {len(self.action_table) - 1}]"
+                ) from exc
+            actions = []
+            for action in selected:
+                mask = np.zeros([self.num_buttons], np.uint8)
+                for index in range(self.num_buttons):
+                    mask[index] = (action >> index) & 1
+                actions.append(mask)
+            return actions
         actions = []
         for p in range(self.players):
             action = 0

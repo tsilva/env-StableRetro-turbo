@@ -5,6 +5,7 @@
 ## PROJECT REQUIREMENTS
 
 - The project must preserve Stable Retro's supported game integrations and public single-environment semantics, including saved-state loading, scenario rewards and termination, raw info variables, and ROM import; Turbo features must not reinterpret or remove them.
+- Scalar and vector environments must accept every Stable Retro built-in action mode, exact caller-supplied button-label action tables, and game-owned named tables with identical ordered controller semantics.
 - Published package artifacts must exclude ROM payloads and allow users to supply required ROMs through the supported import workflow.
 - `RetroVecEnv` must implement Gymnasium's vector-environment contract directly and expose batched observations, rewards, terminations, truncations, and infos without requiring Stable-Baselines3.
 - Each `RetroVecEnv` lane must preserve the corresponding `RetroEnv` emulator, action, saved-state, scenario reward and termination, and info semantics before configured vector-only transforms.

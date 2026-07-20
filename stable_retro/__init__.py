@@ -29,6 +29,7 @@ def _reject_rosetta_process():
 _reject_rosetta_process()
 
 import stable_retro.data
+from stable_retro.action_tables import ActionTable
 from stable_retro._retro import Movie
 from stable_retro._retro import RetroEmulator as NativeRetroEmulator
 from stable_retro._retro import core_path
@@ -46,6 +47,7 @@ __all__ = [
     "Movie",
     "RetroEmulator",
     "Actions",
+    "ActionTable",
     "State",
     "Observations",
     "get_core_path",

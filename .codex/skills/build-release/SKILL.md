@@ -17,7 +17,11 @@ recovery.
 - checks the upstream Stable Retro base version;
 - checks the target version is unused on PyPI;
 - bumps `stable_retro/VERSION.txt`;
-- commits `Release v<version>`;
+- requires non-empty, human-authored notes in the checked-in `CHANGES.md`
+  `Unreleased` section;
+- promotes those notes to the target version and release date, then creates a
+  fresh `Unreleased` section;
+- commits `CHANGES.md` with the version bump as `Release v<version>`;
 - tags `v<version>`;
 - atomically pushes the branch and tag;
 - lets GitHub Actions build, validate, and publish the wheels through trusted
@@ -56,7 +60,9 @@ target.
 
 If it fails before pushing, report the failing gate or command and stop. Typical
 failures are a dirty tree, unsynced branch, existing tag, upstream base mismatch,
-or a PyPI version that already exists.
+an existing PyPI version, or missing/empty release notes. Never synthesize
+release notes from commits; the script may only promote human-authored
+`Unreleased` prose.
 
 If it succeeds, capture the printed tag from output such as:
 

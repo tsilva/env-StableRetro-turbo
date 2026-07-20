@@ -13,8 +13,8 @@ import gymnasium as gym
 from gymnasium.vector import AutoresetMode, VectorEnv
 from gymnasium.vector.utils import batch_space
 import stable_retro.data as retro_data
-from stable_retro.enums import Actions, Observations, State
-from stable_retro.retro_env import RetroEnv
+from stable_retro.enums import Actions, Observations
+from stable_retro.action_tables import ActionTable
 
 _SERIALIZED_UNSET = object()
 
@@ -164,7 +164,7 @@ class RetroVecEnv(VectorEnv):
         state=_STATE_UNSET,
         scenario=None,
         info=None,
-        use_restricted_actions=Actions.FILTERED,
+        use_restricted_actions: Actions | str | ActionTable = Actions.FILTERED,
         record=False,
         players=1,
         inttype=retro_data.Integrations.STABLE,
@@ -317,8 +317,14 @@ class RetroVecEnv(VectorEnv):
             self.button_combos = [
                 [int(action) for action in combo] for combo in template.button_combos
             ]
+            self.action_mode = template.action_mode
+            self.action_preset = template.action_preset
+            self.action_table = template.action_table
+            self.action_meanings = template.action_meanings
+            self.action_table_hash = template.action_table_hash
+            self._custom_action_masks = template._custom_action_masks
             self.use_restricted_actions = template.use_restricted_actions
-            self._filter_actions = self.use_restricted_actions == retro.Actions.FILTERED
+            self._filter_actions = self.action_mode == "filtered"
             reward_clip, reward_low, reward_high = self._reward_clip_config(reward_clip)
         finally:
             template.close()
@@ -415,8 +421,13 @@ class RetroVecEnv(VectorEnv):
             fire_button = template.buttons.index("BUTTON")
         except ValueError:
             return -1
-        if template.use_restricted_actions == Actions.ALL:
+        if template.action_mode == "all":
             return fire_button
+        if template.action_mode == "custom_discrete":
+            fire_mask = 1 << fire_button
+            if any(action[0] & fire_mask for action in template._custom_action_masks):
+                return fire_button
+            return -1
         fire_mask = 1 << fire_button
         if any(
             int(action) & fire_mask
@@ -793,6 +804,19 @@ class RetroVecEnv(VectorEnv):
     def _actions_to_masks(self, actions):
         import stable_retro as retro
 
+        if self.action_mode == "custom_discrete":
+            values = np.asarray(actions).reshape(-1)
+            masks = np.zeros((self.num_envs, self.num_buttons), dtype=np.uint8)
+            for env_idx, value in enumerate(values):
+                try:
+                    action_bits = self._custom_action_masks[int(value)][0]
+                except (IndexError, TypeError, ValueError) as exc:
+                    raise ValueError(
+                        f"custom discrete actions must be in [0, {len(self.action_table) - 1}]"
+                    ) from exc
+                for key in range(self.num_buttons):
+                    masks[env_idx, key] = (action_bits >> key) & 1
+            return masks
         if self.use_restricted_actions in (retro.Actions.ALL, retro.Actions.FILTERED):
             masks = np.asarray(actions, dtype=np.uint8)
             return masks.reshape((self.num_envs, self.num_buttons))

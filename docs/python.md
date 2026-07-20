@@ -28,7 +28,26 @@ There are a few possible action spaces included with {class}`stable_retro.RetroE
    :members:
 ```
 
-You can also create your own action spaces derived from these.  For an example, see [discretizer.py](https://github.com/farama-foundation/stable-retro/blob/master/stable_retro/examples/discretizer.py).  This file shows how to use `stable_retro.Actions.Discrete` as well as how to make a custom wrapper that reduces the action space from `126` actions to `7`
+`use_restricted_actions` also accepts a named table from the game's
+`metadata.json`, or an inline ordered table of console button labels. Both forms
+produce an exact `Discrete` space:
+
+```python
+env = stable_retro.make(
+    game="SuperMarioBros-Nes-v0",
+    use_restricted_actions="simple",
+)
+
+custom = stable_retro.make(
+    game="SuperMarioBros-Nes-v0",
+    use_restricted_actions=[[], ["RIGHT"], ["RIGHT", "A"]],
+)
+```
+
+The resolved contract is available through `action_preset`, `action_table`,
+`action_meanings`, and `action_table_hash`. Multiplayer exact tables contain one
+complete per-player action in each category; Stable Retro does not construct a
+Cartesian product for them.
 
 ## Observations
 

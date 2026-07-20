@@ -1,6 +1,7 @@
 import json
 import os
 import re
+from pathlib import Path
 
 import stable_retro.data
 
@@ -271,6 +272,57 @@ def verify_default_state(game, inttype, raw=None):
         return [], []
 
     errors = []
+    action_sets = metadata.get("action_sets")
+    if action_sets is None:
+        packaged_metadata = (
+            Path(stable_retro.__file__).parent
+            / "data"
+            / "stable"
+            / game
+            / "metadata.json"
+        )
+        if packaged_metadata.is_file() and Path(path).resolve() != packaged_metadata.resolve():
+            try:
+                packaged = json.loads(packaged_metadata.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                packaged = {}
+            action_sets = packaged.get("action_sets")
+    if action_sets is None:
+        action_sets = {}
+    if not isinstance(action_sets, dict):
+        errors.append((file, "action_sets must be an object"))
+    elif action_sets:
+        from stable_retro.action_tables import (
+            RESERVED_ACTION_SET_NAMES,
+            normalize_action_table,
+        )
+
+        game_base = re.sub(r"-v\d+$", "", game)
+        system = game_base.rsplit("-", 1)[-1]
+        try:
+            buttons = stable_retro.get_system_info(system)["buttons"]
+        except KeyError:
+            errors.append((file, f"cannot validate action_sets for unknown system {system}"))
+        else:
+            seen_names = set()
+            for name, table in action_sets.items():
+                if not isinstance(name, str) or not name.strip():
+                    errors.append((file, "action_sets contains an invalid name"))
+                    continue
+                folded = name.casefold()
+                if folded in RESERVED_ACTION_SET_NAMES or folded in seen_names:
+                    errors.append((file, f"invalid or reserved action set {name}"))
+                    continue
+                seen_names.add(folded)
+                try:
+                    normalize_action_table(
+                        table,
+                        buttons=buttons,
+                        players=1,
+                        context=f"action set {name!r}",
+                    )
+                except ValueError as exc:
+                    errors.append((file, str(exc)))
     state = metadata.get("default_state")
     if not state:
         return [], [(file, "default state missing")]

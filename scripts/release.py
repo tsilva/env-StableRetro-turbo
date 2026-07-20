@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import date
 import os
 import re
 import subprocess
@@ -15,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 RELEASE_HELPER = REPO_ROOT / "scripts" / "release_build.py"
 PYTHON = REPO_ROOT / ".venv314" / "bin" / "python"
 VERSION_PATH = REPO_ROOT / "stable_retro" / "VERSION.txt"
+CHANGES = REPO_ROOT / "CHANGES.md"
 VERSION_RE = re.compile(r"^(?P<base>\d+\.\d+\.\d+)(?:\.post(?P<post>\d+))?$")
 
 
@@ -105,6 +107,30 @@ def target_version(args: argparse.Namespace) -> str:
     return version
 
 
+def promote_changelog(version: str, *, release_date: str | None = None) -> None:
+    text = CHANGES.read_text(encoding="utf-8")
+    prefix = "# Changelog\n\n## Unreleased\n\n"
+    if not text.startswith(prefix):
+        raise SystemExit("CHANGES.md must begin with an Unreleased section")
+    tail = text[len(prefix) :]
+    separator = tail.find("\n## ")
+    if separator < 0:
+        unreleased = tail.strip()
+        history = ""
+    else:
+        unreleased = tail[:separator].strip()
+        history = tail[separator + 1 :].strip()
+    if not unreleased or unreleased in {"* Nothing yet.", "- Nothing yet."}:
+        raise SystemExit("CHANGES.md Unreleased section must describe the release")
+    if re.search(rf"^## {re.escape(version)}(?:\s|$)", text, re.MULTILINE):
+        raise SystemExit(f"CHANGES.md already contains release {version}")
+    released = release_date or date.today().isoformat()
+    updated = f"{prefix}* Nothing yet.\n\n## {version} - {released}\n\n{unreleased}\n"
+    if history:
+        updated += f"\n{history}\n"
+    CHANGES.write_text(updated, encoding="utf-8")
+
+
 def run_checks(version: str, skip_checks: bool) -> None:
     if skip_checks:
         return
@@ -116,7 +142,7 @@ def create_commit_and_tag(version: str) -> str:
     tag = f"v{version}"
     if subprocess.run(["git", "rev-parse", "--verify", "--quiet", tag], cwd=REPO_ROOT).returncode == 0:
         raise SystemExit(f"tag already exists locally: {tag}")
-    run(["git", "add", "stable_retro/VERSION.txt"])
+    run(["git", "add", "stable_retro/VERSION.txt", "CHANGES.md"])
     run(["git", "commit", "-m", f"Release {tag}"])
     run(["git", "tag", tag, "HEAD"])
     return tag
@@ -154,6 +180,7 @@ def main() -> None:
     remote, branch = ensure_synced()
     version = target_version(args)
     helper("bump-version", "--to", version, "--write")
+    promote_changelog(version)
     run_checks(version, args.skip_checks)
     tag = create_commit_and_tag(version)
     push_release(remote, branch, tag, args.dry_run_push)

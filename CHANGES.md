@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* unify built-in, game-owned preset, and inline exact action tables under
+  `use_restricted_actions`, with validated controller labels, semantic action
+  meanings, deterministic hashes, and scalar/vector parity
 * add reusable, per-lane live snapshot handles through
   `capture_snapshots(mask)` and mixed snapshot/catalog restoration through
   masked `reset()`, including exact cross-lane fan-out without advancing
