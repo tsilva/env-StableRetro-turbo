@@ -403,6 +403,8 @@ class RetroVecEnv(VectorEnv):
         self._state_catalog = tuple(self.native.state_catalog)
         self._active_state_indices = self.native.active_state_indices()
         self._active_state_indices.setflags(write=False)
+        self.supports_live_snapshots = bool(self.native.supports_live_snapshots)
+        self._initialized = np.zeros(self.num_envs, dtype=np.bool_)
 
     @staticmethod
     def _fire_reset_button(template, enabled):
@@ -862,6 +864,8 @@ class RetroVecEnv(VectorEnv):
         return self._list_infos_to_dict(infos)
 
     def reset(self, *, seed: int | Sequence[int | None] | None = None, options=None):
+        if self.closed:
+            raise RuntimeError("cannot reset a closed environment")
         super().reset(seed=None if isinstance(seed, Sequence) else seed)
         reset_options = {} if options is None else dict(options)
         reset_mask = reset_options.pop("reset_mask", None)
@@ -870,11 +874,34 @@ class RetroVecEnv(VectorEnv):
         elif not isinstance(reset_mask, np.ndarray):
             raise TypeError("options['reset_mask'] must be a NumPy array")
         elif reset_mask.shape != (self.num_envs,):
-            raise ValueError(f"options['reset_mask'] must have shape {(self.num_envs,)}")
+            raise ValueError(
+                f"options['reset_mask'] must have shape {(self.num_envs,)}"
+            )
         elif reset_mask.dtype != np.bool_:
             raise TypeError("options['reset_mask'] must have dtype np.bool_")
         elif not np.any(reset_mask):
             raise ValueError("options['reset_mask'] must select at least one lane")
+
+        snapshots = reset_options.pop("snapshots", None)
+        if snapshots is None:
+            snapshot_values = [None for _ in range(self.num_envs)]
+        else:
+            if isinstance(snapshots, (str, bytes, bytearray)) or not isinstance(
+                snapshots,
+                Sequence,
+            ):
+                raise TypeError("options['snapshots'] must be a lane-aligned sequence")
+            if len(snapshots) != self.num_envs:
+                raise ValueError(
+                    f"options['snapshots'] must have length {self.num_envs}",
+                )
+            snapshot_values = list(snapshots)
+        snapshot_mask = np.asarray(
+            [value is not None for value in snapshot_values],
+            dtype=np.bool_,
+        )
+        if np.any(snapshot_mask & ~reset_mask):
+            raise ValueError("snapshots may only be supplied for selected reset lanes")
 
         state_indices = reset_options.pop("state_indices", None)
         if reset_options:
@@ -883,24 +910,47 @@ class RetroVecEnv(VectorEnv):
         if state_indices is None:
             default_index = 0 if self.state_catalog else -1
             state_indices = np.full(self.num_envs, default_index, dtype=np.int32)
+            state_indices[snapshot_mask] = -1
         elif not isinstance(state_indices, np.ndarray):
             raise TypeError("options['state_indices'] must be a NumPy array")
         elif state_indices.shape != (self.num_envs,):
-            raise ValueError(f"options['state_indices'] must have shape {(self.num_envs,)}")
+            raise ValueError(
+                f"options['state_indices'] must have shape {(self.num_envs,)}"
+            )
         elif state_indices.dtype != np.int32:
             raise TypeError("options['state_indices'] must have dtype np.int32")
+        if np.any(state_indices[snapshot_mask] != -1):
+            raise ValueError(
+                "snapshot reset lanes must use -1 for the static state selector",
+            )
+        static_mask = reset_mask & ~snapshot_mask
         if self.state_catalog:
-            selected = state_indices[reset_mask]
+            selected = state_indices[static_mask]
             if np.any(selected < 0) or np.any(selected >= len(self.state_catalog)):
                 raise ValueError(
                     "selected state_indices entries must index state_catalog",
                 )
-        elif np.any(state_indices[reset_mask] != -1):
+        elif np.any(state_indices[static_mask] != -1):
             raise ValueError("state_indices require a non-empty state_catalog")
 
         seeds = self._normalize_reset_seed(seed)
-        obs, infos = self.native.reset(seeds, reset_mask, state_indices)
+        if seeds is not None and any(
+            seeds[index] is not None for index in np.flatnonzero(snapshot_mask)
+        ):
+            raise ValueError("snapshot reset lanes cannot also specify a seed")
+        if snapshots is None:
+            obs, infos = self.native.reset(seeds, reset_mask, state_indices)
+        else:
+            obs, infos = self.native.reset_mixed(
+                seeds,
+                reset_mask,
+                state_indices,
+                snapshot_values,
+            )
         self._set_observations(obs, "reset")
+        if not hasattr(self, "_initialized"):
+            self._initialized = np.zeros(self.num_envs, dtype=np.bool_)
+        self._initialized[reset_mask] = True
         self._reset_seeds()
         self._reset_options()
         vector_infos = (
@@ -914,9 +964,17 @@ class RetroVecEnv(VectorEnv):
             copy=True,
         )
         vector_infos["_state_index"] = reset_mask.copy()
+        start_source = np.full(self.num_envs, "environment", dtype=object)
+        start_source[snapshot_mask] = "snapshot"
+        vector_infos["start_source"] = start_source
+        vector_infos["_start_source"] = reset_mask.copy()
         return self._obs(), vector_infos
 
     def step(self, actions):
+        if self.closed:
+            raise RuntimeError("cannot step a closed environment")
+        if not np.all(self._initialized):
+            raise RuntimeError("all lanes must be reset before the first step")
         masks = self._actions_to_masks(actions)
         obs, rewards, dones, infos = self.native.step(masks)
         self._set_observations(obs, "step")
@@ -931,6 +989,26 @@ class RetroVecEnv(VectorEnv):
             if getattr(self, "_info_filter_mode", "all") == "none"
             else self._step_infos_to_dict(infos),
         )
+
+    def capture_snapshots(self, mask: np.ndarray):
+        if self.closed:
+            raise RuntimeError("cannot capture snapshots from a closed environment")
+        if not self.supports_live_snapshots:
+            raise NotImplementedError(
+                "live snapshots are unavailable because this core or scenario "
+                "cannot preserve exact runtime state",
+            )
+        if not isinstance(mask, np.ndarray):
+            raise TypeError("mask must be a NumPy array")
+        if mask.shape != (self.num_envs,):
+            raise ValueError(f"mask must have shape {(self.num_envs,)}")
+        if mask.dtype != np.bool_:
+            raise TypeError("mask must have dtype np.bool_")
+        if not np.any(mask):
+            raise ValueError("mask must select at least one lane")
+        if not np.all(self._initialized[mask]):
+            raise RuntimeError("cannot capture a lane before its initial reset")
+        return tuple(self.native.capture_snapshots(mask))
 
     def close(self):
         viewer = getattr(self, "viewer", None)

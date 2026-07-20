@@ -76,6 +76,60 @@ jobs:
         if: github.event_name == 'push' && github.ref_type == 'tag'
         run: .venv314/bin/python scripts/release_build.py check-pypi --version "${{ steps.version.outputs.version }}"
 
+  test-python:
+    name: Full Python test suite
+    needs: validate
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install git cmake capnproto libcapnp-dev zlib1g-dev build-essential pkg-config libzip-dev software-properties-common libbz2-dev xvfb python3-opengl
+
+      - name: Install Python package and tests
+        run: |
+          python3 -m pip install --upgrade pip pytest
+          python3 -m pip install -e .
+
+      - name: Run full Python test suite
+        run: xvfb-run -s '-screen 0 1024x768x24' pytest
+
+  test-cpp:
+    name: Full C++ test suite
+    needs: validate
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install git cmake capnproto libcapnp-dev zlib1g-dev build-essential pkg-config libzip-dev software-properties-common libbz2-dev python3-opengl
+
+      - name: Build C++ package and tests
+        run: |
+          cmake -DBUILD_PYTHON=OFF .
+          make -j2
+          make -j2 -f tests/Makefile
+
+      - name: Run full C++ test suite
+        run: ctest --progress --verbose
+
   build:
     name: Build ${{ matrix.platform }} wheels
     needs: validate
@@ -205,6 +259,8 @@ jobs:
     needs:
       - validate
       - final-check
+      - test-python
+      - test-cpp
     runs-on: ubuntu-24.04
     environment:
       name: pypi

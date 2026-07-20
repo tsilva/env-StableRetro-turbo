@@ -33,6 +33,7 @@ Pass a full game ID such as `SuperMarioBros-Nes-v0`, or use `all` to open one im
 ## Use
 
 ```python
+import numpy as np
 import stable_retro as retro
 
 env = retro.RetroVecEnv(
@@ -61,11 +62,33 @@ obs, rewards, terminations, truncations, infos = env.step(
 done = terminations | truncations
 if done.any():
     obs, reset_infos = env.reset(options={"reset_mask": done})
-
-env.close()
 ```
 
 `RetroVecEnv` uses Gymnasium's disabled-autoreset semantics. A finished lane keeps its terminal observation and cannot be stepped again until it is selected by a masked reset; unselected lanes keep their emulator state, RNG stream, frame stack, and sticky-action history.
+
+When `env.supports_live_snapshots` is true, live positions can be captured
+without advancing emulation and restored into any lane of the same environment:
+
+```python
+capture_mask = np.zeros(env.num_envs, dtype=np.bool_)
+capture_mask[0] = True
+captured = env.capture_snapshots(capture_mask)
+
+restore_mask = np.zeros(env.num_envs, dtype=np.bool_)
+restore_mask[3] = True
+starts = [None] * env.num_envs
+starts[3] = captured[0]
+obs, infos = env.reset(
+    options={"reset_mask": restore_mask, "snapshots": starts},
+)
+env.close()
+```
+
+Handles are reusable, session-local, and intentionally not pickleable. A
+single masked reset can mix snapshot starts with ordinary `state_indices`;
+`infos["start_source"]` distinguishes `"snapshot"` from `"environment"`.
+Scripted scenarios and cores that cannot serialize exact state report the
+capability as unavailable.
 
 The fast path also supports:
 
@@ -107,6 +130,9 @@ Benchmark definitions live in [`scripts/benchmark_vec_env.json`](scripts/benchma
 - `RetroVecEnv` implements Gymnasium's vector API directly. It is not a Stable-Baselines3 `VecEnv`, and Stable-Baselines3 is not a runtime dependency.
 - A scalar reset seed expands to `seed + lane_index`. Seed sequences must contain one integer or `None` per lane.
 - `state_catalog` preloads an ordered saved-state catalog. Select reset lanes with `reset_mask` and their exact catalog entries with `state_indices`; Turbo does not sample states.
+- `capture_snapshots(mask)` returns lane-aligned live handles for exact
+  same-instance continuation. The caller owns archive selection, eviction, and
+  curriculum policy; `handle.nbytes` exposes approximate payload size.
 - `active_state_indices()` returns a read-only NumPy view. Copy it when you need a stable snapshot.
 - [Stable Retro](https://stable-retro.farama.org/) remains the source for inherited game, integration, and emulator documentation.
 - Bundled emulator cores have their own licenses; see [`LICENSES.md`](LICENSES.md).

@@ -10,4 +10,5 @@
 - Each `RetroVecEnv` lane must preserve the corresponding `RetroEnv` emulator, action, saved-state, scenario reward and termination, and info semantics before configured vector-only transforms.
 - `RetroVecEnv` must use disabled autoreset: terminal lanes retain their terminal observations and cannot be stepped until selected for reset, while a masked reset leaves every unselected lane's emulator state, random stream, and observation history unchanged.
 - Saved-state catalogs must preserve declared order, and each selected lane must reset to an explicit caller-selected catalog index so execution is reproducible without provider-owned sampling.
+- Snapshot-capable `RetroVecEnv` instances must capture live lanes and restore selected lanes from reusable same-instance snapshots without advancing emulation or changing unselected lanes; capability must report unavailable when exact core and scenario state cannot be preserved.
 - Non-benchmark observation ownership modes must not expose results that a later environment call can unexpectedly mutate.

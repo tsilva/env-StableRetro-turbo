@@ -689,6 +689,9 @@ def smoke_wheel(args: argparse.Namespace) -> None:
                 )
 
         code = """
+from pathlib import Path
+
+import numpy as np
 import stable_retro
 from stable_retro import _retro
 print(stable_retro.__file__)
@@ -699,8 +702,61 @@ assert not hasattr(_retro, "RetroVecEnv")
 assert hasattr(stable_retro, "RetroVecEnv")
 assert not hasattr(stable_retro, "RetroVectorEnv")
 assert not hasattr(stable_retro, "StableRetro" + "Native" + "VecEnv")
+
+rom_path = Path({rom_path!r})
+assert rom_path.is_file()
+empty_info = Path({empty_info!r})
+empty_info.write_text('{{"info": {{}}}}', encoding="utf-8")
+env = stable_retro.RetroVecEnv(
+    "Dr88-FamiconIntro",
+    state=stable_retro.State.NONE,
+    num_envs=2,
+    num_threads=1,
+    rom_path=str(rom_path),
+    info=str(empty_info),
+    scenario=str(empty_info),
+    obs_resize=(84, 84),
+    obs_grayscale=True,
+    frame_skip=1,
+    frame_stack=1,
+    render_mode="rgb_array",
+)
+try:
+    assert env.supports_live_snapshots is True
+    env.reset(seed=17)
+    warmup = np.zeros((2, env.num_buttons), dtype=np.uint8)
+    env.step(warmup)
+    handles = env.capture_snapshots(
+        np.asarray([True, False], dtype=np.bool_)
+    )
+    assert handles[0] is not None
+    assert handles[0].nbytes > 0
+    assert handles[1] is None
+
+    reset_options = {{
+        "reset_mask": np.asarray([True, True], dtype=np.bool_),
+        "state_indices": np.asarray([-1, -1], dtype=np.int32),
+        "snapshots": [handles[0], handles[0]],
+    }}
+    restored, restored_infos = env.reset(options=reset_options)
+    np.testing.assert_array_equal(restored[0], restored[1])
+    assert restored_infos["start_source"].tolist() == ["snapshot", "snapshot"]
+
+    replay_actions = np.zeros_like(warmup)
+    replay_actions[:, 0] = 1
+    first = tuple(
+        np.asarray(value).copy() for value in env.step(replay_actions)[:4]
+    )
+    env.reset(options=reset_options)
+    second = env.step(replay_actions)
+    for expected, actual in zip(first, second[:4], strict=True):
+        np.testing.assert_array_equal(expected, actual)
+finally:
+    env.close()
 """.format(
             target=str(target),
+            rom_path=str(REPO_ROOT / "tests" / "roms" / "Dr88-FamiconIntro.nes"),
+            empty_info=str(target / "snapshot_smoke_info.json"),
         )
         env = os.environ.copy()
         env["PYTHONPATH"] = str(target)

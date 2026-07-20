@@ -172,6 +172,36 @@ def test_release_wheel_builds_use_persistent_ccache():
     assert "Install macOS system packages" not in workflow
 
 
+def test_built_wheel_smoke_exercises_exact_live_snapshot_replay():
+    root = Path(__file__).resolve().parents[2]
+    source = (root / "scripts" / "release_build.py").read_text(encoding="utf-8")
+
+    for required in (
+        "Dr88-FamiconIntro.nes",
+        "supports_live_snapshots",
+        "capture_snapshots",
+        '"snapshots": [handles[0], handles[0]]',
+        'restored_infos["start_source"]',
+        "np.testing.assert_array_equal(expected, actual)",
+    ):
+        assert required in source
+
+
+def test_release_publish_requires_full_python_and_cpp_suites():
+    root = Path(__file__).resolve().parents[2]
+    workflow = (root / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8",
+    )
+
+    assert "test-python:" in workflow
+    assert "xvfb-run -s '-screen 0 1024x768x24' pytest" in workflow
+    assert "test-cpp:" in workflow
+    assert "ctest --progress --verbose" in workflow
+    publish = workflow.split("  publish:", maxsplit=1)[1]
+    assert "- test-python" in publish
+    assert "- test-cpp" in publish
+
+
 def test_release_cache_paths_are_platform_scoped(tmp_path):
     release_build = _release_build_module()
 

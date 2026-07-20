@@ -77,6 +77,38 @@ struct AreaResizePlan {
 };
 
 struct PyGameData;
+
+struct PyRetroLiveSnapshot {
+	std::shared_ptr<void> owner;
+	std::vector<uint8_t> coreState;
+	Retro::GameData::RuntimeState dataState;
+	Retro::Scenario::RuntimeState scenarioState;
+	std::vector<uint8_t> frameStack;
+	size_t frameStackIndex = 0;
+	std::vector<uint8_t> singleObs;
+	std::vector<uint8_t> lastMask;
+	bool hasLastMask = false;
+	bool pendingReset = false;
+	std::string currentStartStateLabel;
+	std::mt19937 rng;
+	int32_t activeStateIndex = -1;
+	std::vector<uint8_t> screenRgb;
+	long screenWidth = 0;
+	long screenHeight = 0;
+
+	size_t nbytes() const {
+		return sizeof(*this) +
+			   coreState.capacity() +
+			   frameStack.capacity() +
+			   singleObs.capacity() +
+			   lastMask.capacity() +
+			   currentStartStateLabel.capacity() +
+			   screenRgb.capacity() +
+			   dataState.trackedCurrentValues.capacity() * sizeof(int64_t) +
+			   dataState.trackedLastValues.capacity() * sizeof(int64_t);
+	}
+};
+
 struct PyRetroEmulator {
 	Retro::Emulator m_re;
 	int m_cheats = 0;
@@ -1754,10 +1786,20 @@ public:
 					}
 				}
 			}
-			slot->frameStack.resize(static_cast<size_t>(m_frameStack) * m_singleObsSize);
-			slot->action.resize(static_cast<size_t>(m_numButtons));
-			slot->lastMask.assign(static_cast<size_t>(m_numButtons), 0);
-			m_slots.emplace_back(std::move(slot));
+				slot->frameStack.resize(static_cast<size_t>(m_frameStack) * m_singleObsSize);
+				slot->action.resize(static_cast<size_t>(m_numButtons));
+				slot->lastMask.assign(static_cast<size_t>(m_numButtons), 0);
+				bool scriptedScenario =
+					!slot->data.m_scen.scripts().empty() ||
+					!slot->data.m_scen.doneFunction().first.empty();
+				for (unsigned player = 0; player < MAX_PLAYERS; ++player) {
+					scriptedScenario =
+						scriptedScenario || !slot->data.m_scen.rewardFunction(player).first.empty();
+				}
+				if (scriptedScenario || slot->emulator->m_re.serializeSize() == 0) {
+					m_supportsLiveSnapshots = false;
+				}
+				m_slots.emplace_back(std::move(slot));
 		}
 		const auto obsShape = observationBatchShape();
 		m_obsArrays[0] = py::array_t<uint8_t>(obsShape);
@@ -1953,8 +1995,191 @@ public:
 		m_anyPendingReset = std::any_of(m_slots.begin(), m_slots.end(), [](const auto& slot) {
 			return slot->pendingReset;
 		});
-		return py::make_tuple(obsArray, resetInfos(resetMask));
-	}
+			return py::make_tuple(obsArray, resetInfos(resetMask));
+		}
+
+		py::tuple resetMixed(
+			py::object seedObj,
+			py::object resetMaskObj,
+			py::object stateIndicesObj,
+			py::object snapshotsObj) {
+			if (!m_supportsLiveSnapshots) {
+				PyErr_SetString(
+					PyExc_NotImplementedError,
+					"live snapshots are unavailable because this core or scenario cannot preserve exact runtime state");
+				throw py::error_already_set();
+			}
+
+			py::array resetMaskArray = py::cast<py::array>(resetMaskObj);
+			if (
+				!py::isinstance<py::array_t<bool>>(resetMaskArray) ||
+				resetMaskArray.ndim() != 1 ||
+				static_cast<size_t>(resetMaskArray.shape(0)) != m_slots.size()) {
+				throw py::value_error("reset_mask must be a one-dimensional bool array with num_envs entries");
+			}
+			auto resetValues = resetMaskArray.cast<py::array_t<bool>>().unchecked<1>();
+			std::vector<uint8_t> resetMask(m_slots.size(), 0);
+			bool any = false;
+			for (size_t i = 0; i < m_slots.size(); ++i) {
+				resetMask[i] = resetValues(static_cast<py::ssize_t>(i)) ? 1 : 0;
+				any = any || resetMask[i] != 0;
+			}
+			if (!any) {
+				throw py::value_error("reset_mask must select at least one lane");
+			}
+
+			if (!PySequence_Check(snapshotsObj.ptr()) || PyUnicode_Check(snapshotsObj.ptr()) || PyBytes_Check(snapshotsObj.ptr())) {
+				throw py::type_error("snapshots must be a lane-aligned sequence");
+			}
+			py::sequence snapshotSequence = py::reinterpret_borrow<py::sequence>(snapshotsObj);
+			if (static_cast<size_t>(snapshotSequence.size()) != m_slots.size()) {
+				throw py::value_error("snapshots must have num_envs entries");
+			}
+			std::vector<std::shared_ptr<PyRetroLiveSnapshot>> snapshots(m_slots.size());
+			for (size_t i = 0; i < m_slots.size(); ++i) {
+				py::object value = snapshotSequence[static_cast<py::ssize_t>(i)];
+				if (value.is_none()) {
+					continue;
+				}
+				if (!resetMask[i]) {
+					throw py::value_error("snapshots may only be supplied for selected reset lanes");
+				}
+				if (!py::isinstance<PyRetroLiveSnapshot>(value)) {
+					throw py::type_error("snapshot entries must be live snapshot handles or None");
+				}
+				snapshots[i] = value.cast<std::shared_ptr<PyRetroLiveSnapshot>>();
+				if (snapshots[i]->owner.get() != m_snapshotOwner.get()) {
+					throw py::value_error("snapshot belongs to a different environment instance");
+				}
+				if (snapshots[i]->pendingReset) {
+					throw std::runtime_error("cannot restore a snapshot that is pending reset");
+				}
+			}
+
+			py::array stateArray = py::cast<py::array>(stateIndicesObj);
+			if (
+				!py::isinstance<py::array_t<int32_t>>(stateArray) ||
+				stateArray.ndim() != 1 ||
+				static_cast<size_t>(stateArray.shape(0)) != m_slots.size()) {
+				throw py::value_error("state_indices must be a one-dimensional int32 array with num_envs entries");
+			}
+			auto stateValues = stateArray.cast<py::array_t<int32_t>>().unchecked<1>();
+			std::vector<int32_t> stateIndices(m_slots.size(), -1);
+			for (size_t i = 0; i < m_slots.size(); ++i) {
+				stateIndices[i] = stateValues(static_cast<py::ssize_t>(i));
+				if (!resetMask[i]) {
+					continue;
+				}
+				if (snapshots[i]) {
+					if (stateIndices[i] != -1) {
+						throw py::value_error("snapshot reset lanes must use the -1 state-index sentinel");
+					}
+					continue;
+				}
+				if (
+					m_initialStates.empty()
+						? stateIndices[i] != -1
+						: stateIndices[i] < 0 || static_cast<size_t>(stateIndices[i]) >= m_initialStates.size()) {
+					throw py::value_error("selected state_indices entries must index state_catalog");
+				}
+			}
+
+			std::vector<uint32_t> seedValues(m_slots.size(), 0);
+			std::vector<uint8_t> hasSeed(m_slots.size(), 0);
+			if (!seedObj.is_none()) {
+				if (PyLong_Check(seedObj.ptr())) {
+					const uint64_t seed = seedObj.cast<uint64_t>();
+					for (size_t i = 0; i < m_slots.size(); ++i) {
+						if (resetMask[i]) {
+							if (snapshots[i]) {
+								throw py::value_error("snapshot reset lanes cannot also specify a seed");
+							}
+							seedValues[i] = static_cast<uint32_t>(seed + i);
+							hasSeed[i] = 1;
+						}
+					}
+				} else {
+					if (!PySequence_Check(seedObj.ptr())) {
+						throw py::type_error("seed must be an integer or a lane-aligned sequence");
+					}
+					py::sequence seedSequence = py::reinterpret_borrow<py::sequence>(seedObj);
+					if (static_cast<size_t>(seedSequence.size()) != m_slots.size()) {
+						throw py::value_error("seed sequence length must match num_envs");
+					}
+					for (size_t i = 0; i < m_slots.size(); ++i) {
+						py::object seed = seedSequence[static_cast<py::ssize_t>(i)];
+						if (!resetMask[i] || seed.is_none()) {
+							continue;
+						}
+						if (snapshots[i]) {
+							throw py::value_error("snapshot reset lanes cannot also specify a seed");
+						}
+						seedValues[i] = seed.cast<uint32_t>();
+						hasSeed[i] = 1;
+					}
+				}
+			}
+
+			std::vector<std::shared_ptr<PyRetroLiveSnapshot>> backups(m_slots.size());
+			for (size_t i = 0; i < m_slots.size(); ++i) {
+				if (resetMask[i]) {
+					backups[i] = captureSlot(*m_slots[i], true);
+				}
+			}
+			const size_t oldNextObsArray = m_nextObsArray;
+			const size_t oldPreviousObsArray = m_previousObsArray;
+			const bool oldHasPreviousObservation = m_hasPreviousObservation;
+			py::array_t<uint8_t>& obsArray = nextObservationArray();
+			uint8_t* obsData = obsArray.mutable_data();
+			clearErrors();
+			{
+				py::gil_scoped_release release;
+				batchThreadPool(m_numThreads).parallelFor(m_slots.size(), [&](size_t index) {
+					try {
+						if (!resetMask[index]) {
+							writeStackedObservation(*m_slots[index], obsData + index * m_stackedObsSize);
+							return;
+						}
+						if (snapshots[index]) {
+							restoreSlot(*m_slots[index], *snapshots[index], obsData + index * m_stackedObsSize);
+						} else {
+							if (hasSeed[index]) {
+								m_slots[index]->rng.seed(seedValues[index]);
+							}
+							resetSlot(*m_slots[index], obsData + index * m_stackedObsSize, stateIndices[index]);
+						}
+					} catch (const std::exception& exc) {
+						m_errors[index] = exc.what();
+					} catch (...) {
+						m_errors[index] = "unknown native mixed reset error";
+					}
+				});
+			}
+
+			const bool failed = std::any_of(m_errors.begin(), m_errors.end(), [](const auto& error) {
+				return !error.empty();
+			});
+			if (failed) {
+				std::vector<uint8_t> rollbackObservation(m_stackedObsSize);
+				for (size_t i = 0; i < m_slots.size(); ++i) {
+					if (backups[i]) {
+						restoreSlot(*m_slots[i], *backups[i], rollbackObservation.data());
+					}
+				}
+				m_nextObsArray = oldNextObsArray;
+				m_previousObsArray = oldPreviousObsArray;
+				m_hasPreviousObservation = oldHasPreviousObservation;
+				m_anyPendingReset = std::any_of(m_slots.begin(), m_slots.end(), [](const auto& slot) {
+					return slot->pendingReset;
+				});
+				throwFirstError(m_errors);
+			}
+
+			m_anyPendingReset = std::any_of(m_slots.begin(), m_slots.end(), [](const auto& slot) {
+				return slot->pendingReset;
+			});
+			return py::make_tuple(obsArray, resetInfos(resetMask));
+		}
 
 	py::array_t<int32_t> activeStateIndices() {
 		return py::array_t<int32_t>(
@@ -2075,6 +2300,15 @@ public:
 			throw std::runtime_error("screen index out of range");
 		}
 		Slot& slot = *m_slots[index];
+		if (slot.hasRestoredScreen) {
+			py::array_t<uint8_t> screen({
+				static_cast<py::ssize_t>(slot.restoredScreenHeight),
+				static_cast<py::ssize_t>(slot.restoredScreenWidth),
+				static_cast<py::ssize_t>(3),
+			});
+			std::memcpy(screen.mutable_data(), slot.restoredScreen.data(), slot.restoredScreen.size());
+			return screen;
+		}
 		IndexedVideoFrame indexedFrame;
 		if (slot.usesIndexedVideo && slot.emulator->m_re.getIndexedVideoFrame(indexedFrame)) {
 			py::array_t<uint8_t> screen({
@@ -2114,6 +2348,48 @@ public:
 
 	size_t numEnvs() const {
 		return m_slots.size();
+	}
+
+	bool supportsLiveSnapshots() const {
+		return m_supportsLiveSnapshots;
+	}
+
+	py::tuple captureSnapshots(py::object captureMaskObj) {
+		if (!m_supportsLiveSnapshots) {
+			PyErr_SetString(
+				PyExc_NotImplementedError,
+				"live snapshots are unavailable because this core or scenario cannot preserve exact runtime state");
+			throw py::error_already_set();
+		}
+		py::array captureMaskArray = py::cast<py::array>(captureMaskObj);
+		if (
+			!py::isinstance<py::array_t<bool>>(captureMaskArray) ||
+			captureMaskArray.ndim() != 1 ||
+			static_cast<size_t>(captureMaskArray.shape(0)) != m_slots.size()) {
+			throw py::value_error("capture_mask must be a one-dimensional bool array with num_envs entries");
+		}
+		auto values = captureMaskArray.cast<py::array_t<bool>>().unchecked<1>();
+		bool any = false;
+		for (size_t i = 0; i < m_slots.size(); ++i) {
+			const bool selected = values(static_cast<py::ssize_t>(i));
+			any = any || selected;
+			if (selected && m_slots[i]->pendingReset) {
+				throw std::runtime_error("cannot capture a lane that is pending reset");
+			}
+		}
+		if (!any) {
+			throw py::value_error("capture_mask must select at least one lane");
+		}
+
+		py::tuple result(m_slots.size());
+		for (size_t i = 0; i < m_slots.size(); ++i) {
+			if (!values(static_cast<py::ssize_t>(i))) {
+				result[static_cast<py::ssize_t>(i)] = py::none();
+				continue;
+			}
+			result[static_cast<py::ssize_t>(i)] = captureSlot(*m_slots[i], false);
+		}
+		return result;
 	}
 
 private:
@@ -2162,7 +2438,7 @@ private:
 		return m_obsArrays[index];
 	}
 
-	struct Slot {
+		struct Slot {
 		Slot(const string& romPath, const string& dataPath, const string& scenarioPath, const std::string& initialState, size_t index)
 			: emulator(std::make_unique<PyRetroEmulator>(romPath))
 			, index(index)
@@ -2217,11 +2493,120 @@ private:
 		std::vector<uint8_t> action;
 		std::vector<uint8_t> lastMask;
 		bool hasLastMask = false;
-		bool pendingReset = false;
-		bool usesIndexedVideo = false;
-		std::string currentStartStateLabel;
-		std::mt19937 rng;
-	};
+			bool pendingReset = false;
+			bool usesIndexedVideo = false;
+			std::string currentStartStateLabel;
+			std::mt19937 rng;
+			std::vector<uint8_t> restoredScreen;
+			long restoredScreenWidth = 0;
+			long restoredScreenHeight = 0;
+			bool hasRestoredScreen = false;
+		};
+
+	void readCurrentScreen(Slot& slot, std::vector<uint8_t>& rgb, long& width, long& height) const {
+		if (slot.hasRestoredScreen) {
+			rgb = slot.restoredScreen;
+			width = slot.restoredScreenWidth;
+			height = slot.restoredScreenHeight;
+			return;
+		}
+		IndexedVideoFrame indexedFrame;
+		if (slot.usesIndexedVideo && slot.emulator->m_re.getIndexedVideoFrame(indexedFrame)) {
+			width = static_cast<long>(indexedFrame.width);
+			height = static_cast<long>(indexedFrame.height);
+			rgb.resize(static_cast<size_t>(width) * static_cast<size_t>(height) * 3);
+			for (unsigned y = 0; y < indexedFrame.height; ++y) {
+				for (unsigned x = 0; x < indexedFrame.width; ++x) {
+					const uint8_t pixel = indexedFrame.data[static_cast<size_t>(y) * indexedFrame.pitch + static_cast<size_t>(x)];
+					uint8_t r = 0;
+					uint8_t g = 0;
+					uint8_t b = 0;
+					rgb565ToRgb888(indexedRgb565(indexedFrame, pixel), r, g, b);
+					const size_t offset =
+						(static_cast<size_t>(y) * indexedFrame.width + static_cast<size_t>(x)) * 3;
+					rgb[offset] = r;
+					rgb[offset + 1] = g;
+					rgb[offset + 2] = b;
+				}
+			}
+			return;
+		}
+
+		width = slot.emulator->m_re.getImageWidth();
+		height = slot.emulator->m_re.getImageHeight();
+		const void* image = slot.emulator->m_re.getImageData();
+		if (!image) {
+			throw std::runtime_error("cannot capture a live snapshot before the core produces a framebuffer");
+		}
+		rgb.resize(static_cast<size_t>(width) * static_cast<size_t>(height) * 3);
+		Image out(Image::Format::RGB888, rgb.data(), width, height, width);
+		Image in;
+		if (slot.emulator->m_re.getImageDepth() == 16) {
+			in = Image(Image::Format::RGB565, image, width, height, slot.emulator->m_re.getImagePitch());
+		} else if (slot.emulator->m_re.getImageDepth() == 32) {
+			in = Image(Image::Format::RGBX888, image, width, height, slot.emulator->m_re.getImagePitch());
+		} else {
+			throw std::runtime_error("unsupported image depth while capturing a live snapshot");
+		}
+		in.copyTo(&out);
+	}
+
+	std::shared_ptr<PyRetroLiveSnapshot> captureSlot(Slot& slot, bool allowPending) const {
+		if (slot.pendingReset && !allowPending) {
+			throw std::runtime_error("cannot capture a lane that is pending reset");
+		}
+		auto snapshot = std::make_shared<PyRetroLiveSnapshot>();
+		snapshot->owner = m_snapshotOwner;
+		const size_t stateSize = slot.emulator->m_re.serializeSize();
+		if (stateSize == 0) {
+			throw std::runtime_error("core does not support live serialization");
+		}
+		snapshot->coreState.resize(stateSize);
+		if (!slot.emulator->m_re.serialize(snapshot->coreState.data(), stateSize)) {
+			throw std::runtime_error("failed to serialize live emulator state");
+		}
+		snapshot->dataState = slot.data.m_data.captureRuntimeState();
+		snapshot->scenarioState = slot.data.m_scen.captureRuntimeState();
+		snapshot->frameStack = slot.frameStack;
+		snapshot->frameStackIndex = slot.frameStackIndex;
+		snapshot->singleObs = slot.singleObs;
+		snapshot->lastMask = slot.lastMask;
+		snapshot->hasLastMask = slot.hasLastMask;
+		snapshot->pendingReset = slot.pendingReset;
+		snapshot->currentStartStateLabel = slot.currentStartStateLabel;
+		snapshot->rng = slot.rng;
+		snapshot->activeStateIndex = m_activeInitialStateIndices[slot.index];
+		readCurrentScreen(
+			slot,
+			snapshot->screenRgb,
+			snapshot->screenWidth,
+			snapshot->screenHeight);
+		return snapshot;
+	}
+
+	void restoreSlot(Slot& slot, const PyRetroLiveSnapshot& snapshot, uint8_t* dst) {
+		if (!slot.emulator->m_re.unserialize(snapshot.coreState.data(), snapshot.coreState.size())) {
+			throw std::runtime_error("failed to restore live emulator state");
+		}
+		slot.data.m_data.restoreRuntimeState(snapshot.dataState);
+		slot.data.m_scen.restoreRuntimeState(snapshot.scenarioState);
+		slot.frameStack = snapshot.frameStack;
+		slot.frameStackIndex = snapshot.frameStackIndex;
+		slot.singleObs = snapshot.singleObs;
+		slot.lastMask = snapshot.lastMask;
+		slot.hasLastMask = snapshot.hasLastMask;
+		slot.pendingReset = snapshot.pendingReset;
+		slot.currentStartStateLabel = snapshot.currentStartStateLabel;
+		slot.rng = snapshot.rng;
+		m_activeInitialStateIndices[slot.index] = snapshot.activeStateIndex;
+		slot.hasPrevRaw = false;
+		slot.hasPrevIndexed = false;
+		slot.restoredScreen = snapshot.screenRgb;
+		slot.restoredScreenWidth = snapshot.screenWidth;
+		slot.restoredScreenHeight = snapshot.screenHeight;
+		slot.hasRestoredScreen = true;
+		writeStackedObservation(slot, dst);
+	}
 
 	NativeCrop cropForFrame(long rawWidth, long rawHeight) const {
 		if (rawWidth <= 0 || rawHeight <= 0) {
@@ -2545,6 +2930,8 @@ private:
 	}
 
 	void resetSlot(Slot& slot, uint8_t* dst, int32_t initialStateIndex) {
+		slot.hasRestoredScreen = false;
+		slot.restoredScreen.clear();
 		const InitialStateChoice* initialState =
 			initialStateIndex >= 0 ? &m_initialStates[static_cast<size_t>(initialStateIndex)] : nullptr;
 		if (initialState && !initialState->state.empty()) {
@@ -2591,6 +2978,8 @@ private:
 	}
 
 	void stepSlot(Slot& slot, const std::vector<uint8_t>& requestedAction, uint8_t* dst, StepOutput& output) {
+		slot.hasRestoredScreen = false;
+		slot.restoredScreen.clear();
 		const bool preserveTerminalFrame = true;
 		const std::vector<uint8_t>* action = &requestedAction;
 		if (m_stickyActionProb > 0.0) {
@@ -2893,6 +3282,8 @@ private:
 	bool m_channelsFirst = false;
 	bool m_renderSkipEnabled = false;
 	bool m_anyPendingReset = false;
+	bool m_supportsLiveSnapshots = true;
+	std::shared_ptr<void> m_snapshotOwner = std::make_shared<int>(0);
 	std::vector<std::string> m_infoKeys;
 	std::vector<std::pair<std::string, Variable>> m_infoVariables;
 	int m_numThreads = 1;
@@ -3054,6 +3445,12 @@ PYBIND11_MODULE(_retro, m) {
 		.def("get_state", &PyMovie::getState)
 		.def("set_state", &PyMovie::setState);
 
+	py::class_<PyRetroLiveSnapshot, std::shared_ptr<PyRetroLiveSnapshot>>(m, "_LiveSnapshot")
+		.def_property_readonly("nbytes", &PyRetroLiveSnapshot::nbytes)
+		.def("__reduce__", [](const PyRetroLiveSnapshot&) -> py::object {
+			throw py::type_error("live snapshot handles are session-local and cannot be pickled");
+		});
+
 	py::class_<PyRetroVecEnv>(m, "_RetroVecEnv")
 		.def(
 			py::init<
@@ -3125,11 +3522,20 @@ PYBIND11_MODULE(_retro, m) {
 			py::arg("seed") = py::none(),
 			py::arg("reset_mask") = py::none(),
 			py::arg("state_indices") = py::none())
+		.def(
+			"reset_mixed",
+			&PyRetroVecEnv::resetMixed,
+			py::arg("seed"),
+			py::arg("reset_mask"),
+			py::arg("state_indices"),
+			py::arg("snapshots"))
+		.def("capture_snapshots", &PyRetroVecEnv::captureSnapshots, py::arg("capture_mask"))
 		.def("step", &PyRetroVecEnv::step)
 		.def("active_state_indices", &PyRetroVecEnv::activeStateIndices)
 		.def("observation_shape", &PyRetroVecEnv::observationShape)
 		.def("get_screen", &PyRetroVecEnv::getScreen, py::arg("index") = 0)
 		.def_property_readonly("state_catalog", &PyRetroVecEnv::stateCatalog)
+		.def_property_readonly("supports_live_snapshots", &PyRetroVecEnv::supportsLiveSnapshots)
 		.def_property_readonly("num_envs", &PyRetroVecEnv::numEnvs);
 
 	m.def("core_path", &::corePath, py::arg("hint") = py::none());

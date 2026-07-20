@@ -397,6 +397,32 @@ size_t GameData::numVariables() const {
 	return m_vars.size();
 }
 
+GameData::RuntimeState GameData::captureRuntimeState() const {
+	RuntimeState state;
+	state.trackedCurrentValues = m_trackedCurrentValues;
+	state.trackedLastValues = m_trackedLastValues;
+	state.trackedHasLastValues = m_trackedHasLastValues;
+	for (const auto& item : m_customVars) {
+		state.customValues.emplace(item.first, *item.second);
+	}
+	return state;
+}
+
+void GameData::restoreRuntimeState(const RuntimeState& state) {
+	if (
+		state.trackedCurrentValues.size() != m_trackedVariables.size() ||
+		state.trackedLastValues.size() != m_trackedVariables.size()) {
+		throw std::invalid_argument("game-data runtime state does not match tracked variables");
+	}
+	m_trackedCurrentValues = state.trackedCurrentValues;
+	m_trackedLastValues = state.trackedLastValues;
+	m_trackedHasLastValues = state.trackedHasLastValues;
+	m_customVars.clear();
+	for (const auto& item : state.customValues) {
+		m_customVars.emplace(item.first, std::make_unique<Variant>(item.second));
+	}
+}
+
 void GameData::search(const std::string& name, int64_t value) {
 	if (m_searches.find(name) == m_searches.cend()) {
 		if (m_types.size()) {
@@ -956,6 +982,24 @@ uint64_t Scenario::frame() const {
 
 uint64_t Scenario::timestep() const {
 	return m_frame / 4;
+}
+
+Scenario::RuntimeState Scenario::captureRuntimeState() const {
+	RuntimeState state;
+	std::copy(std::begin(m_reward), std::end(m_reward), state.reward.begin());
+	std::copy(std::begin(m_totalReward), std::end(m_totalReward), state.totalReward.begin());
+	state.done = m_done;
+	std::copy(std::begin(m_crops), std::end(m_crops), state.crops.begin());
+	state.frame = m_frame;
+	return state;
+}
+
+void Scenario::restoreRuntimeState(const RuntimeState& state) {
+	std::copy(state.reward.begin(), state.reward.end(), std::begin(m_reward));
+	std::copy(state.totalReward.begin(), state.totalReward.end(), std::begin(m_totalReward));
+	m_done = state.done;
+	std::copy(state.crops.begin(), state.crops.end(), std::begin(m_crops));
+	m_frame = state.frame;
 }
 
 void Scenario::setCrop(size_t x, size_t y, size_t width, size_t height, unsigned player) {

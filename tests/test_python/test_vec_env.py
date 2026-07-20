@@ -2,6 +2,7 @@ import gzip
 import hashlib
 import inspect
 import os
+import pickle
 import subprocess
 import sys
 from pathlib import Path
@@ -2645,6 +2646,129 @@ def test_retro_vec_env_masked_reset_preserves_unselected_lane_trajectory():
     finally:
         env.close()
         control.close()
+
+
+def test_retro_vec_env_live_snapshots_support_fanout_and_exact_replay(tmp_path):
+    env = _make_test_retro_vec_env(
+        tmp_path,
+        num_envs=4,
+        sticky_action_prob=0.5,
+        obs_copy="safe_view",
+        render_mode="rgb_array",
+    )
+    capture_mask = np.array([True, False, False, False], dtype=np.bool_)
+    try:
+        assert env.supports_live_snapshots is True
+        with pytest.raises(RuntimeError, match="initial reset"):
+            env.capture_snapshots(capture_mask)
+
+        env.reset(seed=17)
+        actions = np.zeros((4, env.num_buttons), dtype=np.uint8)
+        actions[0, 0] = 1
+        env.step(actions)
+        handles = env.capture_snapshots(capture_mask)
+        assert handles[0] is not None
+        assert handles[0].nbytes > 0
+        assert handles[1:] == (None, None, None)
+        with pytest.raises(TypeError, match="cannot be pickled"):
+            pickle.dumps(handles[0])
+
+        env.step(np.ones_like(actions))
+        unselected_before = env._observations[3].copy()
+        reset_mask = np.array([True, True, True, False], dtype=np.bool_)
+        snapshot_reset_mask = np.array([True, False, True, False], dtype=np.bool_)
+        starts = np.full(4, -1, dtype=np.int32)
+        reset_obs, infos = env.reset(
+            options={
+                "reset_mask": reset_mask,
+                "state_indices": starts,
+                "snapshots": [handles[0], None, handles[0], None],
+            }
+        )
+        np.testing.assert_array_equal(reset_obs[0], reset_obs[2])
+        np.testing.assert_array_equal(reset_obs[3], unselected_before)
+        np.testing.assert_array_equal(
+            env.native.get_screen(0),
+            env.native.get_screen(2),
+        )
+        assert infos["start_source"].tolist() == [
+            "snapshot",
+            "environment",
+            "snapshot",
+            "environment",
+        ]
+        np.testing.assert_array_equal(infos["_start_source"], reset_mask)
+
+        replay_actions = np.zeros_like(actions)
+        replay_actions[0, 1] = 1
+        replay_actions[2, 1] = 1
+        first = env.step(replay_actions)
+        np.testing.assert_array_equal(first[0][0], first[0][2])
+        assert first[1][0] == first[1][2]
+        assert first[2][0] == first[2][2]
+
+        env.reset(
+            options={
+                "reset_mask": reset_mask,
+                "state_indices": starts,
+                "snapshots": [handles[0], None, handles[0], None],
+            }
+        )
+        second = env.step(replay_actions)
+        for first_value, second_value in zip(first[:4], second[:4], strict=True):
+            np.testing.assert_array_equal(
+                np.asarray(first_value)[snapshot_reset_mask],
+                np.asarray(second_value)[snapshot_reset_mask],
+            )
+    finally:
+        env.close()
+
+
+def test_retro_vec_env_live_snapshot_owner_and_conflicts_are_atomic(tmp_path):
+    env = _make_test_retro_vec_env(tmp_path, num_envs=2)
+    other = _make_test_retro_vec_env(tmp_path, num_envs=2)
+    mask = np.array([True, False], dtype=np.bool_)
+    try:
+        env.reset()
+        other.reset()
+        handles = env.capture_snapshots(mask)
+        before = env._observations.copy()
+        with pytest.raises(ValueError, match="static state selector"):
+            env.reset(
+                options={
+                    "reset_mask": mask,
+                    "state_indices": np.array([0, -1], dtype=np.int32),
+                    "snapshots": handles,
+                }
+            )
+        np.testing.assert_array_equal(env._observations, before)
+
+        other_before = other._observations.copy()
+        with pytest.raises(ValueError, match="different environment"):
+            other.reset(
+                options={
+                    "reset_mask": mask,
+                    "state_indices": np.full(2, -1, dtype=np.int32),
+                    "snapshots": handles,
+                }
+            )
+        np.testing.assert_array_equal(other._observations, other_before)
+
+        with pytest.raises(ValueError, match="seed"):
+            env.reset(
+                seed=[1, None],
+                options={
+                    "reset_mask": mask,
+                    "state_indices": np.full(2, -1, dtype=np.int32),
+                    "snapshots": handles,
+                },
+            )
+    finally:
+        env.close()
+        other.close()
+
+    with pytest.raises(RuntimeError, match="closed environment"):
+        env.capture_snapshots(mask)
 
 
 def test_retro_vec_env_explicit_state_indices_and_validation_are_atomic():

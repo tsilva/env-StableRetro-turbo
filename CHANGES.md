@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+* add reusable, per-lane live snapshot handles through
+  `capture_snapshots(mask)` and mixed snapshot/catalog restoration through
+  masked `reset()`, including exact cross-lane fan-out without advancing
+  emulation
+  * expose capability discovery and reject scripted scenarios or cores that
+    cannot preserve exact state
 * restore scalar `RetroEnv` to the upstream Stable Retro API and behavior
 * make native `RetroVecEnv` permanently use disabled/manual autoreset
   * retain terminal observations until an explicit masked reset

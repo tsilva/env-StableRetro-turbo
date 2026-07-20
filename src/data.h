@@ -4,6 +4,7 @@
 #include "memory.h"
 #include "search.h"
 
+#include <array>
 #include <map>
 #include <memory>
 #include <set>
@@ -18,6 +19,13 @@ namespace Retro {
 
 class GameData {
 public:
+	struct RuntimeState {
+		std::vector<int64_t> trackedCurrentValues;
+		std::vector<int64_t> trackedLastValues;
+		bool trackedHasLastValues = false;
+		std::unordered_map<std::string, Variant> customValues;
+	};
+
 	bool load(const std::string& filename);
 	bool load(std::istream* stream);
 
@@ -65,6 +73,8 @@ public:
 	int64_t lookupTrackedValue(size_t index) const;
 	int64_t lookupTrackedDelta(size_t index) const;
 	size_t numVariables() const;
+	RuntimeState captureRuntimeState() const;
+	void restoreRuntimeState(const RuntimeState& state);
 
 	void search(const std::string& name, int64_t value);
 	void deltaSearch(const std::string& name, Operation op, int64_t reference);
@@ -100,6 +110,8 @@ private:
 
 class Scenario {
 public:
+	struct RuntimeState;
+
 	Scenario(GameData& data);
 
 	bool load(const std::string& filename);
@@ -124,6 +136,8 @@ public:
 	bool isDone() const;
 	uint64_t frame() const;
 	uint64_t timestep() const;
+	RuntimeState captureRuntimeState() const;
+	void restoreRuntimeState(const RuntimeState& state);
 
 	void setCrop(size_t x, size_t y, size_t width, size_t height, unsigned player = 0);
 	void getCrop(size_t* x, size_t* y, size_t* width, size_t* height, unsigned player = 0) const;
@@ -198,6 +212,14 @@ public:
 		bool operator!=(const CropInfo& other) const {
 			return !(*this == other);
 		}
+	};
+
+	struct RuntimeState {
+		std::array<float, MAX_PLAYERS> reward{};
+		std::array<float, MAX_PLAYERS> totalReward{};
+		bool done = false;
+		std::array<CropInfo, MAX_PLAYERS> crops{};
+		uint64_t frame = 0;
 	};
 
 	void setRewardVariable(const std::string& name, const RewardSpec&, unsigned player = 0);
