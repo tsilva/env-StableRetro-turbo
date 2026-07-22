@@ -7,6 +7,8 @@ import re
 import sys
 from collections.abc import Iterable
 
+import numpy as np
+
 import stable_retro as retro
 
 
@@ -41,9 +43,45 @@ PLATFORM_ALIASES = {
     "snes": "Snes",
 }
 
+_ATARI_DIFFICULTY_INPUTS = {
+    "A": (10, 11),  # Retropad L and R: both console difficulty switches to A.
+    "B": (12, 13),  # Retropad L2 and R2: both switches to B.
+}
+
 
 def _normalized(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", value.lower())
+
+
+def _parse_state(value: str):
+    """Accept save-state names plus friendly spellings of special states."""
+    normalized = value.strip().lower()
+    if normalized == "default":
+        return retro.State.DEFAULT
+    if normalized in {"none", "poweron", "power-on"}:
+        return retro.State.NONE
+    return value
+
+
+def _parse_startup_press(value: str) -> tuple[str, int]:
+    """Parse ``BUTTON`` or ``BUTTON:COUNT`` for repeatable startup inputs."""
+    raw_name, separator, raw_count = value.rpartition(":")
+    if separator:
+        name = raw_name.strip()
+        try:
+            count = int(raw_count)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                f"startup button count must be an integer: {value!r}"
+            ) from error
+    else:
+        name = value.strip()
+        count = 1
+    if not name:
+        raise argparse.ArgumentTypeError("startup button name must not be empty")
+    if count <= 0:
+        raise argparse.ArgumentTypeError("startup button count must be positive")
+    return name.upper(), count
 
 
 def _platform_for_game(game: str) -> str | None:
@@ -122,17 +160,104 @@ def resolve_target(target: str) -> list[tuple[str, str]]:
     )
 
 
-def run_game(game: str, state: str, *, show_obs: bool = False) -> None:
+def _button_index(env, requested: str) -> int:
+    normalized = requested.upper()
+    for index, button in enumerate(env.buttons):
+        if button is not None and str(button).upper() == normalized:
+            return index
+    available = ", ".join(str(button) for button in env.buttons if button is not None)
+    raise ValueError(
+        f"button {requested!r} is unavailable for {env.gamename}; "
+        f"available buttons: {available}"
+    )
+
+
+def _pulse_button(env, requested: str, count: int = 1):
+    """Press and release one integration-owned button ``count`` times."""
+    index = _button_index(env, requested)
+    noop = np.zeros(env.num_buttons, dtype=np.int8)
+    pressed = noop.copy()
+    pressed[index] = 1
+    observation = None
+    for _ in range(count):
+        env.step(pressed)
+        observation = env.step(noop)[0]
+    return observation
+
+
+def _set_atari_difficulty(env, difficulty: str) -> None:
+    """Set both Stella difficulty switches through standard Retropad inputs."""
+    pressed = np.zeros(16, dtype=np.uint8)
+    pressed[list(_ATARI_DIFFICULTY_INPUTS[difficulty])] = 1
+    env.em.set_button_mask(pressed, 0)
+    env.em.step()
+    env.em.set_button_mask(np.zeros(16, dtype=np.uint8), 0)
+    env.em.step()
+
+
+def _apply_startup_configuration(
+    env,
+    *,
+    platform: str,
+    mode: int | None,
+    difficulty: str | None,
+    startup_presses: tuple[tuple[str, int], ...],
+):
+    """Apply requested console configuration and return the latest observation."""
+    observation = None
+    if mode is not None or difficulty is not None:
+        if platform != "Atari2600":
+            raise ValueError(
+                "--mode and --difficulty are only supported for Atari2600 games"
+            )
+        if mode is not None:
+            observation = _pulse_button(env, "SELECT", mode)
+        if difficulty is not None:
+            _set_atari_difficulty(env, difficulty)
+        observation = _pulse_button(env, "RESET")
+
+    for button, count in startup_presses:
+        observation = _pulse_button(env, button, count)
+    return observation
+
+
+def run_game(
+    game: str,
+    state,
+    *,
+    show_obs: bool = False,
+    mode: int | None = None,
+    difficulty: str | None = None,
+    startup_presses: tuple[tuple[str, int], ...] = (),
+) -> None:
     """Open the repository's interactive player for a single game."""
     from stable_retro.examples.interactive import RetroInteractive
 
-    RetroInteractive(
+    player = RetroInteractive(
         game=game,
         state=state,
         scenario=None,
         record=False,
         show_obs=show_obs,
-    ).run()
+        use_restricted_actions=retro.Actions.ALL,
+    )
+    observation = None
+    if mode is not None or difficulty is not None or startup_presses:
+        observation = _apply_startup_configuration(
+            player._env,
+            platform=_platform_for_game(game) or "unknown platform",
+            mode=mode,
+            difficulty=difficulty,
+            startup_presses=startup_presses,
+        )
+    if observation is not None:
+        player._observation = observation
+        player._image = player.get_image(observation, player._env)
+        if player._observation_window is not None:
+            player._observation_window.set_image(
+                player.get_observation_image(observation, reset=True)
+            )
+    player.run()
 
 
 def _print_runnable_platforms() -> None:
@@ -153,7 +278,12 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         help="platform alias, full game ID, or all",
     )
-    play.add_argument("--state", default=retro.State.DEFAULT, help="optional save-state name")
+    play.add_argument(
+        "--state",
+        default=retro.State.DEFAULT,
+        type=_parse_state,
+        help="save-state name, 'default', or 'none' for the power-on state",
+    )
     play.add_argument(
         "--list",
         action="store_true",
@@ -163,6 +293,26 @@ def build_parser() -> argparse.ArgumentParser:
         "--show-obs",
         action="store_true",
         help="also show the PPO-style preprocessed observation in a second window",
+    )
+    play.add_argument(
+        "--press",
+        action="append",
+        default=[],
+        type=_parse_startup_press,
+        metavar="BUTTON[:COUNT]",
+        help="press and release a game button before play; may be repeated",
+    )
+    play.add_argument(
+        "--mode",
+        type=int,
+        metavar="N",
+        help="Atari mode value: press SELECT N times, then RESET",
+    )
+    play.add_argument(
+        "--difficulty",
+        type=str.upper,
+        choices=("A", "B"),
+        help="set both Atari difficulty switches before RESET",
     )
     return parser
 
@@ -180,6 +330,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if not args.target:
         parser.error("play requires a platform, game ID, or all")
+    if args.mode is not None and args.mode < 0:
+        parser.error("--mode must be non-negative")
 
     try:
         targets = resolve_target(args.target)
@@ -189,7 +341,14 @@ def main(argv: list[str] | None = None) -> int:
     for platform, game in targets:
         print(f"Launching {platform}: {game}", flush=True)
         try:
-            run_game(game, args.state, show_obs=args.show_obs)
+            run_game(
+                game,
+                args.state,
+                show_obs=args.show_obs,
+                mode=args.mode,
+                difficulty=args.difficulty,
+                startup_presses=tuple(args.press),
+            )
         except (FileNotFoundError, KeyError, ValueError) as error:
             if len(targets) == 1:
                 parser.error(str(error))

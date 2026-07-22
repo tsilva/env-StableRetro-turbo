@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import numpy as np
+import pytest
+
 import stable_retro.cli as cli
 import stable_retro.examples.interactive as interactive_module
 from stable_retro.examples.interactive import RetroInteractive
@@ -110,6 +113,13 @@ def test_interactive_sms_pause_button_maps_to_enter():
     ]
 
 
+def test_interactive_unknown_buttons_remain_released():
+    interactive = object.__new__(RetroInteractive)
+    interactive._buttons = ["A", "UNMAPPED"]
+
+    assert interactive.keys_to_act({"Z"}) == [True, False]
+
+
 def test_interactive_window_dimensions_preserve_display_aspect_ratio():
     width, height = interactive_module._window_dimensions(
         image_width=256,
@@ -203,6 +213,34 @@ def test_retro_interactive_show_obs_uses_ppo_preprocessing(monkeypatch):
     assert interactive_kwargs["reset_action"] is None
 
 
+def test_retro_interactive_forwards_requested_action_mode(monkeypatch):
+    env_kwargs = {}
+
+    class Env:
+        buttons = ["A"]
+
+    monkeypatch.setattr(
+        interactive_module.retro,
+        "make",
+        lambda **kwargs: env_kwargs.update(kwargs) or Env(),
+    )
+    monkeypatch.setattr(
+        interactive_module.Interactive,
+        "__init__",
+        lambda *_args, **_kwargs: None,
+    )
+
+    RetroInteractive(
+        game="Game-Nes-v0",
+        state="Start",
+        scenario=None,
+        record=False,
+        use_restricted_actions=interactive_module.retro.Actions.ALL,
+    )
+
+    assert env_kwargs["use_restricted_actions"] is interactive_module.retro.Actions.ALL
+
+
 def test_retro_interactive_does_not_fire_after_atari_reset(monkeypatch):
     interactive_kwargs = {}
 
@@ -294,6 +332,7 @@ def test_cli_player_does_not_record_movies(monkeypatch):
             "scenario": None,
             "record": False,
             "show_obs": False,
+            "use_restricted_actions": cli.retro.Actions.ALL,
         },
         "run",
     ]
@@ -306,7 +345,133 @@ def test_cli_show_obs_passes_preprocessed_view_to_player(monkeypatch):
     monkeypatch.setattr(cli, "run_game", lambda *args, **kwargs: calls.append((args, kwargs)))
 
     assert cli.main(["play", "nes", "--show-obs"]) == 0
-    assert calls == [(("Game-Nes-v0", cli.retro.State.DEFAULT), {"show_obs": True})]
+    assert calls == [
+        (
+            ("Game-Nes-v0", cli.retro.State.DEFAULT),
+            {
+                "show_obs": True,
+                "mode": None,
+                "difficulty": None,
+                "startup_presses": (),
+            },
+        )
+    ]
+
+
+def test_cli_forwards_generic_and_atari_startup_flags(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        cli,
+        "resolve_target",
+        lambda _target: [("Atari2600", "Breakout-Atari2600-v0")],
+    )
+    monkeypatch.setattr(
+        cli, "run_game", lambda *args, **kwargs: calls.append((args, kwargs))
+    )
+
+    assert (
+        cli.main(
+            [
+                "play",
+                "Breakout-Atari2600-v0",
+                "--state",
+                "none",
+                "--mode",
+                "32",
+                "--difficulty",
+                "a",
+                "--press",
+                "BUTTON:2",
+            ]
+        )
+        == 0
+    )
+    assert calls == [
+        (
+            ("Breakout-Atari2600-v0", cli.retro.State.NONE),
+            {
+                "show_obs": False,
+                "mode": 32,
+                "difficulty": "A",
+                "startup_presses": (("BUTTON", 2),),
+            },
+        )
+    ]
+
+
+@pytest.mark.parametrize("value", ["BUTTON:0", "BUTTON:-1", ":2", "BUTTON:nope"])
+def test_cli_rejects_invalid_startup_press(value):
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["play", "Game-Nes-v0", "--press", value])
+
+
+def test_startup_configuration_applies_mode_difficulty_reset_and_presses():
+    class Emulator:
+        def __init__(self, calls):
+            self.calls = calls
+
+        def set_button_mask(self, mask, player):
+            self.calls.append(("raw", tuple(np.flatnonzero(mask)), player))
+
+        def step(self):
+            self.calls.append(("raw-step",))
+
+    class Env:
+        gamename = "Breakout-Atari2600-v0"
+        buttons = [
+            "BUTTON",
+            None,
+            "SELECT",
+            "RESET",
+            "UP",
+            "DOWN",
+            "LEFT",
+            "RIGHT",
+        ]
+        num_buttons = len(buttons)
+
+        def __init__(self):
+            self.calls = []
+            self.em = Emulator(self.calls)
+
+        def step(self, action):
+            self.calls.append(("step", tuple(np.flatnonzero(action))))
+            return f"observation-{len(self.calls)}", 0, False, False, {}
+
+    env = Env()
+    observation = cli._apply_startup_configuration(
+        env,
+        platform="Atari2600",
+        mode=4,
+        difficulty="A",
+        startup_presses=(("BUTTON", 2),),
+    )
+
+    assert [call for call in env.calls if call == ("step", (2,))] == [
+        ("step", (2,))
+    ] * 4
+    assert ("raw", (10, 11), 0) in env.calls
+    assert ("step", (3,)) in env.calls
+    assert [call for call in env.calls if call == ("step", (0,))] == [
+        ("step", (0,)),
+        ("step", (0,)),
+    ]
+    assert observation.startswith("observation-")
+
+
+def test_atari_flags_reject_non_atari_games():
+    class Env:
+        pass
+
+    with pytest.raises(ValueError, match="only supported for Atari2600"):
+        cli._apply_startup_configuration(
+            Env(),
+            platform="Nes",
+            mode=1,
+            difficulty=None,
+            startup_presses=(),
+        )
 
 
 def test_observation_view_tiles_frame_stacked_grayscale_pixels():

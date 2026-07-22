@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-* Nothing yet.
+* let the interactive CLI launch any imported game ID with repeatable startup
+  button presses, friendly power-on state selection, and Atari mode/difficulty
+  configuration
+* use the full controller action set in the interactive CLI so mapped console
+  controls such as SELECT and RESET reach the emulator
 
 ## 1.0.1.post34 - 2026-07-20
 

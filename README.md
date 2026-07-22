@@ -26,9 +26,18 @@ Check the games available on your machine, then open one in the interactive play
 ```bash
 stable-retro-turbo play --list
 stable-retro-turbo play nes
+stable-retro-turbo play SuperMarioBros-Nes-v0 --press START
+stable-retro-turbo play Breakout-Atari2600-v0 --mode 32 --difficulty A
 ```
 
 Pass a full game ID such as `SuperMarioBros-Nes-v0`, or use `all` to open one imported game per platform. Add `--show-obs` to display the raw game beside its PPO-style preprocessed observation.
+
+`--press BUTTON[:COUNT]` applies repeatable startup inputs using the selected
+game's own button names. Atari games additionally accept `--mode N`, which
+pulses the console SELECT switch `N` times before RESET, and `--difficulty A`
+or `--difficulty B`, which sets both console difficulty switches. For example,
+Breakout mode values `0`, `4`, `8`, …, `44` select its twelve one-player
+cartridge variants. Use `--state none` to launch a game from its power-on state.
 
 ## Use
 

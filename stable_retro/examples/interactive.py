@@ -416,7 +416,15 @@ class RetroInteractive(Interactive):
     Interactive setup for retro games
     """
 
-    def __init__(self, game, state, scenario, record, show_obs=False):
+    def __init__(
+        self,
+        game,
+        state,
+        scenario,
+        record,
+        show_obs=False,
+        use_restricted_actions=retro.Actions.FILTERED,
+    ):
         self._observation_sample_interval = 4
         self._observation_frame_stack = 4
         self._observation_sample_steps = 0
@@ -434,6 +442,7 @@ class RetroInteractive(Interactive):
             state=state,
             scenario=scenario,
             record=record,
+            use_restricted_actions=use_restricted_actions,
             render_mode="rgb_array",
             **env_kwargs,
         )
@@ -482,13 +491,31 @@ class RetroInteractive(Interactive):
             "DOWN": "DOWN" in keys,
             "LEFT": "LEFT" in keys,
             "RIGHT": "RIGHT" in keys,
+            "DPAD_UP": "UP" in keys,
+            "DPAD_DOWN": "DOWN" in keys,
+            "DPAD_LEFT": "LEFT" in keys,
+            "DPAD_RIGHT": "RIGHT" in keys,
             "MODE": "TAB" in keys,
             "SELECT": "TAB" in keys,
             "PAUSE": "ENTER" in keys,
             "RESET": "ENTER" in keys,
             "START": "ENTER" in keys,
+            "RUN": "ENTER" in keys,
+            "I": "Z" in keys,
+            "II": "X" in keys,
+            "III": "C" in keys,
+            "IV": "A" in keys,
+            "V": "S" in keys,
+            "VI": "D" in keys,
+            "C-RIGHT": "C" in keys,
+            "C-UP": "D" in keys,
+            "C-MODE": "TAB" in keys,
+            "L2": "E" in keys,
+            "R2": "R" in keys,
+            "L3": "F" in keys,
+            "R3": "G" in keys,
         }
-        return [inputs[b] for b in self._buttons]
+        return [inputs.get(b, False) for b in self._buttons]
 
 
 def main():
