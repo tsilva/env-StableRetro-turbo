@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Nothing yet.
+
+## 1.0.1.post35 - 2026-07-22
+
 * let the interactive CLI launch any imported game ID with repeatable startup
   button presses, friendly power-on state selection, and Atari mode/difficulty
   configuration
