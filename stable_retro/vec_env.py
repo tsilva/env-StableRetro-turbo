@@ -6,6 +6,7 @@ import hashlib
 import math
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from types import MappingProxyType
 from typing import Literal
 
 import numpy as np
@@ -156,7 +157,11 @@ class RetroVecEnv(VectorEnv):
     obs_copy="unsafe_view" restores single-buffer aliasing for benchmarks only.
     """
 
-    metadata = {"autoreset_mode": AutoresetMode.DISABLED}
+    metadata = {
+        "autoreset_mode": AutoresetMode.DISABLED,
+        "render_modes": ["rgb_array"],
+        "turbo_api_version": 1,
+    }
 
     def __init__(
         self,
@@ -251,8 +256,25 @@ class RetroVecEnv(VectorEnv):
             if unsafe_view
             else "copy" if copy_obs else "safe_view"
         )
+        self.observation_ownership = (
+            "owned"
+            if self.obs_copy == "copy"
+            else "unsafe_view" if self.obs_copy == "unsafe_view" else "safe_view"
+        )
+        self.observation_buffer_depth = (
+            None
+            if self.obs_copy == "copy"
+            else 1 if self.obs_copy == "unsafe_view" else 2
+        )
         self._copy_obs = copy_obs
         self._unsafe_view = unsafe_view
+        self.frame_skip = frame_skip
+        self.frame_stack = frame_stack
+        self.obs_resize_algorithm = obs_resize_algorithm
+        self.obs_grayscale = bool(obs_grayscale)
+        self.maxpool_last_two = bool(maxpool_last_two)
+        self.noop_reset_max = noop_reset_max
+        self.sticky_action_prob = sticky_action_prob
         self.render_mode = render_mode
         self.viewer = None
         if players != 1:
@@ -326,6 +348,9 @@ class RetroVecEnv(VectorEnv):
             self.use_restricted_actions = template.use_restricted_actions
             self._filter_actions = self.action_mode == "filtered"
             reward_clip, reward_low, reward_high = self._reward_clip_config(reward_clip)
+            template_signal_names = tuple(
+                str(name) for name in template.data.list_variables()
+            )
         finally:
             template.close()
 
@@ -365,6 +390,8 @@ class RetroVecEnv(VectorEnv):
         self.scenario_path = str(scenario_path)
         if num_threads is None:
             num_threads = num_envs
+        self.num_threads = int(num_threads)
+        self.reward_clip = bool(reward_clip)
         self.native = _retro._RetroVecEnv(
             num_envs,
             str(resolved_rom_path),
@@ -410,6 +437,54 @@ class RetroVecEnv(VectorEnv):
         self._active_state_indices = self.native.active_state_indices()
         self._active_state_indices.setflags(write=False)
         self.supports_live_snapshots = bool(self.native.supports_live_snapshots)
+        self.live_snapshots_deterministic = self.supports_live_snapshots
+        selected_signal_names = (
+            template_signal_names
+            if info_filter_keys is None
+            else tuple(
+                name for name in info_filter_keys if name in template_signal_names
+            )
+        )
+        self.signal_schema = MappingProxyType(
+            {
+                name: MappingProxyType(
+                    {
+                        "dtype": np.dtype(np.int64),
+                        "shape": (),
+                        "available_on_reset": info_filter_mode == "all",
+                        "available_on_step": info_filter_mode != "none",
+                    }
+                )
+                for name in selected_signal_names
+            }
+            if info_filter_mode != "none"
+            else {}
+        )
+        self.capabilities = MappingProxyType(
+            {
+                "supported_action_modes": (
+                    "all",
+                    "filtered",
+                    "discrete",
+                    "multi_discrete",
+                    "custom_discrete",
+                ),
+                "supported_observation_layouts": ("chw", "hwc"),
+                "supported_resize_algorithms": ("nearest", "bilinear", "area"),
+                "supported_observation_copy_modes": (
+                    "copy",
+                    "safe_view",
+                    "unsafe_view",
+                ),
+                "supports_maxpool_last_two": True,
+                "supports_sticky_action_prob": True,
+                "supports_reward_clipping": True,
+                "supports_noop_reset": True,
+                "supports_state_catalog": True,
+                "supports_live_snapshots": self.supports_live_snapshots,
+                "supports_per_lane_rgb": True,
+            }
+        )
         self._initialized = np.zeros(self.num_envs, dtype=np.bool_)
 
     @staticmethod
@@ -982,6 +1057,8 @@ class RetroVecEnv(VectorEnv):
             if getattr(self, "_info_filter_mode", "all") == "none"
             else self._list_infos_to_dict(infos)
         )
+        for legacy_key in ("state", "_state", "start_state", "_start_state"):
+            vector_infos.pop(legacy_key, None)
         vector_infos["state_index"] = np.array(
             self._active_state_indices,
             dtype=np.int32,
@@ -1041,13 +1118,30 @@ class RetroVecEnv(VectorEnv):
             self.viewer = None
         self.closed = True
 
+    def render_lane(self, lane: int):
+        if self.closed:
+            raise RuntimeError("cannot render a closed environment")
+        if isinstance(lane, (bool, np.bool_)):
+            raise TypeError("lane must be an integer")
+        try:
+            lane_index = int(lane)
+        except (TypeError, ValueError):
+            raise TypeError("lane must be an integer") from None
+        if lane_index != lane:
+            raise TypeError("lane must be an integer")
+        if not 0 <= lane_index < self.num_envs:
+            raise IndexError(f"lane must be in [0, {self.num_envs - 1}]")
+        return np.asarray(self.native.get_screen(lane_index)).copy()
+
     def get_images(self):
-        return []
+        if self.render_mode != "rgb_array":
+            return [None for _ in range(self.num_envs)]
+        return [self.render_lane(lane) for lane in range(self.num_envs)]
 
     def render(self, mode: str | None = None):
         mode = self.render_mode if mode is None else mode
         if mode == "rgb_array":
-            return self.native.get_screen(0)
+            return self.render_lane(0)
         if mode == "human":
             from stable_retro.rendering import SimpleImageViewer
 

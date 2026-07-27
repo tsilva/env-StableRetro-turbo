@@ -92,6 +92,8 @@ def test_retro_vec_env_public_export():
 
     assert issubclass(retro.RetroVecEnv, gym.vector.VectorEnv)
     assert retro.RetroVecEnv.metadata["autoreset_mode"] is AutoresetMode.DISABLED
+    assert retro.RetroVecEnv.metadata["turbo_api_version"] == 1
+    assert retro.RetroVecEnv.metadata["render_modes"] == ["rgb_array"]
     assert "RetroVectorEnv" not in retro.__all__
     assert not hasattr(retro, "RetroVectorEnv")
 
@@ -385,6 +387,7 @@ def test_retro_vec_env_gymnasium_contract(tmp_path):
         obs, infos = env.reset(seed=123)
         assert obs.shape == env.observation_space.shape
         assert isinstance(infos, dict)
+        assert not {"state", "start_state"} & set(infos)
         assert env.metadata["autoreset_mode"] is AutoresetMode.DISABLED
         assert env.num_envs == 2
         assert env.action_space.shape == (2, *env.single_action_space.shape)
@@ -402,6 +405,34 @@ def test_retro_vec_env_gymnasium_contract(tmp_path):
         assert terminations.shape == (env.num_envs,)
         assert truncations.shape == (env.num_envs,)
         assert isinstance(infos, dict)
+    finally:
+        env.close()
+
+
+def test_retro_vec_env_turbo_api_v1_capabilities_ownership_and_rendering(tmp_path):
+    env = _make_test_retro_vec_env(
+        tmp_path,
+        obs_copy="safe_view",
+        render_mode="rgb_array",
+    )
+    try:
+        env.reset(seed=41)
+        assert env.observation_ownership == "safe_view"
+        assert env.observation_buffer_depth == 2
+        assert env.live_snapshots_deterministic is env.supports_live_snapshots
+        assert env.capabilities["supported_action_modes"] == (
+            "all",
+            "filtered",
+            "discrete",
+            "multi_discrete",
+            "custom_discrete",
+        )
+        assert tuple(env.signal_schema) == ()
+        images = env.get_images()
+        assert len(images) == env.num_envs
+        assert all(image is not None and image.dtype == np.uint8 for image in images)
+        np.testing.assert_array_equal(env.render_lane(1), images[1])
+        np.testing.assert_array_equal(env.render(), images[0])
     finally:
         env.close()
 
@@ -782,7 +813,7 @@ def test_retro_vec_env_explicit_state_indices_and_per_lane_seeds():
         )
         assert env.active_state_indices()[0] == 1
         np.testing.assert_array_equal(reset_obs[1], lane_one_before)
-        assert _single_info(reset_infos, 0)["start_state"] == "Level1-4"
+        assert _single_info(reset_infos, 0)["state_index"] == 1
         assert _single_info(reset_infos, 1) == {}
 
         default_obs, _ = env.reset(
@@ -1258,8 +1289,7 @@ def test_retro_vec_env_mixed_states_reset_infos_if_rom_present():
             np.arange(len(states), dtype=np.int32),
         )
         assert env.state_catalog == tuple(states)
-        assert [info["start_state"] for info in reset_infos] == states
-        assert [info["state"] for info in reset_infos] == states
+        assert [info["state_index"] for info in reset_infos] == [0, 1, 2]
 
         _, reset_infos = env.reset()
         reset_infos = _infos_to_list(reset_infos, env.num_envs)
@@ -1267,7 +1297,7 @@ def test_retro_vec_env_mixed_states_reset_infos_if_rom_present():
             env.active_state_indices(),
             np.zeros(len(states), dtype=np.int32),
         )
-        assert [info["start_state"] for info in reset_infos] == [states[0]] * len(states)
+        assert [info["state_index"] for info in reset_infos] == [0] * len(states)
     finally:
         env.close()
 
@@ -1319,8 +1349,8 @@ def test_retro_vec_env_catalog_selection_is_explicit_if_rom_present():
             _, reset_infos = env.reset(options={"state_indices": requested})
             reset_infos = _infos_to_list(reset_infos, env.num_envs)
             np.testing.assert_array_equal(indices, requested)
-            reset_states = [info["start_state"] for info in reset_infos]
-            assert reset_states == [states[selected]] * env.num_envs
+            reset_indices = [info["state_index"] for info in reset_infos]
+            assert reset_indices == [selected] * env.num_envs
     finally:
         env.close()
 
@@ -2634,7 +2664,7 @@ def test_retro_vec_env_masked_reset_preserves_unselected_lane_trajectory():
             options={"reset_mask": mask},
         )
         np.testing.assert_array_equal(reset_obs[~mask], before[~mask])
-        for key in ("x_pos", "state", "start_state"):
+        for key in ("x_pos", "state_index", "start_source"):
             if key in reset_infos:
                 assert np.asarray(reset_infos[f"_{key}"])[~mask].tolist() == [False, False]
 
@@ -2789,8 +2819,8 @@ def test_retro_vec_env_explicit_state_indices_and_validation_are_atomic():
         starts = np.array([1, 999, 0], dtype=np.int32)
         _, infos = env.reset(options={"reset_mask": mask, "state_indices": starts})
         np.testing.assert_array_equal(env.active_state_indices(), [1, before_states[1], 0])
-        assert _single_info(infos, 0)["start_state"] == "Level1-4"
-        assert _single_info(infos, 2)["start_state"] == "Level1-1"
+        assert _single_info(infos, 0)["state_index"] == 1
+        assert _single_info(infos, 2)["state_index"] == 0
 
         snapshot = env._observations.copy()
         active = env.active_state_indices().copy()

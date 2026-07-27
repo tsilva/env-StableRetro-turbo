@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-* Nothing yet.
+* add the immutable Turbo Vector API v1 declaration for capabilities, signals,
+  action semantics, observation ownership, state catalogs, and per-lane RGB
+  rendering
+* make `render_lane()` return one raw lane, `get_images()` return every lane,
+  and `render()` return lane zero
 
 ## 1.0.1.post35 - 2026-07-22
 
