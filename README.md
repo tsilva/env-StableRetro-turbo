@@ -75,6 +75,25 @@ if done.any():
 
 `RetroVecEnv` uses Gymnasium's disabled-autoreset semantics. A finished lane keeps its terminal observation and cannot be stepped again until it is selected by a masked reset; unselected lanes keep their emulator state, RNG stream, frame stack, and sticky-action history.
 
+## Turbo Vector API v1
+
+`RetroVecEnv` implements the strict Turbo Vector API v1:
+
+- `metadata["turbo_api_version"]` is `1`, and `metadata["render_modes"]`
+  advertises `rgb_array`.
+- Immutable `capabilities` and `signal_schema` declarations describe supported
+  features and the dtype, shape, and reset/step availability of every signal.
+- `buttons`, `action_mode`, `action_preset`, `action_table`,
+  `action_meanings`, and `action_table_hash` expose the resolved action
+  semantics without provider-specific probing.
+- `state_catalog` is an immutable ordered tuple. Callers select reset states
+  with an `int32` `state_indices` array and inspect the read-only active indices
+  with `active_state_indices()`; state sampling and lane routing remain
+  caller-owned.
+- `observation_ownership` and `observation_buffer_depth` declare the exact
+  lifetime of returned observations. `render_lane(index)` renders one lane,
+  `get_images()` renders all lanes, and `render()` renders lane zero.
+
 When `env.supports_live_snapshots` is true, live positions can be captured
 without advancing emulation and restored into any lane of the same environment:
 
@@ -102,7 +121,7 @@ capability as unavailable.
 The fast path also supports:
 
 - native crop, mask, resize, grayscale, layout conversion, frame skip, frame stack, and two-frame max-pooling;
-- fixed, per-lane, or weighted saved-state selection for curricula and task-conditioned training;
+- ordered saved-state catalogs with explicit per-lane `state_indices`; state sampling and curriculum routing stay with the caller;
 - copy-safe, safe-view, and benchmark-only unsafe-view observation ownership;
 - sticky actions, random no-op starts, reward clipping, and native info filtering;
 - Atari through the packaged Stella core, using the same `RetroEnv` and `RetroVecEnv` APIs.
@@ -135,7 +154,7 @@ Benchmark definitions live in [`scripts/benchmark_vec_env.json`](scripts/benchma
 
 ## Notes
 
-- The distribution is `stable-retro-turbo`; the Python package is `stable_retro`. The legacy `retro` import remains as a compatibility shim.
+- The distribution is `stable-retro-turbo`; the Python package is `stable_retro`. The upstream-compatible `retro` import remains available for scalar integrations, while new code should import `stable_retro`.
 - `RetroVecEnv` implements Gymnasium's vector API directly. It is not a Stable-Baselines3 `VecEnv`, and Stable-Baselines3 is not a runtime dependency.
 - A scalar reset seed expands to `seed + lane_index`. Seed sequences must contain one integer or `None` per lane.
 - `state_catalog` preloads an ordered saved-state catalog. Select reset lanes with `reset_mask` and their exact catalog entries with `state_indices`; Turbo does not sample states.
