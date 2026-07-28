@@ -18,6 +18,11 @@ dynamic = [
 [project.scripts]
 stable-retro-turbo = "stable_retro.cli:main"
 
+[dependency-groups]
+dev = [
+  "pytest>=8,<10",
+]
+
 [tool.cibuildwheel]
 build = "cp314-*"
 build-verbosity = 1

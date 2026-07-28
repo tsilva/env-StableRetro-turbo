@@ -1,3 +1,4 @@
+import ast
 import importlib.util
 import tomllib
 from pathlib import Path
@@ -11,6 +12,30 @@ def _release_build_module():
     assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
+
+
+def test_runtime_dependency_bounds_match_the_supported_contract():
+    root = Path(__file__).resolve().parents[2]
+    tree = ast.parse((root / "setup.py").read_text(encoding="utf-8"))
+    setup_call = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "setup"
+    )
+    install_requires = next(
+        keyword.value
+        for keyword in setup_call.keywords
+        if keyword.arg == "install_requires"
+    )
+
+    assert ast.literal_eval(install_requires) == [
+        "gymnasium>=1.1,<2",
+        "numpy>=1.26,<3",
+        "pyglet>=1.5.27,<2",
+        "farama-notifications>=0.0.1",
+    ]
 
 
 def test_next_post_version_increments_existing_post_version():
