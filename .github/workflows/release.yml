@@ -137,10 +137,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos
-            runner: macos-14
+          - platform: macos-arm64
+            runner: macos-15
             wheelhouse_suffix: repaired
-          - platform: linux
+          - platform: linux-x86_64
             runner: ubuntu-24.04
             wheelhouse_suffix: linux
     runs-on: ${{ matrix.runner }}
@@ -181,8 +181,8 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
           case "${{ matrix.platform }}" in
-            macos) wheels=(wheelhouse-post*-repaired/*-cp314-cp314-*.whl) ;;
-            linux) wheels=(wheelhouse-post*-linux/*-cp314-cp314-*.whl) ;;
+            macos-arm64) wheels=(wheelhouse-post*-repaired/*-cp314-cp314-*.whl) ;;
+            linux-x86_64) wheels=(wheelhouse-post*-linux/*-cp314-cp314-*.whl) ;;
           esac
           if (( ${#wheels[@]} != 1 )); then
             printf 'expected one cp314 wheel, found %s\n' "${#wheels[@]}" >&2
@@ -228,13 +228,13 @@ jobs:
       - name: Download macOS wheel
         uses: actions/download-artifact@v4
         with:
-          name: macos-wheel-v${{ needs.validate.outputs.version }}
+          name: macos-arm64-wheel-v${{ needs.validate.outputs.version }}
           path: wheelhouse-post${{ needs.validate.outputs.post }}-repaired
 
       - name: Download Linux wheel
         uses: actions/download-artifact@v4
         with:
-          name: linux-wheel-v${{ needs.validate.outputs.version }}
+          name: linux-x86_64-wheel-v${{ needs.validate.outputs.version }}
           path: wheelhouse-post${{ needs.validate.outputs.post }}-linux
 
       - name: Final audit

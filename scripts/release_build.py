@@ -22,6 +22,10 @@ VERSION_PATH = REPO_ROOT / "stable_retro" / "VERSION.txt"
 PYTHON = REPO_ROOT / ".venv314" / "bin" / "python"
 PACKAGE_NAME = "stable-retro-turbo"
 PYTHON_TAGS = ("cp314",)
+RELEASE_PLATFORMS = (
+    "macos-arm64",
+    "linux-x86_64",
+)
 
 PUBLIC_CORES = (
     "gambatte",
@@ -143,13 +147,20 @@ def post_number(version: str) -> int:
 
 
 def expected_wheelhouse(version: str, platform_name: str) -> Path:
-    suffix = "repaired" if platform_name == "macos" else "linux"
+    suffixes = {
+        "macos-arm64": "repaired",
+        "linux-x86_64": "linux",
+    }
+    try:
+        suffix = suffixes[platform_name]
+    except KeyError as exc:
+        raise ValueError(f"unknown platform: {platform_name}") from exc
     return REPO_ROOT / f"wheelhouse-post{post_number(version)}-{suffix}"
 
 
 def expected_macos_wheels(version: str) -> list[Path]:
     return [
-        expected_wheelhouse(version, "macos")
+        expected_wheelhouse(version, "macos-arm64")
         / f"stable_retro_turbo-{version}-{tag}-{tag}-macosx_14_0_arm64.whl"
         for tag in PYTHON_TAGS
     ]
@@ -157,7 +168,7 @@ def expected_macos_wheels(version: str) -> list[Path]:
 
 def expected_linux_wheels(version: str) -> list[Path]:
     return [
-        expected_wheelhouse(version, "linux")
+        expected_wheelhouse(version, "linux-x86_64")
         / (
             f"stable_retro_turbo-{version}-{tag}-{tag}-"
             "manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
@@ -167,9 +178,9 @@ def expected_linux_wheels(version: str) -> list[Path]:
 
 
 def expected_wheels(version: str, platform_name: str) -> list[Path]:
-    if platform_name == "macos":
+    if platform_name == "macos-arm64":
         return expected_macos_wheels(version)
-    if platform_name == "linux":
+    if platform_name == "linux-x86_64":
         return expected_linux_wheels(version)
     raise ValueError(f"unknown platform: {platform_name}")
 
@@ -326,8 +337,8 @@ def prepare_sources(args: argparse.Namespace) -> None:
         "linux_src_clean": str(linux_src),
         "repo": str(REPO_ROOT),
         "python": str(PYTHON),
-        "macos_wheelhouse": str(expected_wheelhouse(version, "macos")),
-        "linux_wheelhouse": str(expected_wheelhouse(version, "linux")),
+        "macos_wheelhouse": str(expected_wheelhouse(version, "macos-arm64")),
+        "linux_wheelhouse": str(expected_wheelhouse(version, "linux-x86_64")),
     }
     print(json.dumps(result, indent=2))
 
@@ -435,8 +446,8 @@ def build_commands(args: argparse.Namespace) -> None:
     version = args.version or read_version()
     macos_src = Path(args.macos_src) if args.macos_src else Path("<macos-src>")
     linux_src = Path(args.linux_src) if args.linux_src else Path("<linux-src-clean>")
-    macos_wheelhouse = expected_wheelhouse(version, "macos")
-    linux_wheelhouse = expected_wheelhouse(version, "linux")
+    macos_wheelhouse = expected_wheelhouse(version, "macos-arm64")
+    linux_wheelhouse = expected_wheelhouse(version, "linux-x86_64")
     print("# macOS arm64")
     print(f"cd {shell_quote(macos_src)}")
     print(
@@ -456,7 +467,7 @@ def clean_output_paths(version: str, platform_name: str) -> None:
     wheelhouse = expected_wheelhouse(version, platform_name)
     if wheelhouse.exists():
         shutil.rmtree(wheelhouse)
-    if platform_name == "macos":
+    if platform_name == "macos-arm64":
         dist = REPO_ROOT / "dist"
         build = REPO_ROOT / "build"
         for path in (dist, build):
@@ -469,7 +480,7 @@ def build_platform(args: argparse.Namespace) -> None:
     parse_version(version)
     compiler_cache_dir().mkdir(parents=True, exist_ok=True)
     clean_output_paths(version, args.platform)
-    if args.platform == "macos":
+    if args.platform == "macos-arm64":
         env = os.environ.copy()
         env.update(macos_env())
         env["PATH"] = f"{PYTHON.parent}{os.pathsep}{env.get('PATH', '')}"
@@ -481,14 +492,14 @@ def build_platform(args: argparse.Namespace) -> None:
                 "--platform",
                 "macos",
                 "--output-dir",
-                str(expected_wheelhouse(version, "macos")),
+                str(expected_wheelhouse(version, "macos-arm64")),
             ],
             cwd=REPO_ROOT,
             env=env,
         )
         for wheel in expected_macos_wheels(version):
             print(wheel)
-    elif args.platform == "linux":
+    elif args.platform == "linux-x86_64":
         env = os.environ.copy()
         env.update(linux_env())
         env["PATH"] = f"{PYTHON.parent}{os.pathsep}{env.get('PATH', '')}"
@@ -500,7 +511,7 @@ def build_platform(args: argparse.Namespace) -> None:
                 "--platform",
                 "linux",
                 "--output-dir",
-                str(expected_wheelhouse(version, "linux")),
+                str(expected_wheelhouse(version, "linux-x86_64")),
             ],
             cwd=REPO_ROOT,
             env=env,
@@ -527,11 +538,11 @@ def audit_wheel(wheel: Path, version: str, platform_name: str) -> dict[str, obje
     names = wheel_names(wheel)
     tag = wheel_python_tag(wheel)
     python_abi = tag.replace("cp", "")
-    if platform_name == "macos":
+    if platform_name == "macos-arm64":
         expected_names = {path.name for path in expected_macos_wheels(version)}
         expected_extension = f"stable_retro/_retro.cpython-{python_abi}-darwin.so"
         core_suffix = ".dylib"
-    elif platform_name == "linux":
+    elif platform_name == "linux-x86_64":
         expected_names = {path.name for path in expected_linux_wheels(version)}
         expected_extension = (
             f"stable_retro/_retro.cpython-{python_abi}-x86_64-linux-gnu.so"
@@ -607,8 +618,8 @@ def audit_wheels(args: argparse.Namespace) -> None:
     macos_wheels = args.macos_wheel or expected_macos_wheels(version)
     linux_wheels = args.linux_wheel or expected_linux_wheels(version)
     results = [
-        *(audit_wheel(wheel, version, "macos") for wheel in macos_wheels),
-        *(audit_wheel(wheel, version, "linux") for wheel in linux_wheels),
+        *(audit_wheel(wheel, version, "macos-arm64") for wheel in macos_wheels),
+        *(audit_wheel(wheel, version, "linux-x86_64") for wheel in linux_wheels),
     ]
     assert_audit_passed(results)
     print(json.dumps(results, indent=2))
@@ -784,11 +795,11 @@ def final_check(args: argparse.Namespace) -> None:
     wheels = [*expected_macos_wheels(version), *expected_linux_wheels(version)]
     results = [
         *(
-            audit_wheel(wheel, version, "macos")
+            audit_wheel(wheel, version, "macos-arm64")
             for wheel in expected_macos_wheels(version)
         ),
         *(
-            audit_wheel(wheel, version, "linux")
+            audit_wheel(wheel, version, "linux-x86_64")
             for wheel in expected_linux_wheels(version)
         ),
     ]
@@ -866,7 +877,7 @@ def main() -> None:
         "build-platform",
         help="Build one release wheel platform",
     )
-    build.add_argument("--platform", choices=("macos", "linux"), required=True)
+    build.add_argument("--platform", choices=RELEASE_PLATFORMS, required=True)
     build.add_argument("--version")
     build.set_defaults(func=build_platform)
 

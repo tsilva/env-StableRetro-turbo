@@ -197,6 +197,24 @@ def test_release_wheel_builds_use_persistent_ccache():
     assert "Install macOS system packages" not in workflow
 
 
+def test_release_platform_targets_are_canonical():
+    root = Path(__file__).resolve().parents[2]
+    workflow = (root / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8",
+    )
+    release_build = _release_build_module()
+
+    assert release_build.RELEASE_PLATFORMS == (
+        "macos-arm64",
+        "linux-x86_64",
+    )
+    for platform_name in release_build.RELEASE_PLATFORMS:
+        assert f"platform: {platform_name}" in workflow
+    assert "platform: macos\n" not in workflow
+    assert "platform: linux\n" not in workflow
+    assert "runner: macos-15" in workflow
+
+
 def test_built_wheel_smoke_exercises_exact_live_snapshot_replay():
     root = Path(__file__).resolve().parents[2]
     source = (root / "scripts" / "release_build.py").read_text(encoding="utf-8")
@@ -251,7 +269,7 @@ def test_cleaning_wheel_outputs_preserves_compiler_cache(tmp_path, monkeypatch):
     (tmp_path / "build").mkdir()
     (tmp_path / "dist").mkdir()
 
-    release_build.clean_output_paths("1.0.1.post27", "macos")
+    release_build.clean_output_paths("1.0.1.post27", "macos-arm64")
 
     assert cache_marker.read_text(encoding="utf-8") == "cached"
     assert not (tmp_path / "build").exists()

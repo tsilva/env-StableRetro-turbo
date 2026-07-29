@@ -27,6 +27,9 @@ recovery.
 - lets GitHub Actions build, validate, and publish the wheels through trusted
   publishing.
 
+The release targets are exactly `macos-arm64` and `linux-x86_64`, plus a source
+distribution.
+
 ## Flow
 
 1. Do a small orientation check, but do not duplicate the release script:
