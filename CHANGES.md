@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Nothing yet.
+
+## 1.0.1.post37 - 2026-07-29
+
 * default `RetroVecEnv(use_fire_reset=False)` to the neutral upstream
   `RetroEnv` reset behavior while retaining explicit Atari FIRE reset support
 
