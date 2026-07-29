@@ -14,3 +14,4 @@
 - Saved-state catalogs must preserve declared order, and each selected lane must reset to an explicit caller-selected catalog index so execution is reproducible without provider-owned sampling.
 - Snapshot-capable `RetroVecEnv` instances must capture live lanes and restore selected lanes from reusable same-instance snapshots without advancing emulation or changing unselected lanes; capability must report unavailable when exact core and scenario state cannot be preserved.
 - Non-benchmark observation ownership modes must not expose results that a later environment call can unexpectedly mutate.
+- Publish binary distributions only for Apple-silicon macOS and x86-64 Linux.
