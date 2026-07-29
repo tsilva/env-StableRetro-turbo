@@ -148,9 +148,10 @@ class RetroVecEnv(VectorEnv):
     collection of every saved state that may be selected for this env instance.
     Selected lanes load catalog entries through ``options["state_indices"]``.
 
-    On Stella-backed Atari environments, ``use_fire_reset=True`` presses FIRE
-    for one native frame after each full-episode reset when FIRE is available,
-    then releases it before reset no-ops.
+    The disabled ``use_fire_reset`` default preserves scalar ``RetroEnv`` reset
+    behavior. On Stella-backed Atari environments, ``use_fire_reset=True``
+    presses FIRE for one native frame after each full-episode reset when FIRE
+    is available, then releases it before reset no-ops.
 
     obs_copy="safe_view" returns double-buffered observation views so the
     previous observation survives the next step for rollout collection.
@@ -191,7 +192,7 @@ class RetroVecEnv(VectorEnv):
         frame_stack=1,
         maxpool_last_two=False,
         noop_reset_max=0,
-        use_fire_reset=True,
+        use_fire_reset=False,
         sticky_action_prob=0.0,
         reward_clip=False,
         info_filter="all",

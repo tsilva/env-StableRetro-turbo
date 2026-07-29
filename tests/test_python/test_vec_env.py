@@ -69,7 +69,7 @@ def test_retro_vec_env_legacy_aliases_are_removed():
     from stable_retro.vec_env import RetroVecEnv
 
     params = inspect.signature(RetroVecEnv.__init__).parameters
-    assert params["use_fire_reset"].default is True
+    assert params["use_fire_reset"].default is False
     assert not any(
         param.kind is inspect.Parameter.VAR_KEYWORD for param in params.values()
     )
@@ -1703,7 +1703,6 @@ def test_retro_vec_env_atari_fire_reset_matches_one_manual_fire_step():
         frame_stack=1,
         maxpool_last_two=False,
         noop_reset_max=0,
-        use_fire_reset=False,
     )
     fire_env = _make_breakout_vec_env(
         frame_skip=1,
