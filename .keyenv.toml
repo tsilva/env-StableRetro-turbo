@@ -1,0 +1,7 @@
+# Credential references only. Store values with `keyenv set ENV_NAME`.
+[keyenv]
+version = 1
+
+[secrets.TWINE_PASSWORD]
+account = "stable-retro-turbo/TWINE_PASSWORD"
+required = true
