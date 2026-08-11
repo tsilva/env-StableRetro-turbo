@@ -152,6 +152,16 @@ uv run --frozen --with build python -m build                                    
 
 Benchmark definitions live in [`scripts/benchmark_vec_env.json`](scripts/benchmark_vec_env.json). Use real saved states for representative throughput measurements; `State.NONE` is reserved for explicit direct-ROM diagnostics and requires `--allow-state-none`.
 
+## Benchmark
+
+In an official correctness-gated TurboBench comparison on the matched
+`supermario/canonical-v1` workload, `stable-retro-turbo==1.0.1.post37` measured
+2.1248x to 2.2465x the throughput of original `stable-retro==1.0.1` at 1, 16,
+and 32 environments. This is a workload-specific result, not a claim across all
+games or emulator cores. See [`BENCHMARKS.md`](BENCHMARKS.md) for exact SPS,
+paired confidence intervals, protocol, host details, provenance, and the
+reproduction command.
+
 ## Notes
 
 - The distribution is `stable-retro-turbo`; the Python package is `stable_retro`. The upstream-compatible `retro` import remains available for scalar integrations, while new code should import `stable_retro`.
@@ -164,6 +174,14 @@ Benchmark definitions live in [`scripts/benchmark_vec_env.json`](scripts/benchma
 - `active_state_indices()` returns a read-only NumPy view. Copy it when you need a stable snapshot.
 - [Stable Retro](https://stable-retro.farama.org/) remains the source for inherited game, integration, and emulator documentation.
 - Bundled emulator cores have their own licenses; see [`LICENSES.md`](LICENSES.md).
+
+## Local credentials
+
+Private local values declared in `.keyenv.toml` live in macOS Keychain. Run
+`keyenv doctor` to verify them and launch credential-dependent commands with
+`keyenv run -- <command>`. Python, Node, and their child processes receive the
+values through their normal environment APIs. Keep only public or non-secret
+configuration in dotenv files.
 
 ## Architecture
 
