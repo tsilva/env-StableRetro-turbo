@@ -28,7 +28,7 @@ The self-verifying result bundle contains 119 hash-bound artifacts and passed
 | Field | Value |
 | --- | --- |
 | Bundle ID | `60219a4a4e15d0b9ad978fdcf58d40e99da84eef3e3e43b3a1003ac984f39635` |
-| TurboBench | `1.0.0`, source commit `d986efa72c81a7d0b5ea689ac37898d8fc38732f` |
+| TurboBench | [`turbobench-cli==1.0.0`](https://pypi.org/project/turbobench-cli/1.0.0/), source commit `d986efa72c81a7d0b5ea689ac37898d8fc38732f` |
 | Harness source SHA-256 | `2c64aefe52d5db7f2887b0f9d9d32c23c49f6590319a02eee5b6e2398b710319` |
 | Profile SHA-256 | `326c6d47c4cc0bc2bbafdf003a430ea80cc27877f8a4144dfbb65dbea6bb2cd7` |
 | Canonical ROM SHA-256 | `f61548fdf1670cffefcc4f0b7bdcdd9eaba0c226e3b74f8666071496988248de` |
@@ -59,10 +59,14 @@ the offline boundary.
 
 ## Reproduce
 
-Make the canonical ROM and state catalog available in a Stable Retro-compatible
-integration under `RETRO_DATA_PATH` or `TURBOBENCH_ASSET_ROOT`, then run:
+Install the exact released CLI, make the canonical ROM and state catalog
+available in a Stable Retro-compatible integration under `RETRO_DATA_PATH` or
+`TURBOBENCH_ASSET_ROOT`, then run:
 
 ```bash
+uv tool install \
+  --exclude-newer-package turbobench-cli=2026-08-12T00:00:00Z \
+  turbobench-cli==1.0.0
 turbobench compare supermario/canonical-v1 \
   --left stable-retro-turbo@1.0.1.post37 \
   --right stable-retro@1.0.1

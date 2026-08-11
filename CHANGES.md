@@ -2,7 +2,13 @@
 
 ## Unreleased
 
-* Nothing yet.
+* make `RetroVecEnv` rendering opt-in with `render_mode="rgb_array"`; the
+  default `None` mode performs no rendering and returns lane-aligned `None`
+  values from `get_images()`
+* remove the vector-only `human` viewer and per-call render-mode override;
+  scalar `RetroEnv` human rendering remains unchanged
+* remove unused vector observation and reset bookkeeping fields without
+  changing observation ownership or reset behavior
 
 ## 1.0.1.post37 - 2026-07-29
 

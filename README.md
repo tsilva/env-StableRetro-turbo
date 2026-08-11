@@ -91,8 +91,11 @@ if done.any():
   with `active_state_indices()`; state sampling and lane routing remain
   caller-owned.
 - `observation_ownership` and `observation_buffer_depth` declare the exact
-  lifetime of returned observations. `render_lane(index)` renders one lane,
-  `get_images()` renders all lanes, and `render()` renders lane zero.
+  lifetime of returned observations. Rendering is opt-in: with
+  `render_mode="rgb_array"`, `render_lane(index)` renders one lane,
+  `get_images()` renders all lanes, and `render()` renders lane zero. With the
+  default `render_mode=None`, the first two methods return `None` and
+  `get_images()` returns one `None` entry per lane.
 
 When `env.supports_live_snapshots` is true, live positions can be captured
 without advancing emulation and restored into any lane of the same environment:
@@ -144,23 +147,27 @@ Run these commands from the repository root:
 
 ```bash
 uv run --frozen stable-retro-turbo play --list                                      # list imported games by platform
-uv run --frozen python scripts/benchmark_vec_env.py --list-profiles                 # list benchmark profiles
-uv run --frozen python scripts/benchmark_vec_env.py --profile supermario-level1-1  # benchmark native and classic paths
-uv run --frozen --with pytest pytest tests/test_python/test_cli.py tests/test_python/test_benchmark_vec_env.py  # run quick tests
+uv run --frozen --with pytest pytest tests/test_python/test_cli.py                   # run quick tests
 uv run --frozen --with build python -m build                                        # build source and wheel artifacts
 ```
 
-Benchmark definitions live in [`scripts/benchmark_vec_env.json`](scripts/benchmark_vec_env.json). Use real saved states for representative throughput measurements; `State.NONE` is reserved for explicit direct-ROM diagnostics and requires `--allow-state-none`.
-
 ## Benchmark
 
-In an official correctness-gated TurboBench comparison on the matched
-`supermario/canonical-v1` workload, `stable-retro-turbo==1.0.1.post37` measured
+In an official correctness-gated
+[TurboBench 1.0.0](https://pypi.org/project/turbobench-cli/1.0.0/) comparison on
+the matched `supermario/canonical-v1` workload,
+`stable-retro-turbo==1.0.1.post37` measured
 2.1248x to 2.2465x the throughput of original `stable-retro==1.0.1` at 1, 16,
 and 32 environments. This is a workload-specific result, not a claim across all
 games or emulator cores. See [`BENCHMARKS.md`](BENCHMARKS.md) for exact SPS,
 paired confidence intervals, protocol, host details, provenance, and the
-reproduction command.
+reproduction command. Install the benchmark CLI with:
+
+```bash
+uv tool install \
+  --exclude-newer-package turbobench-cli=2026-08-12T00:00:00Z \
+  turbobench-cli==1.0.0
+```
 
 ## Notes
 

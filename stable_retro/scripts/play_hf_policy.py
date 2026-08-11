@@ -91,7 +91,7 @@ def run(args: argparse.Namespace) -> int:
             for step in range(1, args.max_steps + 1):
                 started_at = time.monotonic()
                 if viewer is not None:
-                    viewer.imshow(env.render("rgb_array"))
+                    viewer.imshow(env.render())
                     if not viewer.isopen:
                         return 0
 

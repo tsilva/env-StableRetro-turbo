@@ -12,9 +12,7 @@
       "frame_stack": 4,
       "obs_crop": "32,0,0,0",
       "resize_algorithm": "area",
-      "maxpool_last_two": true,
-      "num_envs": 32,
-      "num_threads": 16
+      "maxpool_last_two": true
     },
     {
       "name": "megaman-level1",
@@ -27,9 +25,7 @@
       "frame_stack": 4,
       "obs_crop": "32,0,0,0",
       "resize_algorithm": "area",
-      "maxpool_last_two": true,
-      "num_envs": 32,
-      "num_threads": 16
+      "maxpool_last_two": true
     },
     {
       "name": "atari-breakout",
@@ -43,8 +39,6 @@
       "obs_crop": null,
       "resize_algorithm": "area",
       "maxpool_last_two": true,
-      "num_envs": 32,
-      "num_threads": 16,
       "obs_layout": "chw"
     }
   ]

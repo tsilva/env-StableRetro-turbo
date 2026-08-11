@@ -175,7 +175,7 @@ class RetroVecEnv(VectorEnv):
         players=1,
         inttype=retro_data.Integrations.STABLE,
         obs_type=Observations.IMAGE,
-        render_mode="human",
+        render_mode: Literal["rgb_array"] | None = None,
         *,
         num_envs: int = 1,
         num_threads: int | None = None,
@@ -220,17 +220,18 @@ class RetroVecEnv(VectorEnv):
             "sticky_action_prob",
         )
         reward_clip = _normalize_reward_clip(reward_clip)
+        if render_mode not in (None, "rgb_array"):
+            raise ValueError("render_mode must be None or 'rgb_array'")
 
         self.closed = False
         self.autoreset_mode = AutoresetMode.DISABLED
         self._observations = None
         self._seeds = [None for _ in range(num_envs)]
-        self._options = [None for _ in range(num_envs)]
         self.use_fire_reset = use_fire_reset
 
         info_filter_mode, info_filter_keys = self._normalize_info_filter(info_filter)
         self._info_filter_mode = info_filter_mode
-        copy_obs, unsafe_view = self._normalize_obs_copy(obs_copy)
+        obs_copy = self._normalize_obs_copy(obs_copy)
         obs_crop_mode = self._normalize_obs_crop_mode(obs_crop_mode)
 
         env_kwargs = {
@@ -252,11 +253,7 @@ class RetroVecEnv(VectorEnv):
         if obs_layout not in {"hwc", "chw"}:
             raise ValueError("obs_layout must be 'hwc' or 'chw'")
         self.obs_layout = obs_layout
-        self.obs_copy = (
-            "unsafe_view"
-            if unsafe_view
-            else "copy" if copy_obs else "safe_view"
-        )
+        self.obs_copy = obs_copy
         self.observation_ownership = (
             "owned"
             if self.obs_copy == "copy"
@@ -267,8 +264,6 @@ class RetroVecEnv(VectorEnv):
             if self.obs_copy == "copy"
             else 1 if self.obs_copy == "unsafe_view" else 2
         )
-        self._copy_obs = copy_obs
-        self._unsafe_view = unsafe_view
         self.frame_skip = frame_skip
         self.frame_stack = frame_stack
         self.obs_resize_algorithm = obs_resize_algorithm
@@ -277,7 +272,6 @@ class RetroVecEnv(VectorEnv):
         self.noop_reset_max = noop_reset_max
         self.sticky_action_prob = sticky_action_prob
         self.render_mode = render_mode
-        self.viewer = None
         if players != 1:
             raise ValueError("RetroVecEnv currently supports players=1")
         if record:
@@ -419,7 +413,7 @@ class RetroVecEnv(VectorEnv):
             float(reward_high),
             num_threads,
             info_filter_mode,
-            unsafe_view,
+            obs_copy == "unsafe_view",
             obs_layout,
             info_filter_keys,
             initial_state_labels,
@@ -534,12 +528,8 @@ class RetroVecEnv(VectorEnv):
                 "obs_copy must be 'copy', 'safe_view', or 'unsafe_view'",
             )
         mode = str(obs_copy).lower()
-        if mode == "copy":
-            return True, False
-        if mode == "safe_view":
-            return False, False
-        if mode == "unsafe_view":
-            return False, True
+        if mode in {"copy", "safe_view", "unsafe_view"}:
+            return mode
         raise ValueError("obs_copy must be 'copy', 'safe_view', or 'unsafe_view'")
 
     @staticmethod
@@ -862,7 +852,7 @@ class RetroVecEnv(VectorEnv):
             retro.data.get_file_path = original_get_file_path
 
     def _obs(self):
-        if self._copy_obs:
+        if self.obs_copy == "copy":
             return self._observations.copy()
         return self._observations
 
@@ -921,9 +911,6 @@ class RetroVecEnv(VectorEnv):
 
     def _reset_seeds(self):
         self._seeds = [None for _ in range(self.num_envs)]
-
-    def _reset_options(self):
-        self._options = [None for _ in range(self.num_envs)]
 
     def seed(self, seed: int | None = None):
         """Set per-lane reset seeds for the next ``reset()`` call."""
@@ -1052,7 +1039,6 @@ class RetroVecEnv(VectorEnv):
             self._initialized = np.zeros(self.num_envs, dtype=np.bool_)
         self._initialized[reset_mask] = True
         self._reset_seeds()
-        self._reset_options()
         vector_infos = (
             {}
             if getattr(self, "_info_filter_mode", "all") == "none"
@@ -1113,10 +1099,6 @@ class RetroVecEnv(VectorEnv):
         return tuple(self.native.capture_snapshots(mask))
 
     def close(self):
-        viewer = getattr(self, "viewer", None)
-        if viewer is not None:
-            self.viewer.close()
-            self.viewer = None
         self.closed = True
 
     def render_lane(self, lane: int):
@@ -1132,6 +1114,8 @@ class RetroVecEnv(VectorEnv):
             raise TypeError("lane must be an integer")
         if not 0 <= lane_index < self.num_envs:
             raise IndexError(f"lane must be in [0, {self.num_envs - 1}]")
+        if self.render_mode != "rgb_array":
+            return None
         return np.asarray(self.native.get_screen(lane_index)).copy()
 
     def get_images(self):
@@ -1139,19 +1123,8 @@ class RetroVecEnv(VectorEnv):
             return [None for _ in range(self.num_envs)]
         return [self.render_lane(lane) for lane in range(self.num_envs)]
 
-    def render(self, mode: str | None = None):
-        mode = self.render_mode if mode is None else mode
-        if mode == "rgb_array":
-            return self.render_lane(0)
-        if mode == "human":
-            from stable_retro.rendering import SimpleImageViewer
-
-            img = self.native.get_screen(0)
-            if self.viewer is None:
-                self.viewer = SimpleImageViewer()
-            self.viewer.imshow(img)
-            return self.viewer.isopen
-        raise ValueError(f"unsupported render mode: {mode}")
+    def render(self):
+        return self.render_lane(0)
 
 
 __all__ = ["RetroVecEnv"]

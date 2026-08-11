@@ -70,6 +70,7 @@ def test_retro_vec_env_legacy_aliases_are_removed():
 
     params = inspect.signature(RetroVecEnv.__init__).parameters
     assert params["use_fire_reset"].default is False
+    assert params["render_mode"].default is None
     assert not any(
         param.kind is inspect.Parameter.VAR_KEYWORD for param in params.values()
     )
@@ -437,6 +438,17 @@ def test_retro_vec_env_turbo_api_v1_capabilities_ownership_and_rendering(tmp_pat
         env.close()
 
 
+def test_retro_vec_env_rendering_is_disabled_by_default(tmp_path):
+    env = _make_test_retro_vec_env(tmp_path, num_envs=2)
+    try:
+        env.reset()
+        assert env.render() is None
+        assert env.render_lane(1) is None
+        assert env.get_images() == [None, None]
+    finally:
+        env.close()
+
+
 def test_native_retro_vec_env_rejects_frame_geometry_before_observation_write(tmp_path):
     import stable_retro as retro
     from stable_retro import _retro
@@ -706,6 +718,13 @@ def test_retro_vec_env_rejects_removed_constructor_options(tmp_path, removed_opt
         _make_test_retro_vec_env(tmp_path, **{removed_option: None})
 
 
+def test_retro_vec_env_rejects_unsupported_render_mode_before_resources():
+    from stable_retro.vec_env import RetroVecEnv
+
+    with pytest.raises(ValueError, match="render_mode"):
+        RetroVecEnv("missing-game", render_mode="human")
+
+
 def test_retro_vec_env_masked_reset_preserves_unselected_lane(tmp_path):
     from gymnasium.vector import AutoresetMode
 
@@ -946,7 +965,7 @@ def test_retro_vec_env_rgb_array_render_returns_raw_screen(tmp_path):
     )
     try:
         obs = env.reset()[0]
-        screen = env.render("rgb_array")
+        screen = env.render()
         other_screen = env.native.get_screen(1)
 
         assert screen.dtype == np.uint8
@@ -975,7 +994,7 @@ def test_retro_vec_env_rgb_array_render_updates_with_indexed_video(
         action = np.zeros((1, env.num_buttons), dtype=np.uint8)
         frame_hashes = []
         for _ in range(30):
-            frame_hashes.append(_sha(env.render("rgb_array")))
+            frame_hashes.append(_sha(env.render()))
             _step(env, action)
 
         assert len(set(frame_hashes)) > 1
@@ -1047,18 +1066,9 @@ def test_retro_vec_env_fast_info_filters(info_filter, tmp_path):
 def test_retro_vec_env_keyword_normalization():
     from stable_retro.vec_env import RetroVecEnv
 
-    assert RetroVecEnv._normalize_obs_copy("copy") == (
-        True,
-        False,
-    )
-    assert RetroVecEnv._normalize_obs_copy("safe_view") == (
-        False,
-        False,
-    )
-    assert RetroVecEnv._normalize_obs_copy("unsafe_view") == (
-        False,
-        True,
-    )
+    assert RetroVecEnv._normalize_obs_copy("copy") == "copy"
+    assert RetroVecEnv._normalize_obs_copy("safe_view") == "safe_view"
+    assert RetroVecEnv._normalize_obs_copy("unsafe_view") == "unsafe_view"
     assert RetroVecEnv._normalize_info_filter(
         {"mode": "terminal", "keys": ("lives", "x_pos")},
     ) == ("terminal", ["lives", "x_pos"])
@@ -1460,7 +1470,7 @@ def test_retro_vec_env_forwards_per_env_reset_seeds():
     env = RetroVecEnv.__new__(RetroVecEnv)
     env.native = FakeNative()
     env.num_envs = 3
-    env._copy_obs = True
+    env.obs_copy = "copy"
     env.observation_space = gym.spaces.Box(
         low=0,
         high=255,
@@ -1470,7 +1480,6 @@ def test_retro_vec_env_forwards_per_env_reset_seeds():
     env._state_catalog = ()
     env._active_state_indices = np.full(3, -1, dtype=np.int32)
     env._seeds = [11, None, 37]
-    env._options = [{}, {}, {}]
 
     obs = env.reset()[0]
 

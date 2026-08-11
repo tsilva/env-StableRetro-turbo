@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_PROFILE_PATH = ROOT / "scripts" / "benchmark_vec_env.json"
+DEFAULT_PROFILE_PATH = ROOT / "scripts" / "recording_profiles.json"
 
 
 def _load_profile(path: Path, name: str) -> dict:
