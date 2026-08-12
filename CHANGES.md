@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Nothing yet.
+
+## 1.0.1.post41 - 2026-08-12
+
 * preserve the complete supported saved-state catalog in the source
   distribution while pruning only build-irrelevant tests, docs, and platform
   frontends
