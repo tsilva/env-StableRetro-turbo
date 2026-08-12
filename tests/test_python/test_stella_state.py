@@ -3,7 +3,7 @@ import struct
 from stable_retro.stella_state import migrate_legacy_state
 
 
-def test_migrate_legacy_state_inserts_rng_and_snapshots_current_core():
+def test_migrate_legacy_state_preserves_authority_state_bytes():
     legacy = (
         struct.pack("<I", len(b"03090100state"))
         + b"03090100state"
@@ -14,22 +14,7 @@ def test_migrate_legacy_state_inserts_rng_and_snapshots_current_core():
         + b"remaining-state"
     )
 
-    class Emulator:
-        loaded = None
-
-        def set_state(self, state):
-            self.loaded = state
-            return False
-
-        def get_state(self):
-            return b"current-state"
-
-    emulator = Emulator()
-    assert migrate_legacy_state(emulator, legacy) == b"current-state"
-    assert b"03090101state" in emulator.loaded[:32]
-    marker = struct.pack("<I", len(b"System")) + b"System"
-    rng_offset = emulator.loaded.index(marker) + len(marker) + 5
-    assert struct.unpack_from("<I", emulator.loaded, rng_offset) == (543,)
+    assert migrate_legacy_state(object(), legacy) is legacy
 
 
 def test_migrate_legacy_state_leaves_current_state_unchanged():

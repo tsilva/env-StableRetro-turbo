@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+* restore bit-exact original Stable Retro 1.0.1 behavior for canonical Mario
+  and Breakout rollouts, including native and processed frames, rewards,
+  lifecycle, RAM, selective resets, and snapshot continuation
+* restore the authority-compatible Atari core and canonical Breakout state,
+  palette, controller metadata, and scenario signals
+* add ROM-backed TurboBench semantic-oracle release gates for Mario and
+  Breakout against original Stable Retro
 * make `RetroVecEnv` rendering opt-in with `render_mode="rgb_array"`; the
   default `None` mode performs no rendering and returns lane-aligned `None`
   values from `get_images()`

@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll       
-//  SS  SS   tt           ll   ll        
-//  SS     tttttt  eeee   ll   ll   aaaa 
+//   SSSS    tt          lll  lll
+//  SS  SS   tt           ll   ll
+//  SS     tttttt  eeee   ll   ll   aaaa
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -20,8 +20,8 @@
 #ifndef VARIANT_HXX
 #define VARIANT_HXX
 
-#include <sstream>
 #include "Array.hxx"
+#include "Rect.hxx"
 #include "bspf.hxx"
 
 /**
@@ -39,7 +39,7 @@ class Variant
     string data;
 
     // Use singleton so we use only one ostringstream object
-    inline ostringstream& buf() { 
+    inline ostringstream& buf() {
       static ostringstream buf;
       return buf;
     }
@@ -50,15 +50,20 @@ class Variant
     Variant(const string& s) : data(s) { }
     Variant(const char* s) : data(s) { }
 
-    Variant(int32_t i) { buf().str(""); buf() << i; data = buf().str(); }
+    Variant(Int32 i) { buf().str(""); buf() << i; data = buf().str(); }
     Variant(long unsigned int i) { buf().str(""); buf() << i; data = buf().str(); }
     Variant(unsigned int i) { buf().str(""); buf() << i; data = buf().str(); }
+    Variant(float f) { buf().str(""); buf() << f; data = buf().str(); }
+    Variant(double d) { buf().str(""); buf() << d; data = buf().str(); }
     Variant(bool b) { buf().str(""); buf() << b; data = buf().str(); }
+    Variant(const GUI::Size& s) { buf().str(""); buf() << s; data = buf().str(); }
 
     // Conversion methods
     const string& toString() const { return data; }
     int toInt() const { return atoi(data.c_str()); }
+    float toFloat() const { return (float)atof(data.c_str()); }
     bool toBool() const { return data == "1" || data == "true"; }
+    const GUI::Size toSize() const { return GUI::Size(data); }
 
     // Comparison
     bool operator==(const Variant& v) const { return data == v.data; };

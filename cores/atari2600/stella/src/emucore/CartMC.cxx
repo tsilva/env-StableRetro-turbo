@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll       
-//  SS  SS   tt           ll   ll        
-//  SS     tttttt  eeee   ll   ll   aaaa 
+//   SSSS    tt          lll  lll
+//  SS  SS   tt           ll   ll
+//  SS     tttttt  eeee   ll   ll   aaaa
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -17,6 +17,7 @@
 // $Id: CartMC.cxx 2838 2014-01-17 23:34:03Z stephena $
 //============================================================================
 
+#include <cassert>
 #include <cstring>
 
 #include "System.hxx"
@@ -30,11 +31,14 @@
 // TODO (2010-10-03) - support CodeAccessBase functionality somehow
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-CartridgeMC::CartridgeMC(const uint8_t* image, uint32_t size,
+CartridgeMC::CartridgeMC(const uInt8* image, uInt32 size,
                          const Settings& settings)
   : Cartridge(settings),
     mySlot3Locked(false)
 {
+  // Make sure size is reasonable
+  assert(size <= 131072);
+
   // Set the contents of the entire ROM to 0
   memset(myImage, 0, 131072);
 
@@ -52,7 +56,7 @@ void CartridgeMC::reset()
 {
   // Initialize RAM
   if(mySettings.getBool("ramrandom"))
-    for(uint32_t i = 0; i < 32768; ++i)
+    for(uInt32 i = 0; i < 32768; ++i)
       myRAM[i] = mySystem->randGenerator().next();
   else
     memset(myRAM, 0, 32768);
@@ -63,11 +67,16 @@ void CartridgeMC::reset()
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void CartridgeMC::install(System& system)
 {
-  mySystem     = &system;
-  uint16_t shift = mySystem->pageShift();
+  mySystem = &system;
+  uInt16 shift = mySystem->pageShift();
+  uInt16 mask = mySystem->pageMask();
 
-  // Set the page accessing methods for the hot spots in the TIA.  For 
-  // correct emulation I would need to chain any accesses below 0x40 to 
+  // Make sure the system we're being installed in has a page size that'll work
+  assert(((0x1000 & mask) == 0) && ((0x1400 & mask) == 0) &&
+      ((0x1800 & mask) == 0) && ((0x1C00 & mask) == 0));
+
+  // Set the page accessing methods for the hot spots in the TIA.  For
+  // correct emulation I would need to chain any accesses below 0x40 to
   // the TIA but for now I'll just forget about them.
   //
   // TODO: These TIA accesses may need to be chained, however, at this
@@ -75,19 +84,19 @@ void CartridgeMC::install(System& system)
   //
   System::PageAccess access(0, 0, 0, this, System::PA_READWRITE);
 
-  for(uint32_t i = 0x00; i < 0x40; i += (1 << shift))
+  for(uInt32 i = 0x00; i < 0x40; i += (1 << shift))
     mySystem->setPageAccess(i >> shift, access);
 
   // Map the cartridge into the system
   access.type = System::PA_READ;  // We don't yet indicate RAM areas
-  for(uint32_t j = 0x1000; j < 0x2000; j += (1 << shift))
+  for(uInt32 j = 0x1000; j < 0x2000; j += (1 << shift))
     mySystem->setPageAccess(j >> shift, access);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uint8_t CartridgeMC::peek(uint16_t address)
+uInt8 CartridgeMC::peek(uInt16 address)
 {
-  uint16_t peekAddress = address;
+  uInt16 peekAddress = address;
   address &= 0x1FFF;
 
   // Accessing the RESET vector so lets handle the powerup special case
@@ -110,7 +119,7 @@ uint8_t CartridgeMC::peek(uint16_t address)
   }
   else
   {
-    uint8_t block;
+    uInt8 block;
 
     if(mySlot3Locked && ((address & 0x0C00) == 0x0C00))
     {
@@ -125,7 +134,7 @@ uint8_t CartridgeMC::peek(uint16_t address)
     if(block & 0x80)
     {
       // ROM access
-      return myImage[(uint32_t)((block & 0x7F) << 10) + (address & 0x03FF)];
+      return myImage[(uInt32)((block & 0x7F) << 10) + (address & 0x03FF)];
     }
     else
     {
@@ -133,28 +142,28 @@ uint8_t CartridgeMC::peek(uint16_t address)
       if(address & 0x0200)
       {
         // Reading from the read port of the RAM block
-        return myRAM[(uint32_t)((block & 0x3F) << 9) + (address & 0x01FF)];
+        return myRAM[(uInt32)((block & 0x3F) << 9) + (address & 0x01FF)];
       }
       else
       {
         // Oops, reading from the write port of the RAM block!
         // Reading from the write port triggers an unwanted write
-        uint8_t value = mySystem->getDataBusState(0xFF);
+        uInt8 value = mySystem->getDataBusState(0xFF);
 
         if(bankLocked())
           return value;
         else
         {
           triggerReadFromWritePort(peekAddress);
-          return myRAM[(uint32_t)((block & 0x3F) << 9) + (address & 0x01FF)] = value;
+          return myRAM[(uInt32)((block & 0x3F) << 9) + (address & 0x01FF)] = value;
         }
       }
     }
-  }  
+  }
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeMC::poke(uint16_t address, uint8_t value)
+bool CartridgeMC::poke(uInt16 address, uInt8 value)
 {
   address &= 0x1FFF;
 
@@ -178,7 +187,7 @@ bool CartridgeMC::poke(uint16_t address, uint8_t value)
   }
   else
   {
-    uint8_t block;
+    uInt8 block;
 
     if(mySlot3Locked && ((address & 0x0C00) == 0x0C00))
     {
@@ -193,43 +202,43 @@ bool CartridgeMC::poke(uint16_t address, uint8_t value)
     if(!(block & 0x80) && !(address & 0x0200))
     {
       // Handle the write to RAM
-      myRAM[(uint32_t)((block & 0x3F) << 9) + (address & 0x01FF)] = value;
+      myRAM[(uInt32)((block & 0x3F) << 9) + (address & 0x01FF)] = value;
       return true;
     }
-  }  
+  }
   return false;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeMC::bank(uint16_t b)
+bool CartridgeMC::bank(uInt16 b)
 {
   // Doesn't support bankswitching in the normal sense
   return false;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uint16_t CartridgeMC::bank() const
+uInt16 CartridgeMC::bank() const
 {
   // TODO - add support for debugger
   return 0;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uint16_t CartridgeMC::bankCount() const
+uInt16 CartridgeMC::bankCount() const
 {
   // TODO - add support for debugger
   return 1;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeMC::patch(uint16_t address, uint8_t value)
+bool CartridgeMC::patch(uInt16 address, uInt8 value)
 {
   // TODO - add support for debugger
   return false;
-} 
+}
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-const uint8_t* CartridgeMC::getImage(int& size) const
+const uInt8* CartridgeMC::getImage(int& size) const
 {
   size = 128 * 1024;
   return myImage;
@@ -238,13 +247,21 @@ const uint8_t* CartridgeMC::getImage(int& size) const
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 bool CartridgeMC::save(Serializer& out) const
 {
-  out.putString(name());
+  try
+  {
+    out.putString(name());
 
-  // The currentBlock array
-  out.putByteArray(myCurrentBlock, 4);
+    // The currentBlock array
+    out.putByteArray(myCurrentBlock, 4);
 
-  // The 32K of RAM
-  out.putByteArray(myRAM, 32 * 1024);
+    // The 32K of RAM
+    out.putByteArray(myRAM, 32 * 1024);
+  }
+  catch(...)
+  {
+    cerr << "ERROR: CartridgeMC::save" << endl;
+    return false;
+  }
 
   return true;
 }
@@ -252,14 +269,22 @@ bool CartridgeMC::save(Serializer& out) const
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 bool CartridgeMC::load(Serializer& in)
 {
-  if(in.getString() != name())
+  try
+  {
+    if(in.getString() != name())
+      return false;
+
+    // The currentBlock array
+    in.getByteArray(myCurrentBlock, 4);
+
+    // The 32K of RAM
+    in.getByteArray(myRAM, 32 * 1024);
+  }
+  catch(...)
+  {
+    cerr << "ERROR: CartridgeMC::load" << endl;
     return false;
-
-  // The currentBlock array
-  in.getByteArray(myCurrentBlock, 4);
-
-  // The 32K of RAM
-  in.getByteArray(myRAM, 32 * 1024);
+  }
 
   return true;
 }

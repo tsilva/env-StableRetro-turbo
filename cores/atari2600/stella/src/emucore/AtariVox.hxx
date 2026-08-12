@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll       
-//  SS  SS   tt           ll   ll        
-//  SS     tttttt  eeee   ll   ll   aaaa 
+//   SSSS    tt          lll  lll
+//  SS  SS   tt           ll   ll
+//  SS     tttttt  eeee   ll   ll   aaaa
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -86,7 +86,7 @@ class AtariVox : public Controller
 
     /**
       Notification method invoked by the system right before the
-      system resets its cycle counter to zero.  It may be necessary 
+      system resets its cycle counter to zero.  It may be necessary
       to override this method for devices that remember cycle counts.
     */
     void systemCyclesReset();
@@ -107,19 +107,19 @@ class AtariVox : public Controller
     MT24LC256* myEEPROM;
 
     // How many bits have been shifted into the shift register?
-    uint8_t myShiftCount;
+    uInt8 myShiftCount;
 
     // Shift register. Data comes in serially:
     // 1 start bit, always 0
     // 8 data bits, LSB first
     // 1 stop bit, always 1
-    uint16_t myShiftRegister;
+    uInt16 myShiftRegister;
 
     // When did the last data write start, in CPU cycles?
     // The real SpeakJet chip reads data at 19200 bits/sec. Alex's
     // driver code sends data at 62 CPU cycles per bit, which is
     // "close enough".
-    uint32_t myLastDataWriteCycle;
+    uInt32 myLastDataWriteCycle;
 
     // Holds information concerning serial port usage
     string myAboutString;

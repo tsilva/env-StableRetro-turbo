@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll       
-//  SS  SS   tt           ll   ll        
-//  SS     tttttt  eeee   ll   ll   aaaa 
+//   SSSS    tt          lll  lll
+//  SS  SS   tt           ll   ll
+//  SS     tttttt  eeee   ll   ll   aaaa
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -21,52 +21,27 @@
 #include "Joystick.hxx"
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-Joystick::Joystick(Jack jack, const Event& event, const System& system,
-                   bool second)
+Joystick::Joystick(Jack jack, const Event& event, const System& system)
   : Controller(jack, event, system, Controller::Joystick),
     myControlID(-1)
 {
   if(myJack == Left)
   {
-    if(!second)
-    {
-      myUpEvent    = Event::JoystickZeroUp;
-      myDownEvent  = Event::JoystickZeroDown;
-      myLeftEvent  = Event::JoystickZeroLeft;
-      myRightEvent = Event::JoystickZeroRight;
-      myFireEvent  = Event::JoystickZeroFire;
-    }
-    else
-    {
-      /* QuadTari second controller on the left jack -> player 3 */
-      myUpEvent    = Event::JoystickTwoUp;
-      myDownEvent  = Event::JoystickTwoDown;
-      myLeftEvent  = Event::JoystickTwoLeft;
-      myRightEvent = Event::JoystickTwoRight;
-      myFireEvent  = Event::JoystickTwoFire;
-    }
+    myUpEvent    = Event::JoystickZeroUp;
+    myDownEvent  = Event::JoystickZeroDown;
+    myLeftEvent  = Event::JoystickZeroLeft;
+    myRightEvent = Event::JoystickZeroRight;
+    myFireEvent  = Event::JoystickZeroFire;
     myXAxisValue = Event::SALeftAxis0Value;
     myYAxisValue = Event::SALeftAxis1Value;
   }
   else
   {
-    if(!second)
-    {
-      myUpEvent    = Event::JoystickOneUp;
-      myDownEvent  = Event::JoystickOneDown;
-      myLeftEvent  = Event::JoystickOneLeft;
-      myRightEvent = Event::JoystickOneRight;
-      myFireEvent  = Event::JoystickOneFire;
-    }
-    else
-    {
-      /* QuadTari second controller on the right jack -> player 4 */
-      myUpEvent    = Event::JoystickThreeUp;
-      myDownEvent  = Event::JoystickThreeDown;
-      myLeftEvent  = Event::JoystickThreeLeft;
-      myRightEvent = Event::JoystickThreeRight;
-      myFireEvent  = Event::JoystickThreeFire;
-    }
+    myUpEvent    = Event::JoystickOneUp;
+    myDownEvent  = Event::JoystickOneDown;
+    myLeftEvent  = Event::JoystickOneLeft;
+    myRightEvent = Event::JoystickOneRight;
+    myFireEvent  = Event::JoystickOneFire;
     myXAxisValue = Event::SARightAxis0Value;
     myYAxisValue = Event::SARightAxis1Value;
   }

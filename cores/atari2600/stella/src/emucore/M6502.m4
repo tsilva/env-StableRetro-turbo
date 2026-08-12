@@ -15,7 +15,7 @@
 // this file, and for a DISCLAIMER OF ALL WARRANTIES.
 //============================================================================
 
-/** 
+/**
   Code and cases to emulate each of the 6502 instructions.
 
   Recompile with the following:
@@ -29,15 +29,27 @@
 #endif
 
 #ifndef SET_LAST_PEEK
+  #ifdef DEBUGGER_SUPPORT
+    #define SET_LAST_PEEK(_addr1, _addr2) _addr1 = _addr2;
+  #else
     #define SET_LAST_PEEK(_addr1, _addr2)
+  #endif
 #endif
 
 #ifndef CLEAR_LAST_PEEK
+  #ifdef DEBUGGER_SUPPORT
+    #define CLEAR_LAST_PEEK(_addr) _addr = -1;
+  #else
     #define CLEAR_LAST_PEEK(_addr)
+  #endif
 #endif
 
 #ifndef SET_LAST_POKE
+  #ifdef DEBUGGER_SUPPORT
+    #define SET_LAST_POKE(_addr) myDataAddressForPoke = _addr;
+  #else
     #define SET_LAST_POKE(_addr)
+  #endif
 #endif
 
 
@@ -51,26 +63,26 @@ define(M6502_IMMEDIATE_READ, `{
 
 define(M6502_ABSOLUTE_READ, `{
   intermediateAddress = peek(PC++, DISASM_CODE);
-  intermediateAddress |= ((uint16_t)peek(PC++, DISASM_CODE) << 8);
+  intermediateAddress |= ((uInt16)peek(PC++, DISASM_CODE) << 8);
   operand = peek(intermediateAddress, DISASM_DATA);
 }')
 
 define(M6502_ABSOLUTE_WRITE, `{
   operandAddress = peek(PC++, DISASM_CODE);
-  operandAddress |= ((uint16_t)peek(PC++, DISASM_CODE) << 8);
+  operandAddress |= ((uInt16)peek(PC++, DISASM_CODE) << 8);
 }')
 
 define(M6502_ABSOLUTE_READMODIFYWRITE, `{
   operandAddress = peek(PC++, DISASM_CODE);
-  operandAddress |= ((uint16_t)peek(PC++, DISASM_CODE) << 8);
+  operandAddress |= ((uInt16)peek(PC++, DISASM_CODE) << 8);
   operand = peek(operandAddress, DISASM_DATA);
   poke(operandAddress, operand);
 }')
 
 define(M6502_ABSOLUTEX_READ, `{
-  uint16_t low = peek(PC++, DISASM_CODE);
-  uint16_t high = ((uint16_t)peek(PC++, DISASM_CODE) << 8);
-  intermediateAddress = high | (uint8_t)(low + X);
+  uInt16 low = peek(PC++, DISASM_CODE);
+  uInt16 high = ((uInt16)peek(PC++, DISASM_CODE) << 8);
+  intermediateAddress = high | (uInt8)(low + X);
   operand = peek(intermediateAddress, DISASM_DATA);
   if((low + X) > 0xFF)
   {
@@ -80,25 +92,25 @@ define(M6502_ABSOLUTEX_READ, `{
 }')
 
 define(M6502_ABSOLUTEX_WRITE, `{
-  uint16_t low = peek(PC++, DISASM_CODE);
-  uint16_t high = ((uint16_t)peek(PC++, DISASM_CODE) << 8);
-  peek(high | (uint8_t)(low + X), DISASM_DATA);
+  uInt16 low = peek(PC++, DISASM_CODE);
+  uInt16 high = ((uInt16)peek(PC++, DISASM_CODE) << 8);
+  peek(high | (uInt8)(low + X), DISASM_DATA);
   operandAddress = (high | low) + X;
 }')
 
 define(M6502_ABSOLUTEX_READMODIFYWRITE, `{
-  uint16_t low = peek(PC++, DISASM_CODE);
-  uint16_t high = ((uint16_t)peek(PC++, DISASM_CODE) << 8);
-  peek(high | (uint8_t)(low + X), DISASM_DATA);
+  uInt16 low = peek(PC++, DISASM_CODE);
+  uInt16 high = ((uInt16)peek(PC++, DISASM_CODE) << 8);
+  peek(high | (uInt8)(low + X), DISASM_DATA);
   operandAddress = (high | low) + X;
   operand = peek(operandAddress, DISASM_DATA);
   poke(operandAddress, operand);
 }')
 
 define(M6502_ABSOLUTEY_READ, `{
-  uint16_t low = peek(PC++, DISASM_CODE);
-  uint16_t high = ((uint16_t)peek(PC++, DISASM_CODE) << 8);
-  intermediateAddress = high | (uint8_t)(low + Y);
+  uInt16 low = peek(PC++, DISASM_CODE);
+  uInt16 high = ((uInt16)peek(PC++, DISASM_CODE) << 8);
+  intermediateAddress = high | (uInt8)(low + Y);
   operand = peek(intermediateAddress, DISASM_DATA);
   if((low + Y) > 0xFF)
   {
@@ -108,16 +120,16 @@ define(M6502_ABSOLUTEY_READ, `{
 }')
 
 define(M6502_ABSOLUTEY_WRITE, `{
-  uint16_t low = peek(PC++, DISASM_CODE);
-  uint16_t high = ((uint16_t)peek(PC++, DISASM_CODE) << 8);
-  peek(high | (uint8_t)(low + Y), DISASM_DATA);
+  uInt16 low = peek(PC++, DISASM_CODE);
+  uInt16 high = ((uInt16)peek(PC++, DISASM_CODE) << 8);
+  peek(high | (uInt8)(low + Y), DISASM_DATA);
   operandAddress = (high | low) + Y;
 }')
 
 define(M6502_ABSOLUTEY_READMODIFYWRITE, `{
-  uint16_t low = peek(PC++, DISASM_CODE);
-  uint16_t high = ((uint16_t)peek(PC++, DISASM_CODE) << 8);
-  peek(high | (uint8_t)(low + Y), DISASM_DATA);
+  uInt16 low = peek(PC++, DISASM_CODE);
+  uInt16 high = ((uInt16)peek(PC++, DISASM_CODE) << 8);
+  peek(high | (uInt8)(low + Y), DISASM_DATA);
   operandAddress = (high | low) + Y;
   operand = peek(operandAddress, DISASM_DATA);
   poke(operandAddress, operand);
@@ -181,48 +193,48 @@ define(M6502_ZEROY_READMODIFYWRITE, `{
 }')
 
 define(M6502_INDIRECT, `{
-  uint16_t addr = peek(PC++, DISASM_CODE);
-  addr |= ((uint16_t)peek(PC++, DISASM_CODE) << 8);
+  uInt16 addr = peek(PC++, DISASM_CODE);
+  addr |= ((uInt16)peek(PC++, DISASM_CODE) << 8);
 
   // Simulate the error in the indirect addressing mode!
-  uint16_t high = NOTSAMEPAGE(addr, addr + 1) ? (addr & 0xff00) : (addr + 1);
+  uInt16 high = NOTSAMEPAGE(addr, addr + 1) ? (addr & 0xff00) : (addr + 1);
 
   operandAddress = peek(addr, DISASM_DATA);
-  operandAddress |= ((uint16_t)peek(high, DISASM_DATA) << 8);
+  operandAddress |= ((uInt16)peek(high, DISASM_DATA) << 8);
 }')
 
 define(M6502_INDIRECTX_READ, `{
-  uint8_t pointer = peek(PC++, DISASM_CODE);
+  uInt8 pointer = peek(PC++, DISASM_CODE);
   peek(pointer, DISASM_DATA);
   pointer += X;
   intermediateAddress = peek(pointer++, DISASM_DATA);
-  intermediateAddress |= ((uint16_t)peek(pointer, DISASM_DATA) << 8);
+  intermediateAddress |= ((uInt16)peek(pointer, DISASM_DATA) << 8);
   operand = peek(intermediateAddress, DISASM_DATA);
 }')
 
 define(M6502_INDIRECTX_WRITE, `{
-  uint8_t pointer = peek(PC++, DISASM_CODE);
+  uInt8 pointer = peek(PC++, DISASM_CODE);
   peek(pointer, DISASM_DATA);
   pointer += X;
   operandAddress = peek(pointer++, DISASM_DATA);
-  operandAddress |= ((uint16_t)peek(pointer, DISASM_DATA) << 8);
+  operandAddress |= ((uInt16)peek(pointer, DISASM_DATA) << 8);
 }')
 
 define(M6502_INDIRECTX_READMODIFYWRITE, `{
-  uint8_t pointer = peek(PC++, DISASM_CODE);
+  uInt8 pointer = peek(PC++, DISASM_CODE);
   peek(pointer, DISASM_DATA);
   pointer += X;
   operandAddress = peek(pointer++, DISASM_DATA);
-  operandAddress |= ((uint16_t)peek(pointer, DISASM_DATA) << 8);
+  operandAddress |= ((uInt16)peek(pointer, DISASM_DATA) << 8);
   operand = peek(operandAddress, DISASM_DATA);
   poke(operandAddress, operand);
 }')
 
 define(M6502_INDIRECTY_READ, `{
-  uint8_t pointer = peek(PC++, DISASM_CODE);
-  uint16_t low = peek(pointer++, DISASM_DATA);
-  uint16_t high = ((uint16_t)peek(pointer, DISASM_DATA) << 8);
-  intermediateAddress = high | (uint8_t)(low + Y);
+  uInt8 pointer = peek(PC++, DISASM_CODE);
+  uInt16 low = peek(pointer++, DISASM_DATA);
+  uInt16 high = ((uInt16)peek(pointer, DISASM_DATA) << 8);
+  intermediateAddress = high | (uInt8)(low + Y);
   operand = peek(intermediateAddress, DISASM_DATA);
   if((low + Y) > 0xFF)
   {
@@ -232,18 +244,18 @@ define(M6502_INDIRECTY_READ, `{
 }')
 
 define(M6502_INDIRECTY_WRITE, `{
-  uint8_t pointer = peek(PC++, DISASM_CODE);
-  uint16_t low = peek(pointer++, DISASM_DATA);
-  uint16_t high = ((uint16_t)peek(pointer, DISASM_DATA) << 8);
-  peek(high | (uint8_t)(low + Y), DISASM_DATA);
+  uInt8 pointer = peek(PC++, DISASM_CODE);
+  uInt16 low = peek(pointer++, DISASM_DATA);
+  uInt16 high = ((uInt16)peek(pointer, DISASM_DATA) << 8);
+  peek(high | (uInt8)(low + Y), DISASM_DATA);
   operandAddress = (high | low) + Y;
 }')
 
 define(M6502_INDIRECTY_READMODIFYWRITE, `{
-  uint8_t pointer = peek(PC++, DISASM_CODE);
-  uint16_t low = peek(pointer++, DISASM_DATA);
-  uint16_t high = ((uint16_t)peek(pointer, DISASM_DATA) << 8);
-  peek(high | (uint8_t)(low + Y), DISASM_DATA);
+  uInt8 pointer = peek(PC++, DISASM_CODE);
+  uInt16 low = peek(pointer++, DISASM_DATA);
+  uInt16 high = ((uInt16)peek(pointer, DISASM_DATA) << 8);
+  peek(high | (uInt8)(low + Y), DISASM_DATA);
   operandAddress = (high | low) + Y;
   operand = peek(operandAddress, DISASM_DATA);
   poke(operandAddress, operand);
@@ -254,7 +266,7 @@ define(M6502_BCC, `{
   if(!C)
   {
     peek(PC, DISASM_NONE);
-    uint16_t address = PC + (int8_t)operand;
+    uInt16 address = PC + (Int8)operand;
     if(NOTSAMEPAGE(PC, address))
       peek((PC & 0xFF00) | (address & 0x00FF), DISASM_NONE);
     PC = address;
@@ -265,7 +277,7 @@ define(M6502_BCS, `{
   if(C)
   {
     peek(PC, DISASM_NONE);
-    uint16_t address = PC + (int8_t)operand;
+    uInt16 address = PC + (Int8)operand;
     if(NOTSAMEPAGE(PC, address))
       peek((PC & 0xFF00) | (address & 0x00FF), DISASM_NONE);
     PC = address;
@@ -276,7 +288,7 @@ define(M6502_BEQ, `{
   if(!notZ)
   {
     peek(PC, DISASM_NONE);
-    uint16_t address = PC + (int8_t)operand;
+    uInt16 address = PC + (Int8)operand;
     if(NOTSAMEPAGE(PC, address))
       peek((PC & 0xFF00) | (address & 0x00FF), DISASM_NONE);
     PC = address;
@@ -287,7 +299,7 @@ define(M6502_BMI, `{
   if(N)
   {
     peek(PC, DISASM_NONE);
-    uint16_t address = PC + (int8_t)operand;
+    uInt16 address = PC + (Int8)operand;
     if(NOTSAMEPAGE(PC, address))
       peek((PC & 0xFF00) | (address & 0x00FF), DISASM_NONE);
     PC = address;
@@ -298,7 +310,7 @@ define(M6502_BNE, `{
   if(notZ)
   {
     peek(PC, DISASM_NONE);
-    uint16_t address = PC + (int8_t)operand;
+    uInt16 address = PC + (Int8)operand;
     if(NOTSAMEPAGE(PC, address))
       peek((PC & 0xFF00) | (address & 0x00FF), DISASM_NONE);
     PC = address;
@@ -309,7 +321,7 @@ define(M6502_BPL, `{
   if(!N)
   {
     peek(PC, DISASM_NONE);
-    uint16_t address = PC + (int8_t)operand;
+    uInt16 address = PC + (Int8)operand;
     if(NOTSAMEPAGE(PC, address))
       peek((PC & 0xFF00) | (address & 0x00FF), DISASM_NONE);
     PC = address;
@@ -320,7 +332,7 @@ define(M6502_BVC, `{
   if(!V)
   {
     peek(PC, DISASM_NONE);
-    uint16_t address = PC + (int8_t)operand;
+    uInt16 address = PC + (Int8)operand;
     if(NOTSAMEPAGE(PC, address))
       peek((PC & 0xFF00) | (address & 0x00FF), DISASM_NONE);
     PC = address;
@@ -331,7 +343,7 @@ define(M6502_BVS, `{
   if(V)
   {
     peek(PC, DISASM_NONE);
-    uint16_t address = PC + (int8_t)operand;
+    uInt16 address = PC + (Int8)operand;
     if(NOTSAMEPAGE(PC, address))
       peek((PC & 0xFF00) | (address & 0x00FF), DISASM_NONE);
     PC = address;
@@ -341,18 +353,18 @@ define(M6502_BVS, `{
 define(M6502_ADC, `{
   if(!D)
   {
-    int32_t sum = A + operand + (C ? 1 : 0);
+    Int32 sum = A + operand + (C ? 1 : 0);
     N = sum & 0x80;
     V = ~(A ^ operand) & (A ^ sum) & 0x80;
     notZ = sum & 0xff;
     C = sum & 0xff00;
 
-    A = (uint8_t) sum;
+    A = (uInt8) sum;
   }
   else
   {
-    int32_t lo = (A & 0x0f) + (operand & 0x0f) + (C ? 1 : 0);
-    int32_t hi = (A & 0xf0) + (operand & 0xf0);
+    Int32 lo = (A & 0x0f) + (operand & 0x0f) + (C ? 1 : 0);
+    Int32 hi = (A & 0xf0) + (operand & 0xf0);
     notZ = (lo+hi) & 0xff;
     if(lo > 0x09)
     {
@@ -408,7 +420,7 @@ define(M6502_ARR, `{
   }
   else
   {
-    uint8_t value = A & operand;
+    uInt8 value = A & operand;
 
     A = ((value >> 1) & 0x7f) | (C ? 0x80 : 0x00);
     N = C;
@@ -419,8 +431,8 @@ define(M6502_ARR, `{
     {
       A = (A & 0xf0) | ((A + 0x06) & 0x0f);
     }
-    
-    if(((value & 0xf0) + (value & 0x10)) > 0x50) 
+
+    if(((value & 0xf0) + (value & 0x10)) > 0x50)
     {
       A = (A + 0x60) & 0xff;
       C = 1;
@@ -483,7 +495,7 @@ define(M6502_BRK, `{
   I = true;
 
   PC = peek(0xfffe, DISASM_NONE);
-  PC |= ((uint16_t)peek(0xffff, DISASM_NONE) << 8);
+  PC |= ((uInt16)peek(0xffff, DISASM_NONE) << 8);
 }')
 
 define(M6502_CLC, `{
@@ -503,7 +515,7 @@ define(M6502_CLV, `{
 }')
 
 define(M6502_CMP, `{
-  uint16_t value = (uint16_t)A - (uint16_t)operand;
+  uInt16 value = (uInt16)A - (uInt16)operand;
 
   notZ = value;
   N = value & 0x0080;
@@ -511,7 +523,7 @@ define(M6502_CMP, `{
 }')
 
 define(M6502_CPX, `{
-  uint16_t value = (uint16_t)X - (uint16_t)operand;
+  uInt16 value = (uInt16)X - (uInt16)operand;
 
   notZ = value;
   N = value & 0x0080;
@@ -519,7 +531,7 @@ define(M6502_CPX, `{
 }')
 
 define(M6502_CPY, `{
-  uint16_t value = (uint16_t)Y - (uint16_t)operand;
+  uInt16 value = (uInt16)Y - (uInt16)operand;
 
   notZ = value;
   N = value & 0x0080;
@@ -527,17 +539,17 @@ define(M6502_CPY, `{
 }')
 
 define(M6502_DCP, `{
-  uint8_t value = operand - 1;
+  uInt8 value = operand - 1;
   poke(operandAddress, value);
 
-  uint16_t value2 = (uint16_t)A - (uint16_t)value;
+  uInt16 value2 = (uInt16)A - (uInt16)value;
   notZ = value2;
   N = value2 & 0x0080;
   C = !(value2 & 0x0100);
 }')
 
 define(M6502_DEC, `{
-  uint8_t value = operand - 1;
+  uInt8 value = operand - 1;
   poke(operandAddress, value);
 
   notZ = value;
@@ -566,7 +578,7 @@ define(M6502_EOR, `{
 }')
 
 define(M6502_INC, `{
-  uint8_t value = operand + 1;
+  uInt8 value = operand + 1;
   poke(operandAddress, value);
 
   notZ = value;
@@ -590,19 +602,19 @@ define(M6502_ISB, `{
   poke(operandAddress, operand);
 
   // N, V, Z, C flags are the same in either mode (C calculated at the end)
-  int32_t sum = A - operand - (C ? 0 : 1);
+  Int32 sum = A - operand - (C ? 0 : 1);
   N = sum & 0x80;
   V = (A ^ operand) & (A ^ sum) & 0x80;
   notZ = sum & 0xff;
 
   if(!D)
   {
-    A = (uint8_t) sum;
+    A = (uInt8) sum;
   }
   else
   {
-    int32_t lo = (A & 0x0f) - (operand & 0x0f) - (C ? 0 : 1);
-    int32_t hi = (A & 0xf0) - (operand & 0xf0);
+    Int32 lo = (A & 0x0f) - (operand & 0x0f) - (C ? 0 : 1);
+    Int32 hi = (A & 0xf0) - (operand & 0xf0);
     if(lo & 0x10)
     {
       lo -= 6;
@@ -621,7 +633,7 @@ define(M6502_JMP, `{
 }')
 
 define(M6502_JSR, `{
-  uint8_t low = peek(PC++, DISASM_CODE);
+  uInt8 low = peek(PC++, DISASM_CODE);
   peek(0x0100 + SP, DISASM_NONE);
 
   // It seems that the 650x does not push the address of the next instruction
@@ -630,7 +642,7 @@ define(M6502_JSR, `{
   poke(0x0100 + SP--, PC >> 8);
   poke(0x0100 + SP--, PC & 0xff);
 
-  PC = (low | ((uint16_t)peek(PC, DISASM_CODE) << 8));
+  PC = (low | ((uInt16)peek(PC, DISASM_CODE) << 8));
 }')
 
 define(M6502_LAS, `{
@@ -724,7 +736,7 @@ define(M6502_PLP, `{
 }')
 
 define(M6502_RLA, `{
-  uint8_t value = (operand << 1) | (C ? 1 : 0);
+  uInt8 value = (operand << 1) | (C ? 1 : 0);
   poke(operandAddress, value);
 
   A &= value;
@@ -794,18 +806,18 @@ define(M6502_RRA, `{
 
   if(!D)
   {
-    int32_t sum = A + operand + (C ? 1 : 0);
+    Int32 sum = A + operand + (C ? 1 : 0);
     N = sum & 0x80;
     V = ~(A ^ operand) & (A ^ sum) & 0x80;
     notZ = sum & 0xff;
     C = sum & 0xff00;
 
-    A = (uint8_t) sum;
+    A = (uInt8) sum;
   }
   else
   {
-    int32_t lo = (A & 0x0f) + (operand & 0x0f) + (C ? 1 : 0);
-    int32_t hi = (A & 0xf0) + (operand & 0xf0);
+    Int32 lo = (A & 0x0f) + (operand & 0x0f) + (C ? 1 : 0);
+    Int32 hi = (A & 0xf0) + (operand & 0xf0);
     notZ = (lo+hi) & 0xff;
     if(lo > 0x09)
     {
@@ -826,13 +838,13 @@ define(M6502_RTI, `{
   peek(0x0100 + SP++, DISASM_NONE);
   PS(peek(0x0100 + SP++, DISASM_NONE));
   PC = peek(0x0100 + SP++, DISASM_NONE);
-  PC |= ((uint16_t)peek(0x0100 + SP, DISASM_NONE) << 8);
+  PC |= ((uInt16)peek(0x0100 + SP, DISASM_NONE) << 8);
 }')
 
 define(M6502_RTS, `{
   peek(0x0100 + SP++, DISASM_NONE);
   PC = peek(0x0100 + SP++, DISASM_NONE);
-  PC |= ((uint16_t)peek(0x0100 + SP, DISASM_NONE) << 8);
+  PC |= ((uInt16)peek(0x0100 + SP, DISASM_NONE) << 8);
   peek(PC++, DISASM_CODE);
 }')
 
@@ -842,19 +854,19 @@ define(M6502_SAX, `{
 
 define(M6502_SBC, `{
   // N, V, Z, C flags are the same in either mode (C calculated at the end)
-  int32_t sum = A - operand - (C ? 0 : 1);
+  Int32 sum = A - operand - (C ? 0 : 1);
   N = sum & 0x80;
   V = (A ^ operand) & (A ^ sum) & 0x80;
   notZ = sum & 0xff;
 
   if(!D)
   {
-    A = (uint8_t) sum;
+    A = (uInt8) sum;
   }
   else
   {
-    int32_t lo = (A & 0x0f) - (operand & 0x0f) - (C ? 0 : 1);
-    int32_t hi = (A & 0xf0) - (operand & 0xf0);
+    Int32 lo = (A & 0x0f) - (operand & 0x0f) - (C ? 0 : 1);
+    Int32 hi = (A & 0xf0) - (operand & 0xf0);
     if(lo & 0x10)
     {
       lo -= 6;
@@ -869,7 +881,7 @@ define(M6502_SBC, `{
 }')
 
 define(M6502_SBX, `{
-  uint16_t value = (uint16_t)(X & A) - (uint16_t)operand;
+  uInt16 value = (uInt16)(X & A) - (uInt16)operand;
   X = (value & 0xff);
 
   notZ = X;
@@ -892,26 +904,26 @@ define(M6502_SEI, `{
 define(M6502_SHA, `{
   // NOTE: There are mixed reports on the actual operation
   // of this instruction!
-  poke(operandAddress, A & X & (((operandAddress >> 8) & 0xff) + 1)); 
+  poke(operandAddress, A & X & (((operandAddress >> 8) & 0xff) + 1));
 }')
 
 define(M6502_SHS, `{
   // NOTE: There are mixed reports on the actual operation
   // of this instruction!
   SP = A & X;
-  poke(operandAddress, A & X & (((operandAddress >> 8) & 0xff) + 1)); 
+  poke(operandAddress, A & X & (((operandAddress >> 8) & 0xff) + 1));
 }')
 
 define(M6502_SHX, `{
   // NOTE: There are mixed reports on the actual operation
   // of this instruction!
-  poke(operandAddress, X & (((operandAddress >> 8) & 0xff) + 1)); 
+  poke(operandAddress, X & (((operandAddress >> 8) & 0xff) + 1));
 }')
 
 define(M6502_SHY, `{
   // NOTE: There are mixed reports on the actual operation
   // of this instruction!
-  poke(operandAddress, Y & (((operandAddress >> 8) & 0xff) + 1)); 
+  poke(operandAddress, Y & (((operandAddress >> 8) & 0xff) + 1));
 }')
 
 define(M6502_SLO, `{

@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll       
-//  SS  SS   tt           ll   ll        
-//  SS     tttttt  eeee   ll   ll   aaaa 
+//   SSSS    tt          lll  lll
+//  SS  SS   tt           ll   ll
+//  SS     tttttt  eeee   ll   ll   aaaa
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -21,7 +21,6 @@
 #define SERIALIZER_HXX
 
 #include <iostream>
-#include <sstream>
 #include "bspf.hxx"
 
 /**
@@ -75,25 +74,11 @@ class Serializer
     void reset(void);
 
     /**
-      Returns the total size of the underlying stream, in bytes.
-
-      @result  The size of the stream, or 0 if it isn't valid.
-    */
-    uint32_t size(void);
-
-    /**
-      Sets the read/write location to the given absolute byte offset.
-
-      @param pos  The byte offset to seek to (from the start of the stream)
-    */
-    void setPosition(uint32_t pos);
-
-    /**
       Reads a byte value (unsigned 8-bit) from the current input stream.
 
       @result The byte value which has been read from the stream.
     */
-    uint8_t getByte(void);
+    uInt8 getByte(void);
 
     /**
       Reads a byte array (unsigned 8-bit) from the current input stream.
@@ -101,7 +86,7 @@ class Serializer
       @param array  The location to store the bytes read
       @param size   The size of the array (number of bytes to read)
     */
-    void getByteArray(uint8_t* array, uint32_t size);
+    void getByteArray(uInt8* array, uInt32 size);
 
 
     /**
@@ -109,7 +94,7 @@ class Serializer
 
       @result The short value which has been read from the stream.
     */
-    uint16_t getShort(void);
+    uInt16 getShort(void);
 
     /**
       Reads a short array (unsigned 16-bit) from the current input stream.
@@ -117,14 +102,14 @@ class Serializer
       @param array  The location to store the shorts read
       @param size   The size of the array (number of shorts to read)
     */
-    void getShortArray(uint16_t* array, uint32_t size);
+    void getShortArray(uInt16* array, uInt32 size);
 
     /**
       Reads an int value (unsigned 32-bit) from the current input stream.
 
       @result The int value which has been read from the stream.
     */
-    uint32_t getInt(void);
+    uInt32 getInt(void);
 
     /**
       Reads an integer array (unsigned 32-bit) from the current input stream.
@@ -132,7 +117,7 @@ class Serializer
       @param array  The location to store the integers read
       @param size   The size of the array (number of integers to read)
     */
-    void getIntArray(uint32_t* array, uint32_t size);
+    void getIntArray(uInt32* array, uInt32 size);
 
     /**
       Reads a string from the current input stream.
@@ -153,7 +138,7 @@ class Serializer
 
       @param value The byte value to write to the output stream.
     */
-    void putByte(uint8_t value);
+    void putByte(uInt8 value);
 
     /**
       Writes a byte array (unsigned 8-bit) to the current output stream.
@@ -161,14 +146,14 @@ class Serializer
       @param array  The bytes to write
       @param size   The size of the array (number of bytes to write)
     */
-    void putByteArray(const uint8_t* array, uint32_t size);
+    void putByteArray(const uInt8* array, uInt32 size);
 
     /**
       Writes a short value (unsigned 16-bit) to the current output stream.
 
       @param value The short value to write to the output stream.
     */
-    void putShort(uint16_t value);
+    void putShort(uInt16 value);
 
     /**
       Writes a short array (unsigned 16-bit) to the current output stream.
@@ -176,14 +161,14 @@ class Serializer
       @param array  The short to write
       @param size   The size of the array (number of shorts to write)
     */
-    void putShortArray(const uint16_t* array, uint32_t size);
+    void putShortArray(const uInt16* array, uInt32 size);
 
     /**
       Writes an int value (unsigned 32-bit) to the current output stream.
 
       @param value The int value to write to the output stream.
     */
-    void putInt(uint32_t value);
+    void putInt(uInt32 value);
 
     /**
       Writes an integer array (unsigned 32-bit) to the current output stream.
@@ -191,7 +176,7 @@ class Serializer
       @param array  The integers to write
       @param size   The size of the array (number of integers to write)
     */
-    void putIntArray(const uint32_t* array, uint32_t size);
+    void putIntArray(const uInt32* array, uInt32 size);
 
     /**
       Writes a string to the current output stream.

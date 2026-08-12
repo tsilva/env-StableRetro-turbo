@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll       
-//  SS  SS   tt           ll   ll        
-//  SS     tttttt  eeee   ll   ll   aaaa 
+//   SSSS    tt          lll  lll
+//  SS  SS   tt           ll   ll
+//  SS     tttttt  eeee   ll   ll   aaaa
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -17,6 +17,7 @@
 // $Id: Cart3F.cxx 2838 2014-01-17 23:34:03Z stephena $
 //============================================================================
 
+#include <cassert>
 #include <cstring>
 
 #include "System.hxx"
@@ -24,13 +25,13 @@
 #include "Cart3F.hxx"
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-Cartridge3F::Cartridge3F(const uint8_t* image, uint32_t size,
+Cartridge3F::Cartridge3F(const uInt8* image, uInt32 size,
                          const Settings& settings)
   : Cartridge(settings),
     mySize(size)
 {
   // Allocate array for the ROM image
-  myImage = new uint8_t[mySize];
+  myImage = new uInt8[mySize];
 
   // Copy the ROM image into my buffer
   memcpy(myImage, image, mySize);
@@ -56,8 +57,12 @@ void Cartridge3F::reset()
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void Cartridge3F::install(System& system)
 {
-  mySystem     = &system;
-  uint16_t shift = mySystem->pageShift();
+  mySystem = &system;
+  uInt16 shift = mySystem->pageShift();
+  uInt16 mask = mySystem->pageMask();
+
+  // Make sure the system we're being installed in has a page size that'll work
+  assert((0x1800 & mask) == 0);
 
   System::PageAccess access(0, 0, 0, this, System::PA_READWRITE);
 
@@ -65,12 +70,12 @@ void Cartridge3F::install(System& system)
   // we need to chain any accesses below 0x40 to the TIA. Our poke() method
   // does this via mySystem->tiaPoke(...), at least until we come up with a
   // cleaner way to do it).
-  for(uint32_t i = 0x00; i < 0x40; i += (1 << shift))
+  for(uInt32 i = 0x00; i < 0x40; i += (1 << shift))
     mySystem->setPageAccess(i >> shift, access);
 
   // Setup the second segment to always point to the last ROM slice
   access.type = System::PA_READ;
-  for(uint32_t j = 0x1800; j < 0x2000; j += (1 << shift))
+  for(uInt32 j = 0x1800; j < 0x2000; j += (1 << shift))
   {
     access.directPeekBase = &myImage[(mySize - 2048) + (j & 0x07FF)];
     access.codeAccessBase = &myCodeAccessBase[(mySize - 2048) + (j & 0x07FF)];
@@ -82,7 +87,7 @@ void Cartridge3F::install(System& system)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uint8_t Cartridge3F::peek(uint16_t address)
+uInt8 Cartridge3F::peek(uInt16 address)
 {
   address &= 0x0FFF;
 
@@ -97,7 +102,7 @@ uint8_t Cartridge3F::peek(uint16_t address)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool Cartridge3F::poke(uint16_t address, uint8_t value)
+bool Cartridge3F::poke(uInt16 address, uInt8 value)
 {
   address &= 0x0FFF;
 
@@ -117,12 +122,12 @@ bool Cartridge3F::poke(uint16_t address, uint8_t value)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool Cartridge3F::bank(uint16_t bank)
-{ 
+bool Cartridge3F::bank(uInt16 bank)
+{
   if(bankLocked()) return false;
 
   // Make sure the bank they're asking for is reasonable
-  if(((uint32_t)bank << 11) < mySize)
+  if(((uInt32)bank << 11) < mySize)
   {
     myCurrentBank = bank;
   }
@@ -133,14 +138,14 @@ bool Cartridge3F::bank(uint16_t bank)
     myCurrentBank = bank % (mySize >> 11);
   }
 
-  uint32_t offset = myCurrentBank << 11;
-  uint16_t shift = mySystem->pageShift();
+  uInt32 offset = myCurrentBank << 11;
+  uInt16 shift = mySystem->pageShift();
 
   // Setup the page access methods for the current bank
   System::PageAccess access(0, 0, 0, this, System::PA_READ);
 
   // Map ROM image into the system
-  for(uint32_t address = 0x1000; address < 0x1800; address += (1 << shift))
+  for(uInt32 address = 0x1000; address < 0x1800; address += (1 << shift))
   {
     access.directPeekBase = &myImage[offset + (address & 0x07FF)];
     access.codeAccessBase = &myCodeAccessBase[offset + (address & 0x07FF)];
@@ -150,19 +155,19 @@ bool Cartridge3F::bank(uint16_t bank)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uint16_t Cartridge3F::bank() const
+uInt16 Cartridge3F::bank() const
 {
   return myCurrentBank;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uint16_t Cartridge3F::bankCount() const
+uInt16 Cartridge3F::bankCount() const
 {
   return mySize >> 11;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool Cartridge3F::patch(uint16_t address, uint8_t value)
+bool Cartridge3F::patch(uInt16 address, uInt8 value)
 {
   address &= 0x0FFF;
 
@@ -172,10 +177,10 @@ bool Cartridge3F::patch(uint16_t address, uint8_t value)
     myImage[(address & 0x07FF) + mySize - 2048] = value;
 
   return myBankChanged = true;
-} 
+}
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-const uint8_t* Cartridge3F::getImage(int& size) const
+const uInt8* Cartridge3F::getImage(int& size) const
 {
   size = mySize;
   return myImage;

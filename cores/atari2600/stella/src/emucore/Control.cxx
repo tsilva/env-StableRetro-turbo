@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll       
-//  SS  SS   tt           ll   ll        
-//  SS     tttttt  eeee   ll   ll   aaaa 
+//   SSSS    tt          lll  lll
+//  SS  SS   tt           ll   ll
+//  SS     tttttt  eeee   ll   ll   aaaa
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -17,6 +17,8 @@
 // $Id: Control.cxx 2838 2014-01-17 23:34:03Z stephena $
 //============================================================================
 
+#include <cassert>
+
 #include "System.hxx"
 #include "Control.hxx"
 
@@ -28,13 +30,13 @@ Controller::Controller(Jack jack, const Event& event, const System& system,
     mySystem(system),
     myType(type)
 {
-  myDigitalPinState[One]   = 
-  myDigitalPinState[Two]   = 
-  myDigitalPinState[Three] = 
-  myDigitalPinState[Four]  = 
+  myDigitalPinState[One]   =
+  myDigitalPinState[Two]   =
+  myDigitalPinState[Three] =
+  myDigitalPinState[Four]  =
   myDigitalPinState[Six]   = true;
 
-  myAnalogPinValue[Five] = 
+  myAnalogPinValue[Five] =
   myAnalogPinValue[Nine] = maximumResistance;
 
   switch(myType)
@@ -81,21 +83,18 @@ Controller::Controller(Jack jack, const Event& event, const System& system,
     case CompuMate:
       myName = "CompuMate";
       break;
-    case QuadTari:
-      myName = "QuadTari";
-      break;
   }
 }
- 
+
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 Controller::~Controller()
 {
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uint8_t Controller::read()
+uInt8 Controller::read()
 {
-  uint8_t ioport = 0x00;
+  uInt8 ioport = 0x00;
   if(read(One))   ioport |= 0x01;
   if(read(Two))   ioport |= 0x02;
   if(read(Three)) ioport |= 0x04;
@@ -110,7 +109,7 @@ bool Controller::read(DigitalPin pin)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-int32_t Controller::read(AnalogPin pin)
+Int32 Controller::read(AnalogPin pin)
 {
   return myAnalogPinValue[pin];
 }
@@ -122,7 +121,7 @@ void Controller::set(DigitalPin pin, bool value)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void Controller::set(AnalogPin pin, int32_t value)
+void Controller::set(AnalogPin pin, Int32 value)
 {
   myAnalogPinValue[pin] = value;
 }
@@ -130,32 +129,48 @@ void Controller::set(AnalogPin pin, int32_t value)
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 bool Controller::save(Serializer& out) const
 {
-  // Output the digital pins
-  out.putBool(myDigitalPinState[One]);
-  out.putBool(myDigitalPinState[Two]);
-  out.putBool(myDigitalPinState[Three]);
-  out.putBool(myDigitalPinState[Four]);
-  out.putBool(myDigitalPinState[Six]);
+  try
+  {
+    // Output the digital pins
+    out.putBool(myDigitalPinState[One]);
+    out.putBool(myDigitalPinState[Two]);
+    out.putBool(myDigitalPinState[Three]);
+    out.putBool(myDigitalPinState[Four]);
+    out.putBool(myDigitalPinState[Six]);
 
-  // Output the analog pins
-  out.putInt(myAnalogPinValue[Five]);
-  out.putInt(myAnalogPinValue[Nine]);
+    // Output the analog pins
+    out.putInt(myAnalogPinValue[Five]);
+    out.putInt(myAnalogPinValue[Nine]);
+  }
+  catch(...)
+  {
+    cerr << "ERROR: Controller::save() exception\n";
+    return false;
+  }
   return true;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 bool Controller::load(Serializer& in)
 {
-  // Input the digital pins
-  myDigitalPinState[One]   = in.getBool();
-  myDigitalPinState[Two]   = in.getBool();
-  myDigitalPinState[Three] = in.getBool();
-  myDigitalPinState[Four]  = in.getBool();
-  myDigitalPinState[Six]   = in.getBool();
+  try
+  {
+    // Input the digital pins
+    myDigitalPinState[One]   = in.getBool();
+    myDigitalPinState[Two]   = in.getBool();
+    myDigitalPinState[Three] = in.getBool();
+    myDigitalPinState[Four]  = in.getBool();
+    myDigitalPinState[Six]   = in.getBool();
 
-  // Input the analog pins
-  myAnalogPinValue[Five] = (int32_t) in.getInt();
-  myAnalogPinValue[Nine] = (int32_t) in.getInt();
+    // Input the analog pins
+    myAnalogPinValue[Five] = (Int32) in.getInt();
+    myAnalogPinValue[Nine] = (Int32) in.getInt();
+  }
+  catch(...)
+  {
+    cerr << "ERROR: Controller::load() exception\n";
+    return false;
+  }
   return true;
 }
 
@@ -172,10 +187,10 @@ string Controller::about() const
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-const int32_t Controller::maximumResistance = 0x7FFFFFFF;
+const Int32 Controller::maximumResistance = 0x7FFFFFFF;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-const int32_t Controller::minimumResistance = 0x00000000;
+const Int32 Controller::minimumResistance = 0x00000000;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 Controller::Controller(const Controller& c)
@@ -184,10 +199,12 @@ Controller::Controller(const Controller& c)
     mySystem(c.mySystem),
     myType(c.myType)
 {
+  assert(false);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 Controller& Controller::operator = (const Controller&)
 {
+  assert(false);
   return *this;
 }

@@ -57,7 +57,7 @@ class Device : public Serializable
 
     /**
       Notification method invoked by the system right before the
-      system resets its cycle counter to zero.  It may be necessary 
+      system resets its cycle counter to zero.  It may be necessary
       to override this method for devices that remember cycle counts.
     */
     virtual void systemCyclesReset() { }
@@ -99,7 +99,7 @@ class Device : public Serializable
 
       @return The byte at the specified address
     */
-    virtual uint8_t peek(uint16_t address) = 0;
+    virtual uInt8 peek(uInt16 address) = 0;
 
     /**
       Change the byte at the specified address to the given value
@@ -109,7 +109,16 @@ class Device : public Serializable
 
       @return  True if the poke changed the device address space, else false
     */
-    virtual bool poke(uint16_t address, uint8_t value) = 0;
+    virtual bool poke(uInt16 address, uInt8 value) = 0;
+
+    /**
+      Query/change the given address type to use the given disassembly flags
+
+      @param address The address to modify
+      @param flags A bitfield of DisasmType directives for the given address
+    */
+    virtual uInt8 getAccessFlags(uInt16 address) { return 0; }
+    virtual void setAccessFlags(uInt16 address, uInt8 flags) { }
 
   protected:
     /// Pointer to the system the device is installed in or the null pointer

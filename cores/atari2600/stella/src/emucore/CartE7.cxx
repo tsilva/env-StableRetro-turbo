@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll       
-//  SS  SS   tt           ll   ll        
-//  SS     tttttt  eeee   ll   ll   aaaa 
+//   SSSS    tt          lll  lll
+//  SS  SS   tt           ll   ll
+//  SS     tttttt  eeee   ll   ll   aaaa
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -17,13 +17,14 @@
 // $Id: CartE7.cxx 2838 2014-01-17 23:34:03Z stephena $
 //============================================================================
 
+#include <cassert>
 #include <cstring>
 
 #include "System.hxx"
 #include "CartE7.hxx"
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-CartridgeE7::CartridgeE7(const uint8_t* image, uint32_t size, const Settings& settings)
+CartridgeE7::CartridgeE7(const uInt8* image, uInt32 size, const Settings& settings)
   : Cartridge(settings)
 {
   // Copy the ROM image into my buffer
@@ -51,21 +52,13 @@ void CartridgeE7::reset()
 {
   // Initialize RAM
   if(mySettings.getBool("ramrandom"))
-    for(uint32_t i = 0; i < 2048; ++i)
+    for(uInt32 i = 0; i < 2048; ++i)
       myRAM[i] = mySystem->randGenerator().next();
   else
     memset(myRAM, 0, 2048);
 
-  // Install some default banks for the RAM and first segment.
-  //
-  // The RAM bank powers up indeterminate on real hardware; when power-up
-  // randomization is enabled, start at a random RAM bank (as Stella 7
-  // does) rather than always bank 0. Uses the same emulated RNG and the
-  // same "ramrandom" setting already checked above, so it stays
-  // deterministic and adds no new configuration.
-  uint16_t ramBank = mySettings.getBool("ramrandom") ?
-      (uint16_t)(mySystem->randGenerator().next() % 4) : 0;
-  bankRAM(ramBank);
+  // Install some default banks for the RAM and first segment
+  bankRAM(0);
   bank(myStartBank);
 
   myBankChanged = true;
@@ -75,20 +68,24 @@ void CartridgeE7::reset()
 void CartridgeE7::install(System& system)
 {
   mySystem = &system;
-  uint16_t shift = mySystem->pageShift();
-  uint16_t mask = mySystem->pageMask();
+  uInt16 shift = mySystem->pageShift();
+  uInt16 mask = mySystem->pageMask();
+
+  // Make sure the system we're being installed in has a page size that'll work
+  assert(((0x1400 & mask) == 0) && ((0x1800 & mask) == 0) &&
+      ((0x1900 & mask) == 0) && ((0x1A00 & mask) == 0));
 
   System::PageAccess access(0, 0, 0, this, System::PA_READ);
 
   // Set the page accessing methods for the hot spots
-  for(uint32_t i = (0x1FE0 & ~mask); i < 0x2000; i += (1 << shift))
+  for(uInt32 i = (0x1FE0 & ~mask); i < 0x2000; i += (1 << shift))
   {
     access.codeAccessBase = &myCodeAccessBase[8128];
     mySystem->setPageAccess(i >> shift, access);
   }
 
   // Setup the second segment to always point to the last ROM slice
-  for(uint32_t j = 0x1A00; j < (0x1FE0U & ~mask); j += (1 << shift))
+  for(uInt32 j = 0x1A00; j < (0x1FE0U & ~mask); j += (1 << shift))
   {
     access.directPeekBase = &myImage[7 * 2048 + (j & 0x07FF)];
     access.codeAccessBase = &myCodeAccessBase[7 * 2048 + (j & 0x07FF)];
@@ -102,9 +99,9 @@ void CartridgeE7::install(System& system)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uint8_t CartridgeE7::peek(uint16_t address)
+uInt8 CartridgeE7::peek(uInt16 address)
 {
-  uint16_t peekAddress = address;
+  uInt16 peekAddress = address;
   address &= 0x0FFF;
 
   // Switch banks if necessary
@@ -120,7 +117,7 @@ uint8_t CartridgeE7::peek(uint16_t address)
   if((myCurrentSlice[0] == 7) && (address < 0x0400))
   {
     // Reading from the 1K write port @ $1000 triggers an unwanted write
-    uint8_t value = mySystem->getDataBusState(0xFF);
+    uInt8 value = mySystem->getDataBusState(0xFF);
 
     if(bankLocked())
       return value;
@@ -133,7 +130,7 @@ uint8_t CartridgeE7::peek(uint16_t address)
   else if((address >= 0x0800) && (address <= 0x08FF))
   {
     // Reading from the 256B write port @ $1800 triggers an unwanted write
-    uint8_t value = mySystem->getDataBusState(0xFF);
+    uInt8 value = mySystem->getDataBusState(0xFF);
 
     if(bankLocked())
       return value;
@@ -148,7 +145,7 @@ uint8_t CartridgeE7::peek(uint16_t address)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeE7::poke(uint16_t address, uint8_t)
+bool CartridgeE7::poke(uInt16 address, uInt8)
 {
   address &= 0x0FFF;
 
@@ -162,27 +159,27 @@ bool CartridgeE7::poke(uint16_t address, uint8_t)
     bankRAM(address & 0x0003);
   }
 
-  // NOTE: This does not handle writing to RAM, however, this 
+  // NOTE: This does not handle writing to RAM, however, this
   // function should never be called for RAM because of the
   // way page accessing has been setup
   return false;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void CartridgeE7::bankRAM(uint16_t bank)
+void CartridgeE7::bankRAM(uInt16 bank)
 {
   if(bankLocked()) return;
 
   // Remember what bank we're in
   myCurrentRAM = bank;
-  uint16_t offset = bank << 8;
-  uint16_t shift = mySystem->pageShift();
+  uInt16 offset = bank << 8;
+  uInt16 shift = mySystem->pageShift();
 
   // Setup the page access methods for the current bank
   System::PageAccess access(0, 0, 0, this, System::PA_WRITE);
 
   // Set the page accessing method for the 256 bytes of RAM writing pages
-  for(uint32_t j = 0x1800; j < 0x1900; j += (1 << shift))
+  for(uInt32 j = 0x1800; j < 0x1900; j += (1 << shift))
   {
     access.directPokeBase = &myRAM[1024 + offset + (j & 0x00FF)];
     access.codeAccessBase = &myCodeAccessBase[8192 + 1024 + offset + (j & 0x00FF)];
@@ -192,7 +189,7 @@ void CartridgeE7::bankRAM(uint16_t bank)
   // Set the page accessing method for the 256 bytes of RAM reading pages
   access.directPokeBase = 0;
   access.type = System::PA_READ;
-  for(uint32_t k = 0x1900; k < 0x1A00; k += (1 << shift))
+  for(uInt32 k = 0x1900; k < 0x1A00; k += (1 << shift))
   {
     access.directPeekBase = &myRAM[1024 + offset + (k & 0x00FF)];
     access.codeAccessBase = &myCodeAccessBase[8192 + 1024 + offset + (k & 0x00FF)];
@@ -202,14 +199,14 @@ void CartridgeE7::bankRAM(uint16_t bank)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeE7::bank(uint16_t slice)
-{ 
+bool CartridgeE7::bank(uInt16 slice)
+{
   if(bankLocked()) return false;
 
   // Remember what bank we're in
   myCurrentSlice[0] = slice;
-  uint16_t offset = slice << 11;
-  uint16_t shift = mySystem->pageShift();
+  uInt16 offset = slice << 11;
+  uInt16 shift = mySystem->pageShift();
 
   // Setup the page access methods for the current bank
   if(slice != 7)
@@ -217,7 +214,7 @@ bool CartridgeE7::bank(uint16_t slice)
     System::PageAccess access(0, 0, 0, this, System::PA_READ);
 
     // Map ROM image into first segment
-    for(uint32_t address = 0x1000; address < 0x1800; address += (1 << shift))
+    for(uInt32 address = 0x1000; address < 0x1800; address += (1 << shift))
     {
       access.directPeekBase = &myImage[offset + (address & 0x07FF)];
       access.codeAccessBase = &myCodeAccessBase[offset + (address & 0x07FF)];
@@ -229,7 +226,7 @@ bool CartridgeE7::bank(uint16_t slice)
     System::PageAccess access(0, 0, 0, this, System::PA_WRITE);
 
     // Set the page accessing method for the 1K slice of RAM writing pages
-    for(uint32_t j = 0x1000; j < 0x1400; j += (1 << shift))
+    for(uInt32 j = 0x1000; j < 0x1400; j += (1 << shift))
     {
       access.directPokeBase = &myRAM[j & 0x03FF];
       access.codeAccessBase = &myCodeAccessBase[8192 + (j & 0x03FF)];
@@ -239,7 +236,7 @@ bool CartridgeE7::bank(uint16_t slice)
     // Set the page accessing method for the 1K slice of RAM reading pages
     access.directPokeBase = 0;
     access.type = System::PA_READ;
-    for(uint32_t k = 0x1400; k < 0x1800; k += (1 << shift))
+    for(uInt32 k = 0x1400; k < 0x1800; k += (1 << shift))
     {
       access.directPeekBase = &myRAM[k & 0x03FF];
       access.codeAccessBase = &myCodeAccessBase[8192 + (k & 0x03FF)];
@@ -250,19 +247,19 @@ bool CartridgeE7::bank(uint16_t slice)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uint16_t CartridgeE7::bank() const
+uInt16 CartridgeE7::bank() const
 {
   return myCurrentSlice[0];
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uint16_t CartridgeE7::bankCount() const
+uInt16 CartridgeE7::bankCount() const
 {
   return 8;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeE7::patch(uint16_t address, uint8_t value)
+bool CartridgeE7::patch(uInt16 address, uInt8 value)
 {
   address = address & 0x0FFF;
 
@@ -289,10 +286,10 @@ bool CartridgeE7::patch(uint16_t address, uint8_t value)
     myImage[(myCurrentSlice[address >> 11] << 11) + (address & 0x07FF)] = value;
 
   return myBankChanged = true;
-} 
+}
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-const uint8_t* CartridgeE7::getImage(int& size) const
+const uInt8* CartridgeE7::getImage(int& size) const
 {
   size = 16384;
   return myImage;

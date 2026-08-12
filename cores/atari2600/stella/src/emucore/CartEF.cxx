@@ -17,13 +17,14 @@
 // $Id: CartEF.cxx 2838 2014-01-17 23:34:03Z stephena $
 //============================================================================
 
+#include <cassert>
 #include <cstring>
 
 #include "System.hxx"
 #include "CartEF.hxx"
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-CartridgeEF::CartridgeEF(const uint8_t* image, uint32_t size, const Settings& settings)
+CartridgeEF::CartridgeEF(const uInt8* image, uInt32 size, const Settings& settings)
   : Cartridge(settings)
 {
   // Copy the ROM image into my buffer
@@ -51,12 +52,15 @@ void CartridgeEF::install(System& system)
 {
   mySystem = &system;
 
+  // Make sure the system we're being installed in has a page size that'll work
+  assert((0x1000 & mySystem->pageMask()) == 0);
+
   // Install pages for the startup bank
   bank(myStartBank);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uint8_t CartridgeEF::peek(uint16_t address)
+uInt8 CartridgeEF::peek(uInt16 address)
 {
   address &= 0x0FFF;
 
@@ -68,7 +72,7 @@ uint8_t CartridgeEF::peek(uint16_t address)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeEF::poke(uint16_t address, uint8_t)
+bool CartridgeEF::poke(uInt16 address, uInt8)
 {
   address &= 0x0FFF;
 
@@ -80,27 +84,27 @@ bool CartridgeEF::poke(uint16_t address, uint8_t)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeEF::bank(uint16_t bank)
+bool CartridgeEF::bank(uInt16 bank)
 {
   if(bankLocked()) return false;
 
   // Remember what bank we're in
   myCurrentBank = bank;
-  uint16_t offset = myCurrentBank << 12;
-  uint16_t shift = mySystem->pageShift();
-  uint16_t mask = mySystem->pageMask();
+  uInt16 offset = myCurrentBank << 12;
+  uInt16 shift = mySystem->pageShift();
+  uInt16 mask = mySystem->pageMask();
 
   System::PageAccess access(0, 0, 0, this, System::PA_READ);
 
   // Set the page accessing methods for the hot spots
-  for(uint32_t i = (0x1FE0 & ~mask); i < 0x2000; i += (1 << shift))
+  for(uInt32 i = (0x1FE0 & ~mask); i < 0x2000; i += (1 << shift))
   {
     access.codeAccessBase = &myCodeAccessBase[offset + (i & 0x0FFF)];
     mySystem->setPageAccess(i >> shift, access);
   }
 
   // Setup the page access methods for the current bank
-  for(uint32_t address = 0x1000; address < (0x1FE0U & ~mask);
+  for(uInt32 address = 0x1000; address < (0x1FE0U & ~mask);
       address += (1 << shift))
   {
     access.directPeekBase = &myImage[offset + (address & 0x0FFF)];
@@ -111,26 +115,26 @@ bool CartridgeEF::bank(uint16_t bank)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uint16_t CartridgeEF::bank() const
+uInt16 CartridgeEF::bank() const
 {
   return myCurrentBank;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uint16_t CartridgeEF::bankCount() const
+uInt16 CartridgeEF::bankCount() const
 {
   return 16;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeEF::patch(uint16_t address, uint8_t value)
+bool CartridgeEF::patch(uInt16 address, uInt8 value)
 {
   myImage[(myCurrentBank << 12) + (address & 0x0FFF)] = value;
   return myBankChanged = true;
-} 
+}
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-const uint8_t* CartridgeEF::getImage(int& size) const
+const uInt8* CartridgeEF::getImage(int& size) const
 {
   size = 65536;
   return myImage;
@@ -139,18 +143,35 @@ const uint8_t* CartridgeEF::getImage(int& size) const
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 bool CartridgeEF::save(Serializer& out) const
 {
-  out.putString(name());
-  out.putShort(myCurrentBank);
+  try
+  {
+    out.putString(name());
+    out.putShort(myCurrentBank);
+  }
+  catch(...)
+  {
+    cerr << "ERROR: CartridgeEF::save" << endl;
+    return false;
+  }
+
   return true;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 bool CartridgeEF::load(Serializer& in)
 {
-  if(in.getString() != name())
-    return false;
+  try
+  {
+    if(in.getString() != name())
+      return false;
 
-  myCurrentBank = in.getShort();
+    myCurrentBank = in.getShort();
+  }
+  catch(...)
+  {
+    cerr << "ERROR: CartridgeEF::load" << endl;
+    return false;
+  }
 
   // Remember what bank we were in
   bank(myCurrentBank);

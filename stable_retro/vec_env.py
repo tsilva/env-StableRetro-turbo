@@ -626,12 +626,7 @@ class RetroVecEnv(VectorEnv):
 
     @staticmethod
     def _initial_state(template):
-        initial_state = template.initial_state if template.initial_state else None
-        if initial_state is not None and template.system == "Atari2600":
-            from stable_retro.stella_state import migrate_legacy_state
-
-            initial_state = migrate_legacy_state(template.em, initial_state)
-        return initial_state
+        return template.initial_state if template.initial_state else None
 
     @staticmethod
     def _observation_space_for_layout(observation_space, obs_layout):
@@ -1097,6 +1092,23 @@ class RetroVecEnv(VectorEnv):
         if not np.all(self._initialized[mask]):
             raise RuntimeError("cannot capture a lane before its initial reset")
         return tuple(self.native.capture_snapshots(mask))
+
+    def ram(self) -> np.ndarray:
+        """Return an immutable owned snapshot of each lane's emulator RAM."""
+        if self.closed:
+            raise RuntimeError("cannot read RAM from a closed environment")
+        payloads = tuple(self.native.get_rams())
+        if not payloads:
+            result = np.empty((0, 0), dtype=np.uint8)
+        else:
+            widths = {len(payload) for payload in payloads}
+            if len(widths) != 1:
+                raise RuntimeError("vector lanes expose inconsistent RAM sizes")
+            result = np.stack(
+                [np.frombuffer(payload, dtype=np.uint8).copy() for payload in payloads]
+            )
+        result.setflags(write=False)
+        return result
 
     def close(self):
         self.closed = True

@@ -22,7 +22,10 @@
 
 class System;
 #ifdef THUMB_SUPPORT
-struct Thumbulator;
+class Thumbulator;
+#endif
+#ifdef DEBUGGER_SUPPORT
+  #include "CartDPCPlusWidget.hxx"
 #endif
 
 #include "bspf.hxx"
@@ -52,8 +55,8 @@ class CartridgeDPCPlus : public Cartridge
       @param size      The size of the ROM image
       @param settings  A reference to the various settings (read-only)
     */
-    CartridgeDPCPlus(const uint8_t* image, uint32_t size, const Settings& settings);
- 
+    CartridgeDPCPlus(const uInt8* image, uInt32 size, const Settings& settings);
+
     /**
       Destructor
     */
@@ -85,17 +88,17 @@ class CartridgeDPCPlus : public Cartridge
 
       @param bank The bank that should be installed in the system
     */
-    bool bank(uint16_t bank);
+    bool bank(uInt16 bank);
 
     /**
       Get the current bank.
     */
-    uint16_t bank() const;
+    uInt16 bank() const;
 
     /**
       Query the number of banks supported by the cartridge.
     */
-    uint16_t bankCount() const;
+    uInt16 bankCount() const;
 
     /**
       Patch the cartridge ROM.
@@ -104,7 +107,7 @@ class CartridgeDPCPlus : public Cartridge
       @param value    The value to place into the address
       @return    Success or failure of the patch operation
     */
-    bool patch(uint16_t address, uint8_t value);
+    bool patch(uInt16 address, uInt8 value);
 
     /**
       Access the internal ROM image for this cartridge.
@@ -112,7 +115,7 @@ class CartridgeDPCPlus : public Cartridge
       @param size  Set to the size of the internal ROM image data
       @return  A pointer to the internal ROM image data
     */
-    const uint8_t* getImage(int& size) const;
+    const uInt8* getImage(int& size) const;
 
     /**
       Save the current state of this cart to the given Serializer.
@@ -137,13 +140,25 @@ class CartridgeDPCPlus : public Cartridge
     */
     string name() const { return "CartridgeDPC+"; }
 
+  #ifdef DEBUGGER_SUPPORT
+    /**
+      Get debugger widget responsible for accessing the inner workings
+      of the cart.
+    */
+    CartDebugWidget* debugWidget(GuiObject* boss, const GUI::Font& lfont,
+        const GUI::Font& nfont, int x, int y, int w, int h)
+    {
+      return new CartridgeDPCPlusWidget(boss, lfont, nfont, x, y, w, h, *this);
+    }
+  #endif
+
   public:
     /**
       Get the byte at the specified address.
 
       @return The byte at the specified address
     */
-    uint8_t peek(uint16_t address);
+    uInt8 peek(uInt16 address);
 
     /**
       Change the byte at the specified address to the given value
@@ -152,48 +167,48 @@ class CartridgeDPCPlus : public Cartridge
       @param value The value to be stored at the address
       @return  True if the poke changed the device address space, else false
     */
-    bool poke(uint16_t address, uint8_t value);
+    bool poke(uInt16 address, uInt8 value);
 
   private:
-    /** 
+    /**
       Sets the initial state of the DPC pointers and RAM
     */
     void setInitialState();
 
-    /** 
+    /**
       Clocks the random number generator to move it to its next state
     */
     void clockRandomNumberGenerator();
-  
-    /** 
+
+    /**
       Clocks the random number generator to move it to its prior state
     */
     void priorClockRandomNumberGenerator();
 
-    /** 
+    /**
       Updates any data fetchers in music mode based on the number of
       CPU cycles which have passed since the last update.
     */
     void updateMusicModeDataFetchers();
 
-    /** 
+    /**
       Call Special Functions
     */
-    void callFunction(uint8_t value);
+    void callFunction(uInt8 value);
 
   private:
     // The ROM image and size
-    uint8_t* myImage;
-    uint32_t mySize;
+    uInt8* myImage;
+    uInt32 mySize;
 
     // Pointer to the 24K program ROM image of the cartridge
-    uint8_t* myProgramImage;
+    uInt8* myProgramImage;
 
     // Pointer to the 4K display ROM image of the cartridge
-    uint8_t* myDisplayImage;
+    uInt8* myDisplayImage;
 
     // The DPC 8k RAM image
-    uint8_t myDPCRAM[8192];
+    uInt8 myDPCRAM[8192];
 
 #ifdef THUMB_SUPPORT
     // Pointer to the Thumb ARM emulator object
@@ -201,66 +216,55 @@ class CartridgeDPCPlus : public Cartridge
 #endif
 
     // Pointer to the 1K frequency table
-    uint8_t* myFrequencyImage;
+    uInt8* myFrequencyImage;
 
     // Indicates which bank is currently active
-    uint16_t myCurrentBank;
-  
+    uInt16 myCurrentBank;
+
     // The top registers for the data fetchers
-    uint8_t myTops[8];
+    uInt8 myTops[8];
 
     // The bottom registers for the data fetchers
-    uint8_t myBottoms[8];
+    uInt8 myBottoms[8];
 
     // The counter registers for the data fetchers
-    uint16_t myCounters[8];
-  
+    uInt16 myCounters[8];
+
     // The counter registers for the fractional data fetchers
-    uint32_t myFractionalCounters[8];
+    uInt32 myFractionalCounters[8];
 
     // The fractional increments for the data fetchers
-    uint8_t myFractionalIncrements[8];
+    uInt8 myFractionalIncrements[8];
 
     // The Fast Fetcher Enabled flag
     bool myFastFetch;
-  
+
     // Flags that last byte peeked was A9 (LDA #)
     bool myLDAimmediate;
 
     // Parameter for special functions
-    uint8_t myParameter[8];
+    uInt8 myParameter[8];
 
     // Parameter pointer for special functions
-    uint8_t myParameterPointer;
+    uInt8 myParameterPointer;
 
     // The music mode counters
-    uint32_t myMusicCounters[3];
+    uInt32 myMusicCounters[3];
 
     // The music frequency
-    uint32_t myMusicFrequencies[3];
-  
+    uInt32 myMusicFrequencies[3];
+
     // The music waveforms
-    uint16_t myMusicWaveforms[3];
-  
+    uInt16 myMusicWaveforms[3];
+
     // The random number generator register
-    uint32_t myRandomNumber;
+    uInt32 myRandomNumber;
 
     // System cycle count when the last update to music data fetchers occurred
-    int32_t mySystemCycles;
+    Int32 mySystemCycles;
 
-    // Fractional DPC music OSC clocks unused during the last update,
-    // as an integer remainder in units of 1/myDpcClockDen of an OSC clock
-    uint32_t myFractionalClocks;
-
-    // DPC music-oscillator clock rate as an exact integer ratio
-    // (OSC clocks per CPU cycle = num/den), chosen from the TV format
-    uint32_t myDpcClockNum;
-    uint32_t myDpcClockDen;
-
-  public:
-    void setDpcClockRate(uint32_t num, uint32_t den);
-
-  private:
+    // Fractional DPC music OSC clocks unused during the last update
+    double myFractionalClocks;
 };
 
 #endif

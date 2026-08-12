@@ -221,6 +221,25 @@ def _make_test_retro_vec_env(tmp_path, **kwargs):
     )
 
 
+def test_retro_vec_env_ram_is_lane_aligned_owned_and_read_only(tmp_path):
+    env = _make_test_retro_vec_env(tmp_path, num_envs=2)
+    try:
+        env.reset(seed=7)
+        first = env.ram()
+        assert first.shape[0] == 2
+        assert first.shape[1] > 0
+        assert first.dtype == np.uint8
+        assert first.flags.owndata
+        assert not first.flags.writeable
+        actions = np.zeros((2, env.num_buttons), dtype=np.uint8)
+        env.step(actions)
+        second = env.ram()
+        assert second.flags.owndata
+        assert not np.shares_memory(first, second)
+    finally:
+        env.close()
+
+
 def _street_fighter_rom_path_or_skip():
     import stable_retro as retro
 
@@ -1683,6 +1702,13 @@ def _breakout_rom_path_or_skip():
         pytest.skip("Breakout-Atari2600-v0 ROM is not imported locally")
 
 
+def _authority_breakout_state_path():
+    return (
+        Path(__file__).resolve().parents[2]
+        / "stable_retro/data/stable/Breakout-Atari2600-v0/Start.state"
+    )
+
+
 def _make_breakout_vec_env(**kwargs):
     import stable_retro as retro
     from stable_retro.vec_env import RetroVecEnv
@@ -1691,7 +1717,7 @@ def _make_breakout_vec_env(**kwargs):
         pytest.skip("stella core is not built")
 
     defaults = {
-        "state": "Start",
+        "state": str(_authority_breakout_state_path()),
         "num_envs": 1,
         "rom_path": _breakout_rom_path_or_skip(),
         "obs_grayscale": True,
@@ -1997,11 +2023,7 @@ def test_stella_breakout_autodetects_ntsc_palette():
     import stable_retro as retro
 
     emulator = retro.RetroEmulator(_breakout_rom_path_or_skip())
-    state_path = retro.data.get_file_path(
-        "Breakout-Atari2600-v0",
-        "Start.state",
-        retro.data.Integrations.STABLE,
-    )
+    state_path = _authority_breakout_state_path()
     try:
         with gzip.open(state_path, "rb") as state_file:
             emulator.set_state(state_file.read())
@@ -2013,7 +2035,7 @@ def test_stella_breakout_autodetects_ntsc_palette():
             tuple(color)
             for color in np.unique(emulator.get_screen().reshape(-1, 3), axis=0)
         }
-        assert {(200, 72, 72), (72, 160, 72), (64, 72, 200)} <= colors
+        assert {(72, 72, 200), (72, 160, 72), (200, 72, 66)} <= colors
     finally:
         del emulator
 
@@ -2031,6 +2053,57 @@ def test_stella_reports_the_submitted_frame_width():
         assert emulator.get_screen().shape[1] == 160
     finally:
         del emulator
+
+
+def test_stella_live_snapshot_continuation_is_exact():
+    if not _has_stella_core():
+        pytest.skip("stella core is not built")
+
+    import stable_retro as retro
+
+    root = Path(__file__).resolve().parents[2] / "stable_retro" / "data" / "stable" / "Breakout-Atari2600-v0"
+    env = retro.RetroVecEnv(
+        "Breakout-Atari2600-v0",
+        state=str(root / "Start.state"),
+        rom_path=_breakout_rom_path_or_skip(),
+        info=str(root / "data.json"),
+        scenario=str(root / "scenario.json"),
+        num_envs=1,
+        frame_skip=4,
+        frame_stack=4,
+        obs_resize=(84, 84),
+        obs_grayscale=True,
+        obs_resize_algorithm="area",
+        obs_layout="chw",
+        render_mode="rgb_array",
+        use_restricted_actions=[[], ["BUTTON"], ["RIGHT"], ["LEFT"]],
+    )
+    try:
+        env.reset()
+        for action in (0, 1, 2, 3):
+            env.step(np.asarray([action]))
+        handles = env.capture_snapshots(np.ones(1, dtype=np.bool_))
+        suffix = (1, 2, 0, 0)
+        expected = []
+        for action in suffix:
+            observation = env.step(np.asarray([action]))[0]
+            expected.append((observation.copy(), env.ram().copy(), env.render_lane(0).copy()))
+        env.reset(
+            options={
+                "reset_mask": np.ones(1, dtype=np.bool_),
+                "state_indices": np.full(1, -1, dtype=np.int32),
+                "snapshots": list(handles),
+            }
+        )
+        for action, (expected_obs, expected_ram, expected_frame) in zip(
+            suffix, expected, strict=True
+        ):
+            observation = env.step(np.asarray([action]))[0]
+            np.testing.assert_array_equal(observation, expected_obs)
+            np.testing.assert_array_equal(env.ram(), expected_ram)
+            np.testing.assert_array_equal(env.render_lane(0), expected_frame)
+    finally:
+        env.close()
 
 
 def _native_atari_render_skip_trace(tmp_path, *, disable_render_skip, state_path):

@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll       
-//  SS  SS   tt           ll   ll        
-//  SS     tttttt  eeee   ll   ll   aaaa 
+//   SSSS    tt          lll  lll
+//  SS  SS   tt           ll   ll
+//  SS     tttttt  eeee   ll   ll   aaaa
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -17,13 +17,14 @@
 // $Id: Cart4K.cxx 2838 2014-01-17 23:34:03Z stephena $
 //============================================================================
 
+#include <cassert>
 #include <cstring>
 
 #include "System.hxx"
 #include "Cart4K.hxx"
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-Cartridge4K::Cartridge4K(const uint8_t* image, uint32_t size, const Settings& settings)
+Cartridge4K::Cartridge4K(const uInt8* image, uInt32 size, const Settings& settings)
   : Cartridge(settings)
 {
   // Copy the ROM image into my buffer
@@ -45,13 +46,17 @@ void Cartridge4K::reset()
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void Cartridge4K::install(System& system)
 {
-  mySystem     = &system;
-  uint16_t shift = mySystem->pageShift();
+  mySystem = &system;
+  uInt16 shift = mySystem->pageShift();
+  uInt16 mask = mySystem->pageMask();
+
+  // Make sure the system we're being installed in has a page size that'll work
+  assert((0x1000 & mask) == 0);
 
   System::PageAccess access(0, 0, 0, this, System::PA_READ);
 
   // Map ROM image into the system
-  for(uint32_t address = 0x1000; address < 0x2000; address += (1 << shift))
+  for(uInt32 address = 0x1000; address < 0x2000; address += (1 << shift))
   {
     access.directPeekBase = &myImage[address & 0x0FFF];
     access.codeAccessBase = &myCodeAccessBase[address & 0x0FFF];
@@ -60,47 +65,47 @@ void Cartridge4K::install(System& system)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uint8_t Cartridge4K::peek(uint16_t address)
+uInt8 Cartridge4K::peek(uInt16 address)
 {
   return myImage[address & 0x0FFF];
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool Cartridge4K::poke(uint16_t, uint8_t)
+bool Cartridge4K::poke(uInt16, uInt8)
 {
   // This is ROM so poking has no effect :-)
   return false;
-} 
+}
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool Cartridge4K::bank(uint16_t)
+bool Cartridge4K::bank(uInt16)
 {
   // Doesn't support bankswitching
   return false;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uint16_t Cartridge4K::bank() const
+uInt16 Cartridge4K::bank() const
 {
   // Doesn't support bankswitching
   return 0;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uint16_t Cartridge4K::bankCount() const
+uInt16 Cartridge4K::bankCount() const
 {
   return 1;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool Cartridge4K::patch(uint16_t address, uint8_t value)
+bool Cartridge4K::patch(uInt16 address, uInt8 value)
 {
   myImage[address & 0x0FFF] = value;
   return myBankChanged = true;
-} 
+}
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-const uint8_t* Cartridge4K::getImage(int& size) const
+const uInt8* Cartridge4K::getImage(int& size) const
 {
   size = 4096;
   return myImage;

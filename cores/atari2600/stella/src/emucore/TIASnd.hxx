@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll       
-//  SS  SS   tt           ll   ll        
-//  SS     tttttt  eeee   ll   ll   aaaa 
+//   SSSS    tt          lll  lll
+//  SS  SS   tt           ll   ll
+//  SS     tttttt  eeee   ll   ll   aaaa
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -32,15 +32,13 @@
   @author  Bradford W. Mott, Stephen Anthony, z26 and MESS teams
   @version $Id: TIASnd.hxx 2838 2014-01-17 23:34:03Z stephena $
 */
-class Serializer;
-
 class TIASound
 {
   public:
     /**
       Create a new TIA Sound object using the specified output frequency
     */
-    TIASound(int32_t outputFrequency = 31400);
+    TIASound(Int32 outputFrequency = 31400);
 
     /**
       Destructor
@@ -56,7 +54,7 @@ class TIASound
     /**
       Set the frequency output samples should be generated at
     */
-    void outputFrequency(int32_t freq);
+    void outputFrequency(Int32 freq);
 
     /**
       Selects the number of audio channels per sample.  There are two factors
@@ -65,8 +63,10 @@ class TIASound
       @param hardware  The number of channels supported by the sound system
       @param stereo    Whether to output the internal sound signals into 1
                        or 2 channels
+
+      @return  Status of the channel configuration used
     */
-    void channels(uint32_t hardware, bool stereo);
+    string channels(uInt32 hardware, bool stereo);
 
   public:
     /**
@@ -75,14 +75,14 @@ class TIASound
       @param address Register address
       @param value Value to store in the register
     */
-    void set(uint16_t address, uint8_t value);
+    void set(uInt16 address, uInt8 value);
 
     /**
       Gets the specified sound register's value
 
       @param address Register address
     */
-    uint8_t get(uint16_t address) const;
+    uInt8 get(uInt16 address) const;
 
     /**
       Create sound samples based on the current sound register settings
@@ -92,27 +92,15 @@ class TIASound
       @param buffer The location to store generated samples
       @param samples The number of samples to generate
     */
-    void process(int16_t* buffer, uint32_t samples);
+    void process(Int16* buffer, uInt32 samples);
 
     /**
       Set the volume of the samples created (0-100)
     */
-    void volume(uint32_t percent);
+    void volume(uInt32 percent);
 
   private:
-    void polyInit(uint8_t* poly, int size, int f0, int f1);
-
-  public:
-    /**
-      Save/load the generator's emulated state (registers, polynomial
-      positions, divider phases, output counter). Configuration values
-      (output frequency, volume percentage, channel mode) are NOT
-      saved: they belong to the frontend, not the emulated machine.
-    */
-    bool save(Serializer& out) const;
-    bool load(Serializer& in);
-
-  private:
+    void polyInit(uInt8* poly, int size, int f0, int f1);
 
   private:
     // Definitions for AUDCx (15, 16)
@@ -153,24 +141,24 @@ class TIASound
 
   private:
     // Structures to hold the 6 tia sound control bytes
-    uint8_t myAUDC[2];    // AUDCx (15, 16)
-    uint8_t myAUDF[2];    // AUDFx (17, 18)
-    int16_t myAUDV[2];    // AUDVx (19, 1A)
+    uInt8 myAUDC[2];    // AUDCx (15, 16)
+    uInt8 myAUDF[2];    // AUDFx (17, 18)
+    Int16 myAUDV[2];    // AUDVx (19, 1A)
 
-    int16_t myVolume[2];  // Last output volume for each channel
+    Int16 myVolume[2];  // Last output volume for each channel
 
-    uint8_t myP4[2];      // Position pointer for the 4-bit POLY array
-    uint8_t myP5[2];      // Position pointer for the 5-bit POLY array
-    uint16_t myP9[2];     // Position pointer for the 9-bit POLY array
+    uInt8 myP4[2];      // Position pointer for the 4-bit POLY array
+    uInt8 myP5[2];      // Position pointer for the 5-bit POLY array
+    uInt16 myP9[2];     // Position pointer for the 9-bit POLY array
 
-    uint8_t myDivNCnt[2]; // Divide by n counter. one for each channel
-    uint8_t myDivNMax[2]; // Divide by n maximum, one for each channel
-    uint8_t myDiv3Cnt[2]; // Div 3 counter, used for POLY5_DIV3 mode
+    uInt8 myDivNCnt[2]; // Divide by n counter. one for each channel
+    uInt8 myDivNMax[2]; // Divide by n maximum, one for each channel
+    uInt8 myDiv3Cnt[2]; // Div 3 counter, used for POLY5_DIV3 mode
 
     ChannelMode myChannelMode;
-    int32_t  myOutputFrequency;
-    int32_t  myOutputCounter;
-    uint32_t myVolumePercentage;
+    Int32  myOutputFrequency;
+    Int32  myOutputCounter;
+    uInt32 myVolumePercentage;
 
     /*
       Initialize the bit patterns for the polynomials (at runtime).
@@ -180,9 +168,9 @@ class TIASound
       single bit per byte keeps the math simple, which is important for
       efficient processing.
     */
-    uint8_t Bit4[POLY4_SIZE];
-    uint8_t Bit5[POLY5_SIZE];
-    uint8_t Bit9[POLY9_SIZE];
+    uInt8 Bit4[POLY4_SIZE];
+    uInt8 Bit5[POLY5_SIZE];
+    uInt8 Bit9[POLY9_SIZE];
 
     /*
       The 'Div by 31' counter is treated as another polynomial because of
@@ -190,7 +178,7 @@ class TIASound
       has a 13:18 ratio (of course, 13+18 = 31).  This could also be
       implemented by using counters.
     */
-    static const uint8_t Div31[POLY5_SIZE];
+    static const uInt8 Div31[POLY5_SIZE];
 };
 
 #endif

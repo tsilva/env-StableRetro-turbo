@@ -27,6 +27,37 @@ Please include the following information in your issue reports:
 Please try to adhere to the existing code style. There is a linter script included at `scripts/lint.sh`.
 Before creating a pull request, make sure that your new code does not cause any tests to fail. To run the tests, see the instructions below.
 
+Changes to the NES or Atari cores, vector stepping, preprocessing, rewards,
+lifecycle handling, info, RAM exposure, saved states, or snapshots must also
+pass the ROM-backed TurboBench v2 semantic oracle against original
+`stable-retro==1.0.1` for both supported reference integrations:
+
+```bash
+turbobench oracle supermario/canonical-v2 \
+  --left stable-retro@1.0.1 \
+  --right stable-retro-turbo@checkout:"$PWD" \
+  --output /external/evidence/mario-stable-retro-turbo
+
+turbobench oracle breakout/start-v2 \
+  --left stable-retro@1.0.1 \
+  --right stable-retro-turbo@checkout:"$PWD" \
+  --output /external/evidence/breakout-stable-retro-turbo
+```
+
+These checkout receipts are development evidence. After publishing the
+candidate, regenerate both with `stable-retro-turbo@VERSION`; only those PyPI
+candidate receipts may pass the canonical gate:
+
+```bash
+turbobench verify-oracle /external/evidence/mario-stable-retro-turbo \
+  --require-canonical --require-provider stable-retro-turbo
+turbobench verify-oracle /external/evidence/breakout-stable-retro-turbo \
+  --require-canonical --require-provider stable-retro-turbo
+```
+
+Keep ROMs and receipts outside the repository. See
+[`docs/semantic_oracle.md`](docs/semantic_oracle.md) for the exact contract.
+
 #### Testing on Linux
 ```bash
 sudo apt-get install -y python3-opengl

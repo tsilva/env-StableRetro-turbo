@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll       
-//  SS  SS   tt           ll   ll        
-//  SS     tttttt  eeee   ll   ll   aaaa 
+//   SSSS    tt          lll  lll
+//  SS  SS   tt           ll   ll
+//  SS     tttttt  eeee   ll   ll   aaaa
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -24,6 +24,9 @@ class System;
 
 #include "bspf.hxx"
 #include "Cart.hxx"
+#ifdef DEBUGGER_SUPPORT
+  #include "CartCTYWidget.hxx"
+#endif
 
 /**
   The 'Chetiry' bankswitch scheme was developed by Chris D. Walton for a
@@ -85,7 +88,7 @@ class System;
 
   DPC+:
     The music functionality is quite similar to the DPC+ scheme.
-    
+
     Fast Fetcher
       The music frequency value is fetched using a fast fetcher operation.
       This operation is aliased to the instruction "LDA #$F2". Whenever this
@@ -119,8 +122,8 @@ class CartridgeCTY : public Cartridge
       @param size      The size of the ROM image
       @param osystem   A reference to the OSystem currently in use
     */
-    CartridgeCTY(const uint8_t* image, uint32_t size, const OSystem& osystem);
- 
+    CartridgeCTY(const uInt8* image, uInt32 size, const OSystem& osystem);
+
     /**
       Destructor
     */
@@ -152,17 +155,17 @@ class CartridgeCTY : public Cartridge
 
       @param bank The bank that should be installed in the system
     */
-    bool bank(uint16_t bank);
+    bool bank(uInt16 bank);
 
     /**
       Get the current bank.
     */
-    uint16_t bank() const;
+    uInt16 bank() const;
 
     /**
       Query the number of banks supported by the cartridge.
     */
-    uint16_t bankCount() const;
+    uInt16 bankCount() const;
 
     /**
       Patch the cartridge ROM.
@@ -171,7 +174,7 @@ class CartridgeCTY : public Cartridge
       @param value    The value to place into the address
       @return    Success or failure of the patch operation
     */
-    bool patch(uint16_t address, uint8_t value);
+    bool patch(uInt16 address, uInt8 value);
 
     /**
       Access the internal ROM image for this cartridge.
@@ -179,7 +182,7 @@ class CartridgeCTY : public Cartridge
       @param size  Set to the size of the internal ROM image data
       @return  A pointer to the internal ROM image data
     */
-    const uint8_t* getImage(int& size) const;
+    const uInt8* getImage(int& size) const;
 
     /**
       Save the current state of this cart to the given Serializer.
@@ -212,13 +215,25 @@ class CartridgeCTY : public Cartridge
     */
     void setRomName(const string& name);
 
+  #ifdef DEBUGGER_SUPPORT
+    /**
+      Get debugger widget responsible for accessing the inner workings
+      of the cart.
+    */
+    CartDebugWidget* debugWidget(GuiObject* boss, const GUI::Font& lfont,
+        const GUI::Font& nfont, int x, int y, int w, int h)
+    {
+      return new CartridgeCTYWidget(boss, lfont, nfont, x, y, w, h, *this);
+    }
+  #endif
+
   public:
     /**
       Get the byte at the specified address.
 
       @return The byte at the specified address
     */
-    uint8_t peek(uint16_t address);
+    uInt8 peek(uInt16 address);
 
     /**
       Change the byte at the specified address to the given value
@@ -227,7 +242,7 @@ class CartridgeCTY : public Cartridge
       @param value The value to be stored at the address
       @return  True if the poke changed the device address space, else false
     */
-    bool poke(uint16_t address, uint8_t value);
+    bool poke(uInt16 address, uInt8 value);
 
   private:
     /**
@@ -237,17 +252,17 @@ class CartridgeCTY : public Cartridge
       @return  The value at $FF4 with bit 6 set or cleared (depending on
                whether the RAM access was busy or successful)
     */
-    uint8_t ramReadWrite();
+    uInt8 ramReadWrite();
 
     /**
       Actions initiated by accessing $FF4 hotspot.
     */
-    void loadTune(uint8_t index);
-    void loadScore(uint8_t index);
-    void saveScore(uint8_t index);
+    void loadTune(uInt8 index);
+    void loadScore(uInt8 index);
+    void saveScore(uInt8 index);
     void wipeAllScores();
 
-    /** 
+    /**
       Updates any data fetchers in music mode based on the number of
       CPU cycles which have passed since the last update.
     */
@@ -258,56 +273,45 @@ class CartridgeCTY : public Cartridge
     const OSystem& myOSystem;
 
     // Indicates which bank is currently active
-    uint16_t myCurrentBank;
+    uInt16 myCurrentBank;
 
     // The 32K ROM image of the cartridge
-    uint8_t myImage[32768];
+    uInt8 myImage[32768];
 
     // The 64 bytes of RAM accessible at $1000 - $1080
-    uint8_t myRAM[64];
+    uInt8 myRAM[64];
 
     // Operation type (written to $1000, used by hotspot $1FF4)
-    uint8_t myOperationType;
+    uInt8 myOperationType;
 
     // Pointer to the 28K frequency table (points to the start of one
     // of seven 4K tunes in CartCTYTunes)
-    const uint8_t* myFrequencyImage;
+    const uInt8* myFrequencyImage;
 
     // The counter register for the data fetcher
-    uint16_t myCounter;
+    uInt16 myCounter;
 
     // Flags that last byte peeked was A9 (LDA #)
     bool myLDAimmediate;
 
     // The random number generator register
-    uint32_t myRandomNumber;
+    uInt32 myRandomNumber;
 
     // The time after which the first request of a load/save operation
     // will actually be completed
     // Due to Harmony EEPROM constraints, a read/write isn't instantaneous,
     // so we need to emulate the delay as well
-    uint64_t myRamAccessTimeout;
+    uInt64 myRamAccessTimeout;
 
     // Full pathname of the file to use when emulating load/save
     // of internal RAM to Harmony cart EEPROM
     string myEEPROMFile;
 
     // System cycle count when the last update to music data fetchers occurred
-    int32_t mySystemCycles;
+    Int32 mySystemCycles;
 
-    // Fractional DPC music OSC clocks unused during the last update,
-    // as an integer remainder in units of 1/myDpcClockDen of an OSC clock
-    uint32_t myFractionalClocks;
-
-    // DPC music-oscillator clock rate as an exact integer ratio
-    // (OSC clocks per CPU cycle = num/den), chosen from the TV format
-    uint32_t myDpcClockNum;
-    uint32_t myDpcClockDen;
-
-  public:
-    void setDpcClockRate(uint32_t num, uint32_t den);
-
-  private:
+    // Fractional DPC music OSC clocks unused during the last update
+    double myFractionalClocks;
 };
 
 #endif

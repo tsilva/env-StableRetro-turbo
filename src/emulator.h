@@ -75,6 +75,7 @@ public:
 
 	bool serialize(void* data, size_t size);
 	bool unserialize(const void* data, size_t size);
+	bool unserializeLive(const void* data, size_t size);
 	size_t serializeSize();
 
 	void setKey(int port, int key, bool active) { m_buttonMask[port][key] = active; }

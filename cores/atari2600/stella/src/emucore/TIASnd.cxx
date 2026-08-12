@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll       
-//  SS  SS   tt           ll   ll        
-//  SS     tttttt  eeee   ll   ll   aaaa 
+//   SSSS    tt          lll  lll
+//  SS  SS   tt           ll   ll
+//  SS     tttttt  eeee   ll   ll   aaaa
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -18,11 +18,10 @@
 //============================================================================
 
 #include "System.hxx"
-#include "Serializer.hxx"
 #include "TIASnd.hxx"
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-TIASound::TIASound(int32_t outputFrequency)
+TIASound::TIASound(Int32 outputFrequency)
   : myChannelMode(Hardware2Stereo),
     myOutputFrequency(outputFrequency),
     myOutputCounter(0),
@@ -63,22 +62,30 @@ void TIASound::reset()
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void TIASound::outputFrequency(int32_t freq)
+void TIASound::outputFrequency(Int32 freq)
 {
   myOutputFrequency = freq;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void TIASound::channels(uint32_t hardware, bool stereo)
+string TIASound::channels(uInt32 hardware, bool stereo)
 {
   if(hardware == 1)
     myChannelMode = Hardware1;
   else
     myChannelMode = stereo ? Hardware2Stereo : Hardware2Mono;
+
+  switch(myChannelMode)
+  {
+    case Hardware1:       return "Hardware1";
+    case Hardware2Mono:   return "Hardware2Mono";
+    case Hardware2Stereo: return "Hardware2Stereo";
+    default:              return EmptyString;
+  }
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void TIASound::set(uint16_t address, uint8_t value)
+void TIASound::set(uInt16 address, uInt8 value)
 {
   int chan = ~address & 0x1;
   switch(address)
@@ -102,7 +109,7 @@ void TIASound::set(uint16_t address, uint8_t value)
       return;
   }
 
-  uint16_t newVal = 0;
+  uInt16 newVal = 0;
 
   // An AUDC value of 0 is a special case
   if (myAUDC[chan] == SET_TO_1 || myAUDC[chan] == POLY5_POLY5)
@@ -136,7 +143,7 @@ void TIASound::set(uint16_t address, uint8_t value)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uint8_t TIASound::get(uint16_t address) const
+uInt8 TIASound::get(uInt16 address) const
 {
   switch(address)
   {
@@ -164,23 +171,23 @@ uint8_t TIASound::get(uint16_t address) const
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void TIASound::volume(uint32_t percent)
+void TIASound::volume(uInt32 percent)
 {
   if(percent <= 100)
     myVolumePercentage = percent;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void TIASound::process(int16_t* buffer, uint32_t samples)
+void TIASound::process(Int16* buffer, uInt32 samples)
 {
   // Make temporary local copy
-  uint8_t audc0 = myAUDC[0], audc1 = myAUDC[1];
-  uint8_t p5_0 = myP5[0], p5_1 = myP5[1];
-  uint8_t div_n_cnt0 = myDivNCnt[0], div_n_cnt1 = myDivNCnt[1];
-  int16_t v0 = myVolume[0], v1 = myVolume[1];
+  uInt8 audc0 = myAUDC[0], audc1 = myAUDC[1];
+  uInt8 p5_0 = myP5[0], p5_1 = myP5[1];
+  uInt8 div_n_cnt0 = myDivNCnt[0], div_n_cnt1 = myDivNCnt[1];
+  Int16 v0 = myVolume[0], v1 = myVolume[1];
 
   // Take external volume into account
-  int16_t audv0 = (myAUDV[0] * myVolumePercentage) / 100,
+  Int16 audv0 = (myAUDV[0] * myVolumePercentage) / 100,
         audv1 = (myAUDV[1] * myVolumePercentage) / 100;
 
   // Loop until the sample buffer is full
@@ -340,7 +347,7 @@ void TIASound::process(int16_t* buffer, uint32_t samples)
       case Hardware2Mono:  // mono sampling with 2 hardware channels
         while((samples > 0) && (myOutputCounter >= 31400))
         {
-          int16_t byte = v0 + v1;
+          Int16 byte = v0 + v1;
           *(buffer++) = byte;
           *(buffer++) = byte;
           myOutputCounter -= 31400;
@@ -379,7 +386,7 @@ void TIASound::process(int16_t* buffer, uint32_t samples)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void TIASound::polyInit(uint8_t* poly, int size, int f0, int f1)
+void TIASound::polyInit(uInt8* poly, int size, int f0, int f1)
 {
   int mask = (1 << size) - 1, x = mask;
 
@@ -394,47 +401,7 @@ void TIASound::polyInit(uint8_t* poly, int size, int f0, int f1)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-const uint8_t TIASound::Div31[POLY5_SIZE] = {
+const uInt8 TIASound::Div31[POLY5_SIZE] = {
   0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 };
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool TIASound::save(Serializer& out) const
-{
-  for(int i = 0; i < 2; ++i)
-  {
-    out.putByte(myAUDC[i]);
-    out.putByte(myAUDF[i]);
-    out.putInt(myAUDV[i]);
-    out.putInt(myVolume[i]);
-    out.putByte(myP4[i]);
-    out.putByte(myP5[i]);
-    out.putInt(myP9[i]);
-    out.putByte(myDivNCnt[i]);
-    out.putByte(myDivNMax[i]);
-    out.putByte(myDiv3Cnt[i]);
-  }
-  out.putInt(myOutputCounter);
-  return true;
-}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool TIASound::load(Serializer& in)
-{
-  for(int i = 0; i < 2; ++i)
-  {
-    myAUDC[i]    = in.getByte();
-    myAUDF[i]    = in.getByte();
-    myAUDV[i]    = (int16_t)in.getInt();
-    myVolume[i]  = (int16_t)in.getInt();
-    myP4[i]      = in.getByte();
-    myP5[i]      = in.getByte();
-    myP9[i]      = (uint16_t)in.getInt();
-    myDivNCnt[i] = in.getByte();
-    myDivNMax[i] = in.getByte();
-    myDiv3Cnt[i] = in.getByte();
-  }
-  myOutputCounter = (int32_t)in.getInt();
-  return true;
-}

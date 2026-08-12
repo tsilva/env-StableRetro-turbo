@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll       
-//  SS  SS   tt           ll   ll        
-//  SS     tttttt  eeee   ll   ll   aaaa 
+//   SSSS    tt          lll  lll
+//  SS  SS   tt           ll   ll
+//  SS     tttttt  eeee   ll   ll   aaaa
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -17,13 +17,14 @@
 // $Id: CartUA.cxx 2838 2014-01-17 23:34:03Z stephena $
 //============================================================================
 
+#include <cassert>
 #include <cstring>
 
 #include "System.hxx"
 #include "CartUA.hxx"
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-CartridgeUA::CartridgeUA(const uint8_t* image, uint32_t size, const Settings& settings)
+CartridgeUA::CartridgeUA(const uInt8* image, uInt32 size, const Settings& settings)
   : Cartridge(settings)
 {
   // Copy the ROM image into my buffer
@@ -49,8 +50,12 @@ void CartridgeUA::reset()
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void CartridgeUA::install(System& system)
 {
-  mySystem     = &system;
-  uint16_t shift = mySystem->pageShift();
+  mySystem = &system;
+  uInt16 shift = mySystem->pageShift();
+  uInt16 mask = mySystem->pageMask();
+
+  // Make sure the system we're being installed in has a page size that'll work
+  assert((0x1000 & mask) == 0);
 
   // Get the page accessing methods for the hot spots since they overlap
   // areas within the TIA we'll need to forward requests to the TIA
@@ -66,7 +71,7 @@ void CartridgeUA::install(System& system)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uint8_t CartridgeUA::peek(uint16_t address)
+uInt8 CartridgeUA::peek(uInt16 address)
 {
   address &= 0x1FFF;
 
@@ -98,7 +103,7 @@ uint8_t CartridgeUA::peek(uint16_t address)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeUA::poke(uint16_t address, uint8_t value)
+bool CartridgeUA::poke(uInt16 address, uInt8 value)
 {
   address &= 0x1FFF;
 
@@ -127,20 +132,20 @@ bool CartridgeUA::poke(uint16_t address, uint8_t value)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeUA::bank(uint16_t bank)
-{ 
+bool CartridgeUA::bank(uInt16 bank)
+{
   if(bankLocked()) return false;
 
   // Remember what bank we're in
   myCurrentBank = bank;
-  uint16_t offset = myCurrentBank << 12;
-  uint16_t shift = mySystem->pageShift();
+  uInt16 offset = myCurrentBank << 12;
+  uInt16 shift = mySystem->pageShift();
 
   // Setup the page access methods for the current bank
   System::PageAccess access(0, 0, 0, this, System::PA_READ);
 
   // Map ROM image into the system
-  for(uint32_t address = 0x1000; address < 0x2000; address += (1 << shift))
+  for(uInt32 address = 0x1000; address < 0x2000; address += (1 << shift))
   {
     access.directPeekBase = &myImage[offset + (address & 0x0FFF)];
     access.codeAccessBase = &myCodeAccessBase[offset + (address & 0x0FFF)];
@@ -150,26 +155,26 @@ bool CartridgeUA::bank(uint16_t bank)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uint16_t CartridgeUA::bank() const
+uInt16 CartridgeUA::bank() const
 {
   return myCurrentBank;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uint16_t CartridgeUA::bankCount() const
+uInt16 CartridgeUA::bankCount() const
 {
   return 2;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool CartridgeUA::patch(uint16_t address, uint8_t value)
+bool CartridgeUA::patch(uInt16 address, uInt8 value)
 {
   myImage[(myCurrentBank << 12) + (address & 0x0FFF)] = value;
   return myBankChanged = true;
-} 
+}
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-const uint8_t* CartridgeUA::getImage(int& size) const
+const uInt8* CartridgeUA::getImage(int& size) const
 {
   size = 8192;
   return myImage;

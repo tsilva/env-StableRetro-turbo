@@ -3,18 +3,20 @@
 
 OSystem::OSystem()
 {
-    myNVRamDir     = ".";
-    mySettings     = 0;
-    mySound        = new Sound(this);
-    mySerialPort   = new SerialPort();
+    myNVRamDir = ".";
+    mySettings = 0;
+    myFrameBuffer = new FrameBuffer();
+    mySound = new SoundSDL(this);
+    mySerialPort = new SerialPort();
     myEventHandler = new EventHandler(this);
-    myPropSet      = new PropertiesSet(this);
-    Paddles::setDigitalSensitivity(50);
+    myPropSet = new PropertiesSet(this);
+    Paddles::setDigitalSensitivity(5);
     Paddles::setMouseSensitivity(5);
 }
 
 OSystem::~OSystem()
 {
+    delete myFrameBuffer;
     delete mySound;
     delete mySerialPort;
     delete myEventHandler;
@@ -22,20 +24,64 @@ OSystem::~OSystem()
 }
 
 bool OSystem::create() { return 1; }
+
+void OSystem::mainLoop() { }
+
+void OSystem::pollEvent() { }
+
+bool OSystem::queryVideoHardware() { return 1; }
+
 void OSystem::stateChanged(EventHandler::State state) { }
 
-uint64_t OSystem::getTicks() const
+void OSystem::setDefaultJoymap(Event::Type event, EventMode mode) { }
+
+void OSystem::setFramerate(float framerate) { }
+//void OSystem::setFramerate(float framerate)
+//{
+//    if(framerate > 0.0)
+//    {
+//        myDisplayFrameRate = framerate;
+//        myTimePerFrame = (uInt32)(1000000.0 / myDisplayFrameRate);
+//    }
+//}
+
+uInt64 OSystem::getTicks() const
 {
-    // DETERMINISM INVARIANT: this must return *emulated* time, never
-    // wall-clock time. Random::initSeed() seeds the RNG from getTicks(),
-    // and that RNG initializes cartridge RAM contents (CartXX ctors) and
-    // undriven TIA pins. Upstream Stella's getTicks() is wall-clock;
-    // if a future sync ever restores that, RAM-init randomness stops
-    // being reproducible and netplay/run-ahead/replay determinism
-    // silently breaks. TIA::getMilliSeconds() is derived purely from
-    // emulated frame counters, which is what keeps this deterministic.
     return myConsole->tia().getMilliSeconds();
 }
 
-EventHandler::EventHandler(OSystem*) { }
-EventHandler::~EventHandler() { }
+EventHandler::EventHandler(OSystem*)
+{
+
+}
+
+EventHandler::~EventHandler()
+{
+
+}
+
+FrameBuffer::FrameBuffer()
+{
+
+}
+
+FrameBuffer::~FrameBuffer()
+{
+
+}
+
+FBInitStatus FrameBuffer::initialize(const string& title, uInt32 width, uInt32 height)
+{
+    //logMsg("called FrameBuffer::initialize, %d,%d", width, height);
+    return kSuccess;
+}
+
+void FrameBuffer::refresh() { }
+
+void FrameBuffer::showFrameStats(bool enable) { }
+
+// 0 to <counts> - 1, i_s caches the value of counts
+//#define iterateTimes(counts, i) for(unsigned int i = 0, i ## _s = counts; i < (i ## _s); i++)
+//void FrameBuffer::setTIAPalette(const uInt32* palette)
+//{
+//}

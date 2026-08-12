@@ -13,71 +13,189 @@
 //
 // See the file "License.txt" for information on usage and redistribution of
 // this file, and for a DISCLAIMER OF ALL WARRANTIES.
+//
+// $Id: CartFE.hxx 2838 2014-01-17 23:34:03Z stephena $
 //============================================================================
 
 #ifndef CARTRIDGEFE_HXX
 #define CARTRIDGEFE_HXX
 
+class System;
+
 #include "bspf.hxx"
-#include "CartEnhanced.hxx"
+#include "Cart.hxx"
+#ifdef DEBUGGER_SUPPORT
+  #include "CartFEWidget.hxx"
+#endif
 
 /**
-  Cartridge class used for Activision's FE bankswitching scheme (two 4K
-  banks). FE has no hotspots: the bank is decoded from bit 13 of every
-  accessed address, which flips as the ROM's JSR/RTS trampoline passes the
-  return address through the mirror at $D000/$F000. This is the original
-  2014 model, kept intact for behaviour and performance; it is only re-homed
-  on CartridgeEnhanced so FE shares the common image handling and
-  (de)serialization rather than being a bespoke Cartridge subclass.
+  Bankswitching method used by Activision's Robot Tank and Decathlon.
 
-  Because the bank follows the address bus directly, this cart overrides
-  peek()/poke()/bank()/bankChanged() and does not use the base class's
-  hotspot/segment machinery, the RIOT stack-snoop, or checkSwitchBank(); in
-  particular it never claims the stack page, so normal stack traffic is not
-  routed through the cart.
+  Kevin Horton describes FE as follows:
+
+    Used only on two carts (Robot Tank and Decathlon).  These
+    carts are very weird.  It does not use accesses to the stack
+    like was previously thought.  Instead, if you watch the called
+    addresses very carefully, you can see that they are either Dxxx
+    or Fxxx.  This determines the bank to use.  Just monitor A13 of
+    the processor and use it to determine your bank! :-)  Of course
+    the 6507 in the 2600 does not have an A13, so the cart must have
+    an extra bit in the ROM matrix to tell when to switch banks.
+    There is *no* way to determine which bank you want to be in from
+    monitoring the bus.
+
+  This cart reports having 2 banks, even though this cannot be
+  determined on a real system.
 
   @author  Bradford W. Mott
+  @version $Id: CartFE.hxx 2838 2014-01-17 23:34:03Z stephena $
 */
-class CartridgeFE : public CartridgeEnhanced
+class CartridgeFE : public Cartridge
 {
   friend class CartridgeFEWidget;
 
   public:
-    CartridgeFE(const uint8_t* image, uint32_t size, const Settings& settings);
+    /**
+      Create a new cartridge using the specified image
+
+      @param image     Pointer to the ROM image
+      @param size      The size of the ROM image
+      @param settings  A reference to the various settings (read-only)
+    */
+    CartridgeFE(const uInt8* image, uInt32 size, const Settings& settings);
+
+    /**
+      Destructor
+    */
     virtual ~CartridgeFE();
 
   public:
+    /**
+      Reset device to its power-on state
+    */
     void reset();
+
+    /**
+      Install cartridge in the specified system.  Invoked by the system
+      when the cartridge is attached to it.
+
+      @param system The system the device should install itself in
+    */
     void install(System& system);
 
-    uint8_t peek(uint16_t address);
-    bool poke(uint16_t address, uint8_t value);
+    /**
+      Install pages for the specified bank in the system.
 
-    uint16_t bank() const;
-    uint16_t bankCount() const;
+      @param bank The bank that should be installed in the system
+    */
+    bool bank(uInt16 bank);
+
+    /**
+      Get the current bank.
+    */
+    uInt16 bank() const;
+
+    /**
+      Query the number of banks supported by the cartridge.
+    */
+    uInt16 bankCount() const;
+
+    /**
+      Answer whether the bank has changed since the last time this
+      method was called.
+
+      @return  Whether the bank was changed
+    */
     bool bankChanged();
 
+    /**
+      Patch the cartridge ROM.
+
+      @param address  The ROM address to patch
+      @param value    The value to place into the address
+      @return    Success or failure of the patch operation
+    */
+    bool patch(uInt16 address, uInt8 value);
+
+    /**
+      Access the internal ROM image for this cartridge.
+
+      @param size  Set to the size of the internal ROM image data
+      @return  A pointer to the internal ROM image data
+    */
+    const uInt8* getImage(int& size) const;
+
+    /**
+      Save the current state of this cart to the given Serializer.
+
+      @param out  The Serializer object to use
+      @return  False on any errors, else true
+    */
     bool save(Serializer& out) const;
+
+    /**
+      Load the current state of this cart from the given Serializer.
+
+      @param in  The Serializer object to use
+      @return  False on any errors, else true
+    */
     bool load(Serializer& in);
 
+    /**
+      Get a descriptor for the device name (used in error checking).
+
+      @return The name of the object
+    */
     string name() const { return "CartridgeFE"; }
 
-  protected:
-    // FE has no hotspot-style switching; the base class never needs to call
-    // this, but it is pure virtual so a trivial implementation is provided.
-    bool checkSwitchBank(uint16_t, uint8_t) { return false; }
+  #ifdef DEBUGGER_SUPPORT
+    /**
+      Get debugger widget responsible for accessing the inner workings
+      of the cart.
+    */
+    CartDebugWidget* debugWidget(GuiObject* boss, const GUI::Font& lfont,
+        const GUI::Font& nfont, int x, int y, int w, int h)
+    {
+      return new CartridgeFEWidget(boss, lfont, nfont, x, y, w, h, *this);
+    }
+  #endif
+
+  public:
+    /**
+      Get the byte at the specified address.
+
+      @return The byte at the specified address
+    */
+    uInt8 peek(uInt16 address);
+
+    /**
+      Change the byte at the specified address to the given value
+
+      @param address The address where the value should be stored
+      @param value The value to be stored at the address
+      @return  True if the poke changed the device address space, else false
+    */
+    bool poke(uInt16 address, uInt8 value);
 
   private:
-    // Last two addresses accessed, used to detect a bank change (bit 13
-    // toggling between successive accesses).
-    uint16_t myLastAddress1, myLastAddress2;
-    bool     myLastAddressChanged;
+    /**
+      Query/change the given address type to use the given disassembly flags
+
+      @param address The address to modify
+      @param flags A bitfield of DisasmType directives for the given address
+    */
+    uInt8 getAccessFlags(uInt16 address);
+    void setAccessFlags(uInt16 address, uInt8 flags);
 
   private:
-    // Following constructors and assignment operators not supported
-    CartridgeFE();
-    CartridgeFE(const CartridgeFE&);
-    CartridgeFE& operator=(const CartridgeFE&);
+    // The 8K ROM image of the cartridge
+    uInt8 myImage[8192];
+
+    // Previous two addresses accessed by peek()
+    uInt16 myLastAddress1, myLastAddress2;
+
+    // Last two addresses have been modified by peek()
+    bool myLastAddressChanged;
 };
 
 #endif

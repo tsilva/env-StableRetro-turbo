@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll       
-//  SS  SS   tt           ll   ll        
-//  SS     tttttt  eeee   ll   ll   aaaa 
+//   SSSS    tt          lll  lll
+//  SS  SS   tt           ll   ll
+//  SS     tttttt  eeee   ll   ll   aaaa
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -47,10 +47,6 @@ class Event
         JoystickZeroFire, JoystickZeroFire5, JoystickZeroFire9,
       JoystickOneUp, JoystickOneDown, JoystickOneLeft, JoystickOneRight,
         JoystickOneFire, JoystickOneFire5, JoystickOneFire9,
-      JoystickTwoUp, JoystickTwoDown, JoystickTwoLeft, JoystickTwoRight,
-        JoystickTwoFire,
-      JoystickThreeUp, JoystickThreeDown, JoystickThreeLeft, JoystickThreeRight,
-        JoystickThreeFire,
 
       PaddleZeroDecrease, PaddleZeroIncrease, PaddleZeroAnalog, PaddleZeroFire,
       PaddleOneDecrease, PaddleOneIncrease, PaddleOneAnalog, PaddleOneFire,
@@ -69,14 +65,19 @@ class Event
 
       Combo1, Combo2, Combo3, Combo4, Combo5, Combo6, Combo7, Combo8,
       Combo9, Combo10, Combo11, Combo12, Combo13, Combo14, Combo15, Combo16,
-  
+
       SALeftAxis0Value, SALeftAxis1Value,
       SARightAxis0Value, SARightAxis1Value,
 
       MouseAxisXValue, MouseAxisYValue,
       MouseButtonLeftValue, MouseButtonRightValue,
 
-      Fry,
+      ChangeState, LoadState, SaveState, TakeSnapshot, Quit,
+      PauseMode, MenuMode, CmdMenuMode, DebuggerMode, LauncherMode,
+      Fry, VolumeDecrease, VolumeIncrease,
+
+      UIUp, UIDown, UILeft, UIRight, UIHome, UIEnd, UIPgUp, UIPgDown,
+      UISelect, UINavPrev, UINavNext, UIOK, UICancel, UIPrevDir,
 
       LastType
     };
@@ -91,22 +92,22 @@ class Event
     /**
       Get the value associated with the event of the specified type
     */
-    int32_t get(Type type) const { return myValues[type]; }
+    Int32 get(Type type) const { return myValues[type]; }
 
     /**
       Set the value associated with the event of the specified type
     */
-    void set(Type type, int32_t value) { myValues[type] = value; }
+    void set(Type type, Int32 value) { myValues[type] = value; }
 
     /**
       Clears the event array (resets to initial state)
     */
     void clear()
     {
-      for(uint32_t i = 0; i < LastType; ++i)
+      for(uInt32 i = 0; i < LastType; ++i)
         myValues[i] = Event::NoType;
 
-      for(uint32_t i = 0; i < KBDK_LAST; ++i)
+      for(uInt32 i = 0; i < KBDK_LAST; ++i)
         myKeyTable[i] = false;
     }
 
@@ -115,9 +116,14 @@ class Event
     */
     const bool* getKeys() const { return myKeyTable; }
 
+    /**
+      Set the value associated with the event of the specified type
+    */
+    void setKey(StellaKey key, bool state) { myKeyTable[key] = state; }
+
   private:
     // Array of values associated with each event type
-    int32_t myValues[LastType];
+    Int32 myValues[LastType];
 
     // Array of keyboard key states
     bool myKeyTable[KBDK_LAST];

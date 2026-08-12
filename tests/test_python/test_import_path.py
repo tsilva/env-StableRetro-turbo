@@ -5,7 +5,7 @@ import stable_retro
 from stable_retro.scripts.import_path import _refresh_atari_start_state
 
 
-def test_refresh_atari_start_state_uses_current_core(monkeypatch, tmp_path):
+def test_refresh_atari_start_state_preserves_authority_format(monkeypatch, tmp_path):
     legacy = (
         struct.pack("<I", len(b"03090100state"))
         + b"03090100state"
@@ -21,13 +21,6 @@ def test_refresh_atari_start_state_uses_current_core(monkeypatch, tmp_path):
         def __init__(self, rom_path):
             assert rom_path == "breakout.a26"
 
-        def set_state(self, state):
-            assert b"03090101state" in state[:32]
-            return False
-
-        def get_state(self):
-            return b"current-stella-state"
-
     monkeypatch.setattr(stable_retro, "RetroEmulator", FakeEmulator)
 
     _refresh_atari_start_state(
@@ -36,9 +29,7 @@ def test_refresh_atari_start_state_uses_current_core(monkeypatch, tmp_path):
         "breakout.a26",
     )
 
-    assert gzip.decompress((tmp_path / "Start.state").read_bytes()) == (
-        b"current-stella-state"
-    )
+    assert gzip.decompress((tmp_path / "Start.state").read_bytes()) == legacy
 
 
 def test_refresh_atari_start_state_ignores_other_platforms(tmp_path):

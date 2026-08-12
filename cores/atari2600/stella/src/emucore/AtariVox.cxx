@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll       
-//  SS  SS   tt           ll   ll        
-//  SS     tttttt  eeee   ll   ll   aaaa 
+//   SSSS    tt          lll  lll
+//  SS  SS   tt           ll   ll
+//  SS     tttttt  eeee   ll   ll   aaaa
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -88,7 +88,7 @@ void AtariVox::write(DigitalPin pin, bool value)
       myDigitalPinState[One] = value;
       clockDataIn(value);
       break;
-  
+
     // Pin 3: EEPROM SDA
     //        output data to the 24LC256 EEPROM using the I2C protocol
     case Three:
@@ -105,13 +105,13 @@ void AtariVox::write(DigitalPin pin, bool value)
 
     default:
       break;
-  } 
+  }
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void AtariVox::clockDataIn(bool value)
 {
-  uint32_t cycle = mySystem.cycles();
+  uInt32 cycle = mySystem.cycles();
 
   if(value && (myShiftCount == 0))
     return;
@@ -139,11 +139,13 @@ void AtariVox::clockDataIn(bool value)
     {
       myShiftCount = 0;
       myShiftRegister >>= 6;
-      if(!(myShiftRegister & (1<<9))) { /* bad start bit */ }
-      else if((myShiftRegister & 1))  { /* bad stop  bit */ }
+      if(!(myShiftRegister & (1<<9)))
+        cerr << "AtariVox: bad start bit" << endl;
+      else if((myShiftRegister & 1))
+        cerr << "AtariVox: bad stop bit" << endl;
       else
       {
-        uint8_t data = ((myShiftRegister >> 1) & 0xff);
+        uInt8 data = ((myShiftRegister >> 1) & 0xff);
         mySerialPort.writeByte(&data);
       }
       myShiftRegister = 0;

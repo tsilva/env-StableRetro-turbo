@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll       
-//  SS  SS   tt           ll   ll        
-//  SS     tttttt  eeee   ll   ll   aaaa 
+//   SSSS    tt          lll  lll
+//  SS  SS   tt           ll   ll
+//  SS     tttttt  eeee   ll   ll   aaaa
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -18,7 +18,7 @@
 //============================================================================
 
 #include <fstream>
-#include <stdexcept>
+#include <sstream>
 
 #include "Serializer.hxx"
 
@@ -73,7 +73,7 @@ Serializer::Serializer(void)
     myUseFilestream(false)
 {
   myStream = new stringstream(ios::in | ios::out | ios::binary);
-  
+
   // For some reason, Windows and possibly OSX needs to store something in
   // the stream before it is used for the first time
   if(myStream)
@@ -111,37 +111,8 @@ void Serializer::reset(void)
   myStream->seekp(ios_base::beg);
 }
 
-uint32_t Serializer::size(void)
-{
-  if(myStream == NULL)
-    return 0;
-
-  // Temporarily disable exceptions so seeking to the end (and the
-  // implicit EOF handling) doesn't throw
-  ios_base::iostate mask = myStream->exceptions();
-  myStream->exceptions(ios_base::goodbit);
-
-  myStream->clear();
-  streampos cur = myStream->tellg();
-  myStream->seekg(0, ios_base::end);
-  streampos end = myStream->tellg();
-  myStream->clear();
-  myStream->seekg(cur);
-
-  myStream->exceptions(mask);
-
-  return (end > 0) ? (uint32_t)end : 0;
-}
-
-void Serializer::setPosition(uint32_t pos)
-{
-  myStream->clear();
-  myStream->seekg((streampos)pos);
-  myStream->seekp((streampos)pos);
-}
-
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uint8_t Serializer::getByte(void)
+uInt8 Serializer::getByte(void)
 {
   char buf;
   myStream->read(&buf, 1);
@@ -150,60 +121,45 @@ uint8_t Serializer::getByte(void)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void Serializer::getByteArray(uint8_t* array, uint32_t size)
+void Serializer::getByteArray(uInt8* array, uInt32 size)
 {
   myStream->read((char*)array, size);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uint16_t Serializer::getShort(void)
+uInt16 Serializer::getShort(void)
 {
-  uint16_t val = 0;
-  myStream->read((char*)&val, sizeof(uint16_t));
+  uInt16 val = 0;
+  myStream->read((char*)&val, sizeof(uInt16));
 
   return val;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void Serializer::getShortArray(uint16_t* array, uint32_t size)
+void Serializer::getShortArray(uInt16* array, uInt32 size)
 {
-  myStream->read((char*)array, sizeof(uint16_t)*size);
+  myStream->read((char*)array, sizeof(uInt16)*size);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-uint32_t Serializer::getInt(void)
+uInt32 Serializer::getInt(void)
 {
-  uint32_t val = 0;
-  myStream->read((char*)&val, sizeof(uint32_t));
+  uInt32 val = 0;
+  myStream->read((char*)&val, sizeof(uInt32));
 
   return val;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void Serializer::getIntArray(uint32_t* array, uint32_t size)
+void Serializer::getIntArray(uInt32* array, uInt32 size)
 {
-  myStream->read((char*)array, sizeof(uint32_t)*size);
+  myStream->read((char*)array, sizeof(uInt32)*size);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 string Serializer::getString(void)
 {
   int len = getInt();
-
-  // A malformed or truncated stream can yield a bogus length here (a
-  // negative value, or one far larger than the data that remains).
-  // Passing that straight to string::resize()/read() means a giant
-  // allocation or a long read that only fails at the very end. Instead,
-  // reject any length that cannot possibly be satisfied by the bytes
-  // left in the stream, so a bad state is refused immediately.
-  stringstream* s = (stringstream*)myStream;
-  streampos cur = s->tellg();
-  s->seekg(0, ios::end);
-  streampos end = s->tellg();
-  s->seekg(cur, ios::beg);
-  if(len < 0 || (streamoff)len > (end - cur))
-    throw runtime_error("Serializer: invalid string length");
-
   string str;
   str.resize(len);
   myStream->read(&str[0], len);
@@ -218,39 +174,39 @@ bool Serializer::getBool(void)
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void Serializer::putByte(uint8_t value)
+void Serializer::putByte(uInt8 value)
 {
   myStream->write((char*)&value, 1);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void Serializer::putByteArray(const uint8_t* array, uint32_t size)
+void Serializer::putByteArray(const uInt8* array, uInt32 size)
 {
   myStream->write((char*)array, size);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void Serializer::putShort(uint16_t value)
+void Serializer::putShort(uInt16 value)
 {
-  myStream->write((char*)&value, sizeof(uint16_t));
+  myStream->write((char*)&value, sizeof(uInt16));
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void Serializer::putShortArray(const uint16_t* array, uint32_t size)
+void Serializer::putShortArray(const uInt16* array, uInt32 size)
 {
-  myStream->write((char*)array, sizeof(uint16_t)*size);
+  myStream->write((char*)array, sizeof(uInt16)*size);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void Serializer::putInt(uint32_t value)
+void Serializer::putInt(uInt32 value)
 {
-  myStream->write((char*)&value, sizeof(uint32_t));
+  myStream->write((char*)&value, sizeof(uInt32));
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void Serializer::putIntArray(const uint32_t* array, uint32_t size)
+void Serializer::putIntArray(const uInt32* array, uInt32 size)
 {
-  myStream->write((char*)array, sizeof(uint32_t)*size);
+  myStream->write((char*)array, sizeof(uInt32)*size);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -

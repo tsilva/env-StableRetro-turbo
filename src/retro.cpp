@@ -91,12 +91,19 @@ struct PyRetroLiveSnapshot {
 	bool pendingReset = false;
 	std::string currentStartStateLabel;
 	std::mt19937 rng;
+	std::mt19937 resetRng;
+	std::vector<std::vector<uint8_t>> replayActions;
 	int32_t activeStateIndex = -1;
 	std::vector<uint8_t> screenRgb;
 	long screenWidth = 0;
 	long screenHeight = 0;
 
 	size_t nbytes() const {
+		size_t replayActionBytes =
+			replayActions.capacity() * sizeof(std::vector<uint8_t>);
+		for (const auto& action : replayActions) {
+			replayActionBytes += action.capacity();
+		}
 		return sizeof(*this) +
 			   coreState.capacity() +
 			   frameStack.capacity() +
@@ -105,7 +112,8 @@ struct PyRetroLiveSnapshot {
 			   currentStartStateLabel.capacity() +
 			   screenRgb.capacity() +
 			   dataState.trackedCurrentValues.capacity() * sizeof(int64_t) +
-			   dataState.trackedLastValues.capacity() * sizeof(int64_t);
+			   dataState.trackedLastValues.capacity() * sizeof(int64_t) +
+			   replayActionBytes;
 	}
 };
 
@@ -121,6 +129,19 @@ struct PyRetroEmulator {
 
 	void step() {
 		m_re.run();
+	}
+
+	bool sourceFrameIsBgr() const {
+		return m_re.core() == "Atari2600";
+	}
+
+	void normalizeSourceChannelOrder(uint8_t* rgb, size_t pixelCount) const {
+		if (!sourceFrameIsBgr()) {
+			return;
+		}
+		for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
+			std::swap(rgb[pixel * 3], rgb[pixel * 3 + 2]);
+		}
 	}
 
 	void readRgbFrame(std::vector<uint8_t>& rgb) {
@@ -149,6 +170,7 @@ struct PyRetroEmulator {
 			throw std::runtime_error("Unsupported image depth from core");
 		}
 		in.copyTo(&out);
+		normalizeSourceChannelOrder(rgb.data(), static_cast<size_t>(w) * static_cast<size_t>(h));
 	}
 
 	void readRawFrame(std::vector<uint8_t>& raw) {
@@ -422,6 +444,7 @@ struct PyRetroEmulator {
 			throw std::runtime_error("Unsupported image depth from core");
 		}
 		in.copyTo(&out);
+		normalizeSourceChannelOrder(data, static_cast<size_t>(w) * static_cast<size_t>(h));
 		return arr;
 	}
 
@@ -1738,7 +1761,12 @@ public:
 				m_infoKeys.push_back(py::str(key));
 			}
 		}
-		m_renderSkipEnabled = !envFlagEnabled("STABLE_RETRO_DISABLE_RENDER_SKIP");
+		// Render-skipping is not semantics-preserving for the NES core: games may
+		// change PPU state mid-frame, so replaying only the final skipped frame can
+		// yield blank or stale public observations. Stable Retro fidelity takes
+		// priority over this optimization for NES vector lanes.
+		const bool renderSkipRequested =
+			!envFlagEnabled("STABLE_RETRO_DISABLE_RENDER_SKIP");
 		parseInitialStates(initialStateObj, initialStateLabelsObj);
 		m_numThreads = std::max(1, std::min<int>(m_numThreads <= 0 ? static_cast<int>(numEnvs) : m_numThreads, static_cast<int>(numEnvs)));
 		const unsigned hardwareThreads = std::thread::hardware_concurrency();
@@ -1771,6 +1799,7 @@ public:
 			if (
 				indexedVideoEnabled &&
 				grayscaleAreaPlanEligible &&
+				slot->emulator->m_re.core() != "Nes" &&
 				(!atariCore || atariIndexedVideoEnabled)) {
 				slot->usesIndexedVideo = slot->emulator->m_re.setIndexedVideoEnabled(true);
 			}
@@ -1801,6 +1830,10 @@ public:
 				}
 				m_slots.emplace_back(std::move(slot));
 		}
+		m_renderSkipEnabled =
+			renderSkipRequested &&
+			!m_slots.empty() &&
+			m_slots.front()->emulator->m_re.core() != "Nes";
 		const auto obsShape = observationBatchShape();
 		m_obsArrays[0] = py::array_t<uint8_t>(obsShape);
 		m_obsArrays[1] = m_unsafeZeroCopy ? m_obsArrays[0] : py::array_t<uint8_t>(obsShape);
@@ -2354,6 +2387,25 @@ public:
 		return m_supportsLiveSnapshots;
 	}
 
+	py::tuple getRams() const {
+		py::tuple result(m_slots.size());
+		for (size_t i = 0; i < m_slots.size(); ++i) {
+			const auto& blocks = m_slots[i]->data.m_data.addressSpace().blocks();
+			size_t size = 0;
+			for (const auto& block : blocks) {
+				size += block.second.size();
+			}
+			std::string bytes(size, '\0');
+			size_t offset = 0;
+			for (const auto& block : blocks) {
+				std::memcpy(bytes.data() + offset, block.second.offset(0), block.second.size());
+				offset += block.second.size();
+			}
+			result[static_cast<py::ssize_t>(i)] = py::bytes(bytes);
+		}
+		return result;
+	}
+
 	py::tuple captureSnapshots(py::object captureMaskObj) {
 		if (!m_supportsLiveSnapshots) {
 			PyErr_SetString(
@@ -2457,7 +2509,11 @@ private:
 				throw std::runtime_error("failed to load scenario");
 			}
 			if (!initialState.empty() && !emulator->m_re.unserialize(initialState.data(), initialState.size())) {
-				throw std::runtime_error("failed to load initial state");
+				throw std::runtime_error(
+					"failed to load initial state: payload=" +
+					std::to_string(initialState.size()) +
+					" bytes, core expects=" +
+					std::to_string(emulator->m_re.serializeSize()) + " bytes");
 			}
 			emulator->m_re.run();
 			data.reset();
@@ -2497,6 +2553,8 @@ private:
 			bool usesIndexedVideo = false;
 			std::string currentStartStateLabel;
 			std::mt19937 rng;
+			std::mt19937 resetRng;
+			std::vector<std::vector<uint8_t>> replayActions;
 			std::vector<uint8_t> restoredScreen;
 			long restoredScreenWidth = 0;
 			long restoredScreenHeight = 0;
@@ -2549,6 +2607,9 @@ private:
 			throw std::runtime_error("unsupported image depth while capturing a live snapshot");
 		}
 		in.copyTo(&out);
+		slot.emulator->normalizeSourceChannelOrder(
+			rgb.data(),
+			static_cast<size_t>(width) * static_cast<size_t>(height));
 	}
 
 	std::shared_ptr<PyRetroLiveSnapshot> captureSlot(Slot& slot, bool allowPending) const {
@@ -2575,6 +2636,8 @@ private:
 		snapshot->pendingReset = slot.pendingReset;
 		snapshot->currentStartStateLabel = slot.currentStartStateLabel;
 		snapshot->rng = slot.rng;
+		snapshot->resetRng = slot.resetRng;
+		snapshot->replayActions = slot.replayActions;
 		snapshot->activeStateIndex = m_activeInitialStateIndices[slot.index];
 		readCurrentScreen(
 			slot,
@@ -2585,7 +2648,11 @@ private:
 	}
 
 	void restoreSlot(Slot& slot, const PyRetroLiveSnapshot& snapshot, uint8_t* dst) {
-		if (!slot.emulator->m_re.unserialize(snapshot.coreState.data(), snapshot.coreState.size())) {
+		if (slot.emulator->m_re.core() == "Atari2600") {
+			restoreAtariSlotByReplay(slot, snapshot, dst);
+			return;
+		}
+		if (!slot.emulator->m_re.unserializeLive(snapshot.coreState.data(), snapshot.coreState.size())) {
 			throw std::runtime_error("failed to restore live emulator state");
 		}
 		slot.data.m_data.restoreRuntimeState(snapshot.dataState);
@@ -2598,6 +2665,8 @@ private:
 		slot.pendingReset = snapshot.pendingReset;
 		slot.currentStartStateLabel = snapshot.currentStartStateLabel;
 		slot.rng = snapshot.rng;
+		slot.resetRng = snapshot.resetRng;
+		slot.replayActions = snapshot.replayActions;
 		m_activeInitialStateIndices[slot.index] = snapshot.activeStateIndex;
 		slot.hasPrevRaw = false;
 		slot.hasPrevIndexed = false;
@@ -2740,7 +2809,7 @@ private:
 
 	void readProcessedFrame(Slot& slot) {
 		slot.singleObs.resize(m_singleObsSize);
-		if (m_grayscale) {
+		if (m_grayscale && !slot.emulator->sourceFrameIsBgr()) {
 			IndexedVideoFrame indexedFrame;
 			if (slot.usesIndexedVideo && slot.emulator->m_re.getIndexedVideoFrame(indexedFrame) && m_useGrayscaleAreaPlan) {
 				const NativeCrop crop = cropForFrame(indexedFrame.width, indexedFrame.height);
@@ -2930,6 +2999,8 @@ private:
 	}
 
 	void resetSlot(Slot& slot, uint8_t* dst, int32_t initialStateIndex) {
+		slot.resetRng = slot.rng;
+		slot.replayActions.clear();
 		slot.hasRestoredScreen = false;
 		slot.restoredScreen.clear();
 		const InitialStateChoice* initialState =
@@ -2978,6 +3049,7 @@ private:
 	}
 
 	void stepSlot(Slot& slot, const std::vector<uint8_t>& requestedAction, uint8_t* dst, StepOutput& output) {
+		slot.replayActions.push_back(requestedAction);
 		slot.hasRestoredScreen = false;
 		slot.restoredScreen.clear();
 		const bool preserveTerminalFrame = true;
@@ -3036,7 +3108,7 @@ private:
 				slot.data.m_data.updateRam();
 			}
 			if (m_maxpoolLastTwo && (i >= m_frameSkip - 2 || done)) {
-				if (m_grayscale) {
+				if (m_grayscale && !slot.emulator->sourceFrameIsBgr()) {
 					if (!done && i < m_frameSkip - 1) {
 						IndexedVideoFrame indexedFrame;
 						if (slot.usesIndexedVideo && slot.emulator->m_re.getIndexedVideoFrame(indexedFrame)) {
@@ -3114,7 +3186,7 @@ private:
 		if (!m_maxpoolLastTwo || !sawFrame) {
 			readProcessedFrame(slot);
 		} else {
-			if (m_grayscale) {
+			if (m_grayscale && !slot.emulator->sourceFrameIsBgr()) {
 				IndexedVideoFrame indexedFrame;
 				if (slot.usesIndexedVideo && slot.emulator->m_re.getIndexedVideoFrame(indexedFrame) && m_useGrayscaleAreaPlan) {
 					const NativeCrop crop = cropForFrame(indexedFrame.width, indexedFrame.height);
@@ -3236,6 +3308,24 @@ private:
 			slot.pendingReset = true;
 		} else if (!observationWritten) {
 			writeStackedObservation(slot, dst);
+		}
+	}
+
+	void restoreAtariSlotByReplay(
+		Slot& slot,
+		const PyRetroLiveSnapshot& snapshot,
+		uint8_t* dst) {
+		const auto actions = snapshot.replayActions;
+		slot.rng = snapshot.resetRng;
+		resetSlot(slot, dst, snapshot.activeStateIndex);
+		for (const auto& action : actions) {
+			StepOutput output;
+			clearStepOutput(output);
+			stepSlot(slot, action, dst, output);
+			if (output.done) {
+				throw std::runtime_error(
+					"Atari snapshot replay crossed a terminal transition");
+			}
 		}
 	}
 
@@ -3530,6 +3620,7 @@ PYBIND11_MODULE(_retro, m) {
 			py::arg("state_indices"),
 			py::arg("snapshots"))
 		.def("capture_snapshots", &PyRetroVecEnv::captureSnapshots, py::arg("capture_mask"))
+		.def("get_rams", &PyRetroVecEnv::getRams)
 		.def("step", &PyRetroVecEnv::step)
 		.def("active_state_indices", &PyRetroVecEnv::activeStateIndices)
 		.def("observation_shape", &PyRetroVecEnv::observationShape)

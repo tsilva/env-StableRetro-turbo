@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll       
-//  SS  SS   tt           ll   ll        
-//  SS     tttttt  eeee   ll   ll   aaaa 
+//   SSSS    tt          lll  lll
+//  SS  SS   tt           ll   ll
+//  SS     tttttt  eeee   ll   ll   aaaa
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -24,9 +24,12 @@ class System;
 
 #include "bspf.hxx"
 #include "Cart.hxx"
+#ifdef DEBUGGER_SUPPORT
+  #include "CartDPCWidget.hxx"
+#endif
 
 /**
-  Cartridge class used for Pitfall II.  There are two 4K program banks, a 
+  Cartridge class used for Pitfall II.  There are two 4K program banks, a
   2K display bank, and the DPC chip.  The bankswitching itself is the same
   as F8 scheme (hotspots at $1FF8 and $1FF9).  DPC chip access is mapped to
   $1000 - $1080 ($1000 - $103F is read port, $1040 - $107F is write port).
@@ -49,8 +52,8 @@ class CartridgeDPC : public Cartridge
       @param size      The size of the ROM image
       @param settings  A reference to the various settings (read-only)
     */
-    CartridgeDPC(const uint8_t* image, uint32_t size, const Settings& settings);
- 
+    CartridgeDPC(const uInt8* image, uInt32 size, const Settings& settings);
+
     /**
       Destructor
     */
@@ -82,17 +85,17 @@ class CartridgeDPC : public Cartridge
 
       @param bank The bank that should be installed in the system
     */
-    bool bank(uint16_t bank);
+    bool bank(uInt16 bank);
 
     /**
       Get the current bank.
     */
-    uint16_t bank() const;
+    uInt16 bank() const;
 
     /**
       Query the number of banks supported by the cartridge.
     */
-    uint16_t bankCount() const;
+    uInt16 bankCount() const;
 
     /**
       Patch the cartridge ROM.
@@ -101,7 +104,7 @@ class CartridgeDPC : public Cartridge
       @param value    The value to place into the address
       @return    Success or failure of the patch operation
     */
-    bool patch(uint16_t address, uint8_t value);
+    bool patch(uInt16 address, uInt8 value);
 
     /**
       Access the internal ROM image for this cartridge.
@@ -109,7 +112,7 @@ class CartridgeDPC : public Cartridge
       @param size  Set to the size of the internal ROM image data
       @return  A pointer to the internal ROM image data
     */
-    const uint8_t* getImage(int& size) const;
+    const uInt8* getImage(int& size) const;
 
     /**
       Save the current state of this cart to the given Serializer.
@@ -134,13 +137,25 @@ class CartridgeDPC : public Cartridge
     */
     string name() const { return "CartridgeDPC"; }
 
+  #ifdef DEBUGGER_SUPPORT
+    /**
+      Get debugger widget responsible for accessing the inner workings
+      of the cart.
+    */
+    CartDebugWidget* debugWidget(GuiObject* boss, const GUI::Font& lfont,
+        const GUI::Font& nfont, int x, int y, int w, int h)
+    {
+      return new CartridgeDPCWidget(boss, lfont, nfont, x, y, w, h, *this);
+    }
+  #endif
+
   public:
     /**
       Get the byte at the specified address.
 
       @return The byte at the specified address
     */
-    uint8_t peek(uint16_t address);
+    uInt8 peek(uInt16 address);
 
     /**
       Change the byte at the specified address to the given value
@@ -149,15 +164,15 @@ class CartridgeDPC : public Cartridge
       @param value The value to be stored at the address
       @return  True if the poke changed the device address space, else false
     */
-    bool poke(uint16_t address, uint8_t value);
+    bool poke(uInt16 address, uInt8 value);
 
   private:
-    /** 
+    /**
       Clocks the random number generator to move it to its next state
     */
     void clockRandomNumberGenerator();
 
-    /** 
+    /**
       Updates any data fetchers in music mode based on the number of
       CPU cycles which have passed since the last update.
     */
@@ -165,54 +180,43 @@ class CartridgeDPC : public Cartridge
 
   private:
     // The ROM image
-    uint8_t myImage[8192 + 2048 + 256];
+    uInt8 myImage[8192 + 2048 + 256];
 
     // (Actual) Size of the ROM image
-    uint32_t mySize;
+    uInt32 mySize;
 
     // Pointer to the 8K program ROM image of the cartridge
-    uint8_t* myProgramImage;
+    uInt8* myProgramImage;
 
     // Pointer to the 2K display ROM image of the cartridge
-    uint8_t* myDisplayImage;
+    uInt8* myDisplayImage;
 
     // Indicates which bank is currently active
-    uint16_t myCurrentBank;
+    uInt16 myCurrentBank;
 
     // The top registers for the data fetchers
-    uint8_t myTops[8];
+    uInt8 myTops[8];
 
     // The bottom registers for the data fetchers
-    uint8_t myBottoms[8];
+    uInt8 myBottoms[8];
 
     // The counter registers for the data fetchers
-    uint16_t myCounters[8];
+    uInt16 myCounters[8];
 
     // The flag registers for the data fetchers
-    uint8_t myFlags[8];
+    uInt8 myFlags[8];
 
     // The music mode DF5, DF6, & DF7 enabled flags
     bool myMusicMode[3];
 
     // The random number generator register
-    uint8_t myRandomNumber;
+    uInt8 myRandomNumber;
 
     // System cycle count when the last update to music data fetchers occurred
-    int32_t mySystemCycles;
+    Int32 mySystemCycles;
 
-    // Fractional DPC music OSC clocks unused during the last update,
-    // as an integer remainder in units of 1/myDpcClockDen of an OSC clock
-    uint32_t myFractionalClocks;
-
-    // DPC music-oscillator clock rate as an exact integer ratio
-    // (OSC clocks per CPU cycle = num/den), chosen from the TV format
-    uint32_t myDpcClockNum;
-    uint32_t myDpcClockDen;
-
-  public:
-    void setDpcClockRate(uint32_t num, uint32_t den);
-
-  private:
+    // Fractional DPC music OSC clocks unused during the last update
+    double myFractionalClocks;
 };
 
 #endif

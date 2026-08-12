@@ -78,7 +78,7 @@ typedef enum {
 	KBDK_GREATER		= 62,
 	KBDK_QUESTION		= 63,
 	KBDK_AT			= 64,
-	/* 
+	/*
 	   Skip uppercase letters
 	 */
 	KBDK_LEFTBRACKET	= 91,
@@ -305,5 +305,9 @@ typedef enum {
 
 	KBDK_LAST
 } StellaKey;
+
+// Just pass SDLMod directly as int (placeholder for now)
+// The underlying code doesn't need to know how it's implemented
+typedef int StellaMod;
 
 #endif /* StellaKeys */

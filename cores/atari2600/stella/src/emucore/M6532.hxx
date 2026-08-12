@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll       
-//  SS  SS   tt           ll   ll        
-//  SS     tttttt  eeee   ll   ll   aaaa 
+//   SSSS    tt          lll  lll
+//  SS  SS   tt           ll   ll
+//  SS     tttttt  eeee   ll   ll   aaaa
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -55,7 +55,7 @@ class M6532 : public Device
       @param settings The settings used by the system
     */
     M6532(const Console& console, const Settings& settings);
- 
+
     /**
       Destructor
     */
@@ -127,7 +127,7 @@ class M6532 : public Device
 
       @return The byte at the specified address
     */
-    uint8_t peek(uint16_t address);
+    uInt8 peek(uInt16 address);
 
     /**
       Change the byte at the specified address to the given value
@@ -137,21 +137,21 @@ class M6532 : public Device
 
       @return  True if the poke changed the device address space, else false
     */
-    bool poke(uint16_t address, uint8_t value);
+    bool poke(uInt16 address, uInt8 value);
 
   private:
-    int32_t timerClocks() const
+    Int32 timerClocks() const
       { return myTimer - (mySystem->cycles() - myCyclesWhenTimerSet); }
 
-    void setTimerRegister(uint8_t data, uint8_t interval);
+    void setTimerRegister(uInt8 data, uInt8 interval);
     void setPinState(bool shcha);
 
     // The following are used by the debugger to read INTIM/TIMINT
     // We need separate methods to do this, so the state of the system
     // isn't changed
-    uint8_t intim() const;
-    uint8_t timint() const;
-    int32_t intimClocks() const;
+    uInt8 intim() const;
+    uInt8 timint() const;
+    Int32 intimClocks() const;
 
   private:
     // Accessible bits in the interrupt flag register
@@ -168,31 +168,31 @@ class M6532 : public Device
     const Settings& mySettings;
 
     // An amazing 128 bytes of RAM
-    uint8_t myRAM[128];
+    uInt8 myRAM[128];
 
     // Current value of the timer
-    uint32_t myTimer;
+    uInt32 myTimer;
 
     // Log base 2 of the number of cycles in a timer interval
-    uint32_t myIntervalShift;
+    uInt32 myIntervalShift;
 
     // Indicates the number of cycles when the timer was last set
-    int32_t myCyclesWhenTimerSet;
+    Int32 myCyclesWhenTimerSet;
 
     // Data Direction Register for Port A
-    uint8_t myDDRA;
+    uInt8 myDDRA;
 
     // Data Direction Register for Port B
-    uint8_t myDDRB;
+    uInt8 myDDRB;
 
     // Last value written to Port A
-    uint8_t myOutA;
+    uInt8 myOutA;
 
     // Last value written to Port B
-    uint8_t myOutB;
+    uInt8 myOutB;
 
     // Interrupt Flag Register
-    uint8_t myInterruptFlag;
+    uInt8 myInterruptFlag;
 
     // Whether the timer flag (as currently set) can be used
     // If it isn't valid, it will be updated as required
@@ -203,16 +203,16 @@ class M6532 : public Device
     bool myEdgeDetectPositive;
 
     // Last value written to the timer registers
-    uint8_t myOutTimer[4];
+    uInt8 myOutTimer[4];
 
   private:
     // Copy constructor isn't supported by this class so make it private
     M6532(const M6532&);
- 
+
     // Assignment operator isn't supported by this class so make it private
     M6532& operator = (const M6532&);
 
-  public: uint8_t* getRAM() { return myRAM; }
+  public: uInt8* getRAM() { return myRAM; }
 };
 
 #endif

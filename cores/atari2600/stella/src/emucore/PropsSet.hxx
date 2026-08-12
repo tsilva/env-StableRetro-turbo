@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll       
-//  SS  SS   tt           ll   ll        
-//  SS     tttttt  eeee   ll   ll   aaaa 
+//   SSSS    tt          lll  lll
+//  SS  SS   tt           ll   ll
+//  SS     tttttt  eeee   ll   ll   aaaa
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -23,6 +23,7 @@
 #include <map>
 
 #include "bspf.hxx"
+//#include "FSNode.hxx"
 #include "Props.hxx"
 
 class OSystem;
@@ -34,7 +35,7 @@ class OSystem;
   and least likely to change.  A change in MD5 would mean a change in
   the game rom image (essentially a different game) and this would
   necessitate a new entry in the stella.pro file anyway.
-  
+
   @author  Stephen Anthony
 */
 class PropertiesSet
@@ -53,6 +54,24 @@ class PropertiesSet
 
   public:
     /**
+      Load properties from the specified file, and create an internal
+      searchable list.
+
+      @param filename  Full pathname of input file to use
+    */
+    void load(const string& filename);
+
+    /**
+      Save properties to the specified file.
+
+      @param filename  Full pathname of output file to use
+
+      @return  True on success, false on failure
+               Failure occurs if file couldn't be opened for writing
+    */
+    bool save(const string& filename) const;
+
+    /**
       Get the property from the set with the given MD5.
 
       @param md5         The md5 of the property to get
@@ -67,11 +86,41 @@ class PropertiesSet
                 bool useDefaults = false) const;
 
     /**
+      Get the property from the set with the given MD5, at the same time
+      checking if it exists.  If it doesn't, insert a temporary copy into
+      the set.
+
+      @param file        The node representing the
+      @param md5         The md5 of the property to get
+      @param properties  The properties with the given MD5, or the default
+                         properties if not found
+      @param defaults    Use the built-in defaults, ignoring any properties
+                         from an external file
+    */
+    //void getMD5WithInsert(const FilesystemNode& rom, const string& md5,
+    //                      Properties& properties);
+
+    /**
+      Insert the properties into the set.  If a duplicate is inserted
+      the old properties are overwritten with the new ones.
+
+      @param properties  The collection of properties
+      @param save        Indicates whether the properties should be saved
+                         when the program exits
+    */
+    void insert(const Properties& properties, bool save = true);
+
+    /**
       Marks the property with the given MD5 as being removed.
 
       @param md5  The md5 of the property to remove
     */
     void removeMD5(const string& md5);
+
+    /**
+      Prints the contents of the PropertiesSet as a flat file.
+    */
+    void print() const;
 
   private:
     typedef map<string, Properties> PropsList;

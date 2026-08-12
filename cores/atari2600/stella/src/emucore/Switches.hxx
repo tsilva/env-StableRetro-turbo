@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll       
-//  SS  SS   tt           ll   ll        
-//  SS     tttttt  eeee   ll   ll   aaaa 
+//   SSSS    tt          lll  lll
+//  SS  SS   tt           ll   ll
+//  SS     tttttt  eeee   ll   ll   aaaa
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -47,7 +47,7 @@ class Switches : public Serializable
       @param event The event object to use for events
     */
     Switches(const Event& event, const Properties& properties);
- 
+
     /**
       Destructor
     */
@@ -59,7 +59,7 @@ class Switches : public Serializable
 
       @return The 8 bits which represent the state of the console switches
     */
-    uint8_t read() const { return mySwitches; }
+    uInt8 read() const { return mySwitches; }
 
     /**
       Update the switches variable
@@ -94,7 +94,7 @@ class Switches : public Serializable
     const Event& myEvent;
 
     // State of the console switches
-    uint8_t mySwitches;
+    uInt8 mySwitches;
 };
 
 #endif

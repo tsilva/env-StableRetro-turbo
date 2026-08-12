@@ -5,8 +5,8 @@
 ;
 [subrepo]
 	remote = https://github.com/libretro/stella-libretro.git
-	branch = master
-	commit = 4a7da82595d27b8df7af1ecb467a64b642a41bc9
-	parent = 5e24076eebcf724d7644c93a953d8306cb68259b
+	branch = b0b63615fc2c7a30470fc1ac31ffdc18fdf4518b
+	commit = b0b63615fc2c7a30470fc1ac31ffdc18fdf4518b
+	parent = 72f0e18a9feb16f0975c90ed50bc82e8ccad5907
 	method = rebase
 	cmdver = 0.4.0

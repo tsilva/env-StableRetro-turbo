@@ -402,28 +402,27 @@ bool Emulator::unserialize(const void* data, size_t size) {
 		retro_system_info systemInfo;
 		m_retro_get_system_info(&systemInfo);
 		if (!strcmp(systemInfo.library_name, "Stella")) {
-			// Stella's legacy state omits device-local transient fields, so rebuild
-			// its Console before applying the state. Keep the already-loaded shared
-			// library and ROM bytes: unloading/re-copying/reloading the dylib for
-			// every lane reset is unnecessary and stalls the full vector batch.
-			m_retro_unload_game();
-			if (!m_retro_load_game(&m_gameInfo)) {
-				return false;
-			}
-			if (m_stable_retro_set_audio_enabled) {
-				m_stable_retro_set_audio_enabled(m_audioEnabled);
-			}
-			if (m_addressSpace) {
-				m_addressSpace->reset();
-				m_addressSpace->addBlock(
-					Retro::ramBase(m_core),
-					m_retro_get_memory_size(RETRO_MEMORY_SYSTEM_RAM),
-					m_retro_get_memory_data(RETRO_MEMORY_SYSTEM_RAM)
-				);
-			}
+			// Match Stable Retro 1.0.1 exactly: Stella does not clear every
+			// device-local field when a saved state is loaded, so rebuild the core
+			// before applying the authority-format state.
+			reset();
 		}
 		ensureInitializedForSerialization();
 		bool ok = m_retro_unserialize(data, size);
+		if (ok && (m_serializationQuirks & RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE)) {
+			m_needsInitFrame = false;
+		}
+		return ok;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool Emulator::unserializeLive(const void* data, size_t size) {
+	try {
+		CallbackScope callbackScope(this);
+		ensureInitializedForSerialization();
+		const bool ok = m_retro_unserialize(data, size);
 		if (ok && (m_serializationQuirks & RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE)) {
 			m_needsInitFrame = false;
 		}
@@ -697,6 +696,13 @@ bool Emulator::cbEnvironment(unsigned cmd, void* data) {
 		}
 		return true;
 	case RETRO_ENVIRONMENT_GET_CURRENT_SOFTWARE_FRAMEBUFFER: {
+		// Stable Retro 1.0.1 did not offer this frontend fast path.  FCEUmm's
+		// behavior is not equivalent when it is enabled: on some NES frames it
+		// presents a newly cleared frontend buffer instead of duplicating the
+		// last core-owned frame.  Keep NES on the authority's public video path.
+		if (emulator->m_core == "Nes") {
+			return false;
+		}
 		auto* framebuffer = reinterpret_cast<retro_framebuffer*>(data);
 		if (!framebuffer || !framebuffer->width || !framebuffer->height) {
 			return false;

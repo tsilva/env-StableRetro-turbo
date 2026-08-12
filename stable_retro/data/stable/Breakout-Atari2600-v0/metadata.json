@@ -1,13 +1,5 @@
 {
   "default_state": "Start",
-  "action_sets": {
-    "simple": [
-      [],
-      ["BUTTON"],
-      ["RIGHT"],
-      ["LEFT"]
-    ]
-  },
   "tags": [
     "aligned"
   ],

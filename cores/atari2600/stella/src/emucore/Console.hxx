@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll       
-//  SS  SS   tt           ll   ll        
-//  SS     tttttt  eeee   ll   ll   aaaa 
+//   SSSS    tt          lll  lll
+//  SS  SS   tt           ll   ll
+//  SS     tttttt  eeee   ll   ll   aaaa
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -32,8 +32,8 @@ class CompuMate;
 #include "bspf.hxx"
 #include "Control.hxx"
 #include "Props.hxx"
-#include "OSystem.hxx"
 #include "TIATables.hxx"
+#include "FrameBuffer.hxx"
 #include "Serializable.hxx"
 
 /**
@@ -65,7 +65,7 @@ class Console : public Serializable
 
       @param osystem  The OSystem object to use
       @param cart     The cartridge to use with this console
-      @param props    The properties for the cartridge  
+      @param props    The properties for the cartridge
     */
     Console(OSystem* osystem, Cartridge* cart, const Properties& props);
 
@@ -75,7 +75,7 @@ class Console : public Serializable
       @param console The object to copy
     */
     Console(const Console& console);
- 
+
     /**
       Destructor
     */
@@ -178,6 +178,11 @@ class Console : public Serializable
     const ConsoleInfo& about() const { return myConsoleInfo; }
 
     /**
+      Set up the console to use the debugger.
+    */
+    void addDebugger();
+
+    /**
       Informs the Console of a change in EventHandler state.
     */
     void stateChanged(EventHandler::State state);
@@ -212,6 +217,11 @@ class Console : public Serializable
     void setPalette(const string& palette);
 
     /**
+      Toggles phosphor effect.
+    */
+    void togglePhosphor();
+
+    /**
       Toggles the PAL color-loss effect.
     */
     void toggleColorLoss();
@@ -220,8 +230,13 @@ class Console : public Serializable
     /**
       Initialize the video subsystem wrt this class.
       This is required for changing window size, title, etc.
+
+      @param full  Whether we want a full initialization,
+                   or only reset certain attributes.
+
+      @return  The results from FrameBuffer::initialize()
     */
-    void initializeVideo();
+    FBInitStatus initializeVideo(bool full = true);
 
     /**
       Initialize the audio subsystem wrt this class.
@@ -252,14 +267,13 @@ class Console : public Serializable
       Sets the framerate of the console, which in turn communicates
       this to all applicable subsystems.
     */
-    void setFramerate(uint32_t num, uint32_t den);
+    void setFramerate(float framerate);
 
     /**
       Returns the framerate based on a number of factors
       (whether 'framerate' is set, what display format is in use, etc)
     */
-    uint32_t getFramerateNum() const { return myFramerateNum; }
-    uint32_t getFramerateDen() const { return myFramerateDen; }
+    float getFramerate() const { return myFramerate; }
 
     /**
       Toggles the TIA bit specified in the method name.
@@ -293,7 +307,7 @@ class Console : public Serializable
       Returns a pointer to the palette data for the palette currently defined
       by the ROM properties.
     */
-    const uint32_t* getPalette(int direction) const;
+    const uInt32* getPalette(int direction) const;
 
   private:
     /**
@@ -336,13 +350,13 @@ class Console : public Serializable
     // Pointers to the left and right controllers
     Controller* myControllers[2];
 
-    // Pointer to the TIA object 
+    // Pointer to the TIA object
     TIA* myTIA;
 
     // Pointer to the switches on the front of the console
     Switches* mySwitches;
- 
-    // Pointer to the 6502 based system being emulated 
+
+    // Pointer to the 6502 based system being emulated
     System* mySystem;
 
     // Pointer to the Cartridge (the debugger needs it)
@@ -359,13 +373,10 @@ class Console : public Serializable
     string myDisplayFormat;
 
     // The currently defined display framerate
-    // Framerate as an exact rational (frames per second = num/den),
-    // e.g. NTSC 59.92 fps = 1498/25, PAL 49.92 fps = 1248/25
-    uint32_t myFramerateNum;
-    uint32_t myFramerateDen;
+    float myFramerate;
 
     // Display format currently in use
-    uint32_t myCurrentFormat;
+    uInt32 myCurrentFormat;
 
     // Indicates whether an external palette was found and
     // successfully loaded
@@ -374,22 +385,22 @@ class Console : public Serializable
     // Contains detailed info about this console
     ConsoleInfo myConsoleInfo;
 
-	const uint32_t *currentPalette;
+	const uInt32 *currentPalette;
 
     // Table of RGB values for NTSC, PAL and SECAM
-    static uint32_t ourNTSCPalette[256];
-    static uint32_t ourPALPalette[256];
-    static uint32_t ourSECAMPalette[256];
+    static uInt32 ourNTSCPalette[256];
+    static uInt32 ourPALPalette[256];
+    static uInt32 ourSECAMPalette[256];
 
     // Table of RGB values for NTSC, PAL and SECAM - Z26 version
-    static uint32_t ourNTSCPaletteZ26[256];
-    static uint32_t ourPALPaletteZ26[256];
-    static uint32_t ourSECAMPaletteZ26[256];
+    static uInt32 ourNTSCPaletteZ26[256];
+    static uInt32 ourPALPaletteZ26[256];
+    static uInt32 ourSECAMPaletteZ26[256];
 
     // Table of RGB values for NTSC, PAL and SECAM - user-defined
-    static uint32_t ourUserNTSCPalette[256];
-    static uint32_t ourUserPALPalette[256];
-    static uint32_t ourUserSECAMPalette[256];
+    static uInt32 ourUserNTSCPalette[256];
+    static uInt32 ourUserPALPalette[256];
+    static uInt32 ourUserSECAMPalette[256];
 };
 
 #endif

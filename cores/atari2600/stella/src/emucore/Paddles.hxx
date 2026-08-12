@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll       
-//  SS  SS   tt           ll   ll        
-//  SS     tttttt  eeee   ll   ll   aaaa 
+//   SSSS    tt          lll  lll
+//  SS  SS   tt           ll   ll
+//  SS     tttttt  eeee   ll   ll   aaaa
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -86,7 +86,7 @@ class Paddles : public Controller
       or digital joystick axis events); Stelladaptors or the mouse are
       not modified.
 
-      @param sensitivity  Value from 10 to 100, with larger values
+      @param sensitivity  Value from 1 to 10, with larger values
                           causing more movement
     */
     static void setDigitalSensitivity(int sensitivity);
@@ -95,7 +95,7 @@ class Paddles : public Controller
       Sets the sensitivity for analog emulation of paddle movement
       using a mouse.
 
-      @param sensitivity  Value from 1 to 15, with larger values
+      @param sensitivity  Value from 1 to 10, with larger values
                           causing more movement
     */
     static void setMouseSensitivity(int sensitivity);
@@ -129,7 +129,6 @@ class Paddles : public Controller
 
     static int _DIGITAL_SENSITIVITY, _DIGITAL_DISTANCE;
     static int _MOUSE_SENSITIVITY;
-    static int _MOUSE_DIRECTION;
 
     // Lookup table for associating paddle buttons with controller pins
     // Yes, this is hideously complex

@@ -1,8 +1,8 @@
 //============================================================================
 //
-//   SSSS    tt          lll  lll       
-//  SS  SS   tt           ll   ll        
-//  SS     tttttt  eeee   ll   ll   aaaa 
+//   SSSS    tt          lll  lll
+//  SS  SS   tt           ll   ll
+//  SS     tttttt  eeee   ll   ll   aaaa
 //   SSSS    tt   ee  ee  ll   ll      aa
 //      SS   tt   eeeeee  ll   ll   aaaaa  --  "An Atari 2600 VCS Emulator"
 //  SS  SS   tt   ee      ll   ll  aa  aa
@@ -23,6 +23,9 @@
 #include "bspf.hxx"
 #include "Cart.hxx"
 #include "System.hxx"
+#ifdef DEBUGGER_SUPPORT
+  #include "Cart0840Widget.hxx"
+#endif
 
 /**
   Cartridge class used for 0840 "Econobanking" 8K bankswitched games.  There
@@ -42,8 +45,8 @@ class Cartridge0840 : public Cartridge
       @param size      The size of the ROM image
       @param settings  A reference to the various settings (read-only)
     */
-    Cartridge0840(const uint8_t* image, uint32_t size, const Settings& settings);
- 
+    Cartridge0840(const uInt8* image, uInt32 size, const Settings& settings);
+
     /**
       Destructor
     */
@@ -68,17 +71,17 @@ class Cartridge0840 : public Cartridge
 
       @param bank The bank that should be installed in the system
     */
-    bool bank(uint16_t bank);
+    bool bank(uInt16 bank);
 
     /**
       Get the current bank.
     */
-    uint16_t bank() const;
+    uInt16 bank() const;
 
     /**
       Query the number of banks supported by the cartridge.
     */
-    uint16_t bankCount() const;
+    uInt16 bankCount() const;
 
     /**
       Patch the cartridge ROM.
@@ -87,7 +90,7 @@ class Cartridge0840 : public Cartridge
       @param value    The value to place into the address
       @return    Success or failure of the patch operation
     */
-    bool patch(uint16_t address, uint8_t value);
+    bool patch(uInt16 address, uInt8 value);
 
     /**
       Access the internal ROM image for this cartridge.
@@ -95,7 +98,7 @@ class Cartridge0840 : public Cartridge
       @param size  Set to the size of the internal ROM image data
       @return  A pointer to the internal ROM image data
     */
-    const uint8_t* getImage(int& size) const;
+    const uInt8* getImage(int& size) const;
 
     /**
       Save the current state of this cart to the given Serializer.
@@ -120,13 +123,25 @@ class Cartridge0840 : public Cartridge
     */
     string name() const { return "Cartridge0840"; }
 
+  #ifdef DEBUGGER_SUPPORT
+    /**
+      Get debugger widget responsible for accessing the inner workings
+      of the cart.
+    */
+    CartDebugWidget* debugWidget(GuiObject* boss, const GUI::Font& lfont,
+        const GUI::Font& nfont, int x, int y, int w, int h)
+    {
+      return new Cartridge0840Widget(boss, lfont, nfont, x, y, w, h, *this);
+    }
+  #endif
+
   public:
     /**
       Get the byte at the specified address.
 
       @return The byte at the specified address
     */
-    uint8_t peek(uint16_t address);
+    uInt8 peek(uInt16 address);
 
     /**
       Change the byte at the specified address to the given value
@@ -135,15 +150,15 @@ class Cartridge0840 : public Cartridge
       @param value The value to be stored at the address
       @return  True if the poke changed the device address space, else false
     */
-    bool poke(uint16_t address, uint8_t value);
+    bool poke(uInt16 address, uInt8 value);
 
   private:
     // The 8K ROM image of the cartridge
-    uint8_t myImage[8192];
+    uInt8 myImage[8192];
 
     // Indicates which bank is currently active
-    uint16_t myCurrentBank;
-   
+    uInt16 myCurrentBank;
+
     // Previous Device's page access
     System::PageAccess myHotSpotPageAccess[8];
 };
