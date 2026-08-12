@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-* Nothing yet.
+* allow the optional Stella Turbo-hook test to accept the authority-compatible
+  core while retaining hook coverage when those exports are present
 
 ## 1.0.1.post38 - 2026-08-12
 
