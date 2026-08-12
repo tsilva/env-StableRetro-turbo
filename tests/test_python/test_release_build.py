@@ -383,6 +383,7 @@ def test_release_publishes_audited_sdist_and_github_release():
     assert "release_build.py build-sdist" in workflow
     assert "dist/*.tar.gz" in workflow
     assert "gh release create" in workflow
+    assert '--repo "${GITHUB_REPOSITORY}"' in workflow
 
 
 def test_release_cache_paths_are_platform_scoped(tmp_path):
