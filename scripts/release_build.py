@@ -278,8 +278,6 @@ def prune_sdist_tree(root: Path) -> None:
         for path in collection_root.iterdir():
             if path.is_dir() and data_dir_platform(path.name) not in public_platforms:
                 shutil.rmtree(path)
-        for path in collection_root.rglob("*.state"):
-            path.unlink()
 
     libzip_regress = root / "third-party" / "libzip" / "regress"
     if libzip_regress.exists():
@@ -296,10 +294,32 @@ def prune_sdist_tree(root: Path) -> None:
                 shutil.rmtree(path)
     for unused_core_asset in (
         root / "cores" / "gba" / "cinema",
+        root / "cores" / "gba" / "doc",
+        root / "cores" / "gba" / "res",
+        root / "cores" / "gba" / "tools",
         root / "cores" / "genesis" / "builds",
+        root / "cores" / "genesis" / "gcw0",
+        root / "cores" / "genesis" / "gx",
+        root / "cores" / "genesis" / "psp2",
+        root / "cores" / "genesis" / "sdl",
+        root / "cores" / "32x" / "platform" / "gizmondo",
+        root / "cores" / "32x" / "platform" / "gp2x",
+        root / "cores" / "32x" / "platform" / "opendingux",
+        root / "cores" / "32x" / "platform" / "pandora",
+        root / "cores" / "32x" / "platform" / "psp",
+        root / "cores" / "32x" / "platform" / "win32",
+        root / "cores" / "32x" / "tools",
+        root / "cores" / "ds" / ".github",
+        root / "cores" / "ds" / "icon",
+        root / "cores" / "ds" / "tools",
     ):
         if unused_core_asset.exists():
             shutil.rmtree(unused_core_asset)
+    gba_platform = root / "cores" / "gba" / "src" / "platform"
+    if gba_platform.is_dir():
+        for path in gba_platform.iterdir():
+            if path.is_dir() and path.name not in {"libretro", "posix"}:
+                shutil.rmtree(path)
     for core_root in (root / "cores").iterdir():
         if not core_root.is_dir():
             continue
@@ -781,7 +801,7 @@ def audit_sdist(sdist: Path, version: str) -> dict[str, object]:
         "all_public_core_sources": PUBLIC_CORE_SOURCE_DIRS <= source_core_dirs,
         "only_public_core_sources": source_core_dirs <= PUBLIC_CORE_SOURCE_DIRS,
         "only_public_data_platforms": data_platforms <= public_platforms,
-        "no_bundled_saved_states": not any(
+        "has_bundled_saved_states": any(
             name.startswith(f"{root}/stable_retro/data/") and name.endswith(".state")
             for name in names
         ),

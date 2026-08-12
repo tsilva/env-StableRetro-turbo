@@ -180,6 +180,11 @@ def test_sdist_audit_accepts_clean_source_and_rejects_rom_payload(
             member = tarfile.TarInfo(f"{root}/cores/{core_dir}")
             member.type = tarfile.DIRTYPE
             archive.addfile(member)
+        saved_state = tarfile.TarInfo(
+            f"{root}/stable_retro/data/stable/Breakout-Atari2600-v0/Start.state"
+        )
+        saved_state.size = 0
+        archive.addfile(saved_state)
 
     result = release_build.audit_sdist(sdist, version)
     release_build.assert_sdist_audit_passed(result)
@@ -197,6 +202,11 @@ def test_sdist_audit_accepts_clean_source_and_rejects_rom_payload(
             member = tarfile.TarInfo(f"{root}/cores/{core_dir}")
             member.type = tarfile.DIRTYPE
             archive.addfile(member)
+        saved_state = tarfile.TarInfo(
+            f"{root}/stable_retro/data/stable/Breakout-Atari2600-v0/Start.state"
+        )
+        saved_state.size = 0
+        archive.addfile(saved_state)
         archive.add(rom, arcname=f"{root}/stable_retro/data/stable/Game/rom.nes")
     contaminated = release_build.audit_sdist(sdist, version)
     assert contaminated["checks"]["no_rom_payloads"] is False
@@ -250,7 +260,7 @@ def test_sdist_pruning_keeps_only_supported_cores_and_platforms(
     assert not gba_cinema.exists()
     assert not genesis_builds.exists()
     assert not compiled.exists()
-    assert not saved_state.exists()
+    assert saved_state.exists()
     assert {
         path.name for path in (tmp_path / "third-party" / "pybind11").iterdir()
     } == {"include"}
