@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Nothing yet.
+
+## 1.0.1.post38 - 2026-08-12
+
 * restore bit-exact original Stable Retro 1.0.1 behavior for canonical Mario
   and Breakout rollouts, including native and processed frames, rewards,
   lifecycle, RAM, selective resets, and snapshot continuation
