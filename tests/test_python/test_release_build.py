@@ -1,5 +1,6 @@
 import ast
 import importlib.util
+import tarfile
 import tomllib
 from pathlib import Path
 
@@ -143,6 +144,118 @@ def test_expected_linux_wheels_match_auditwheel_policy_tag():
     assert all("manylinux_2_27_x86_64.manylinux_2_28_x86_64" in name for name in names)
 
 
+def test_expected_sdist_uses_normalized_package_name(tmp_path, monkeypatch):
+    release_build = _release_build_module()
+    monkeypatch.setattr(release_build, "REPO_ROOT", tmp_path)
+
+    assert release_build.expected_sdist("1.0.1.post40") == (
+        tmp_path / "dist" / "stable_retro_turbo-1.0.1.post40.tar.gz"
+    )
+
+
+def test_sdist_audit_accepts_clean_source_and_rejects_rom_payload(
+    tmp_path,
+    monkeypatch,
+):
+    release_build = _release_build_module()
+    monkeypatch.setattr(release_build, "REPO_ROOT", tmp_path)
+    version = "1.0.1.post40"
+    root = f"stable_retro_turbo-{version}"
+    source = tmp_path / "source"
+    (source / "stable_retro").mkdir(parents=True)
+    (source / "setup.py").write_text("from setuptools import setup\n", encoding="utf-8")
+    (source / "stable_retro" / "VERSION.txt").write_text(
+        f"{version}\n",
+        encoding="utf-8",
+    )
+    sdist = release_build.expected_sdist(version)
+    sdist.parent.mkdir()
+    with tarfile.open(sdist, mode="w:gz") as archive:
+        archive.add(source / "setup.py", arcname=f"{root}/setup.py")
+        archive.add(
+            source / "stable_retro" / "VERSION.txt",
+            arcname=f"{root}/stable_retro/VERSION.txt",
+        )
+        for core_dir in sorted(release_build.PUBLIC_CORE_SOURCE_DIRS):
+            member = tarfile.TarInfo(f"{root}/cores/{core_dir}")
+            member.type = tarfile.DIRTYPE
+            archive.addfile(member)
+
+    result = release_build.audit_sdist(sdist, version)
+    release_build.assert_sdist_audit_passed(result)
+
+    rom = source / "stable_retro" / "data" / "stable" / "Game" / "rom.nes"
+    rom.parent.mkdir(parents=True)
+    rom.write_bytes(b"not-a-real-rom")
+    with tarfile.open(sdist, mode="w:gz") as archive:
+        archive.add(source / "setup.py", arcname=f"{root}/setup.py")
+        archive.add(
+            source / "stable_retro" / "VERSION.txt",
+            arcname=f"{root}/stable_retro/VERSION.txt",
+        )
+        for core_dir in sorted(release_build.PUBLIC_CORE_SOURCE_DIRS):
+            member = tarfile.TarInfo(f"{root}/cores/{core_dir}")
+            member.type = tarfile.DIRTYPE
+            archive.addfile(member)
+        archive.add(rom, arcname=f"{root}/stable_retro/data/stable/Game/rom.nes")
+    contaminated = release_build.audit_sdist(sdist, version)
+    assert contaminated["checks"]["no_rom_payloads"] is False
+
+
+def test_sdist_pruning_keeps_only_supported_cores_and_platforms(
+    tmp_path,
+):
+    release_build = _release_build_module()
+    for core_dir in release_build.KNOWN_CORE_SOURCE_DIRS:
+        (tmp_path / "cores" / core_dir).mkdir(parents=True)
+    stable = tmp_path / "stable_retro" / "data" / "stable"
+    (stable / "SuperMarioBros-Nes-v0").mkdir(parents=True)
+    (stable / "Breakout-Atari2600-v0").mkdir()
+    (stable / "MortalKombatTrilogy-N64-v0").mkdir()
+    saved_state = stable / "Breakout-Atari2600-v0" / "Start.state"
+    saved_state.write_bytes(b"state")
+    libzip_regress = tmp_path / "third-party" / "libzip" / "regress"
+    libzip_regress.mkdir(parents=True)
+    (libzip_regress / "unused.zip").write_bytes(b"fixture")
+    for unused_dependency in ("capnproto", "gtest"):
+        dependency = tmp_path / "third-party" / unused_dependency
+        dependency.mkdir(parents=True)
+        (dependency / "unused.cpp").write_text("// unused\n", encoding="utf-8")
+    gba_cinema = tmp_path / "cores" / "gba" / "cinema"
+    gba_cinema.mkdir(parents=True)
+    (gba_cinema / "test.gb").write_bytes(b"test-rom")
+    genesis_builds = tmp_path / "cores" / "genesis" / "builds"
+    genesis_builds.mkdir(parents=True)
+    (genesis_builds / "core.dll").write_bytes(b"prebuilt")
+    compiled = tmp_path / "cores" / "saturn" / "stale.o"
+    compiled.write_bytes(b"compiled")
+    for unused_pybind11_path in ("docs", "pybind11", "tests", "tools"):
+        path = tmp_path / "third-party" / "pybind11" / unused_pybind11_path
+        path.mkdir(parents=True)
+        (path / "unused.txt").write_text("unused\n", encoding="utf-8")
+    (tmp_path / "third-party" / "pybind11" / "include").mkdir()
+
+    release_build.prune_sdist_tree(tmp_path)
+
+    assert {path.name for path in (tmp_path / "cores").iterdir()} == (
+        release_build.PUBLIC_CORE_SOURCE_DIRS
+    )
+    assert {path.name for path in stable.iterdir()} == {
+        "SuperMarioBros-Nes-v0",
+        "Breakout-Atari2600-v0",
+    }
+    assert not libzip_regress.exists()
+    assert not (tmp_path / "third-party" / "capnproto").exists()
+    assert not (tmp_path / "third-party" / "gtest").exists()
+    assert not gba_cinema.exists()
+    assert not genesis_builds.exists()
+    assert not compiled.exists()
+    assert not saved_state.exists()
+    assert {
+        path.name for path in (tmp_path / "third-party" / "pybind11").iterdir()
+    } == {"include"}
+
+
 def test_package_and_wheel_metadata_target_python_314_only():
     root = Path(__file__).resolve().parents[2]
     pyproject = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
@@ -169,6 +282,12 @@ def test_wheel_build_parallelizes_cores_without_rebuilding_native_snes():
     assert "CXX=${core_cxx_compiler}" in cmake_source
     assert "build_native_snes_core" not in setup_source
     assert '["lipo", str(asset), "-verify_arch", "arm64"]' in setup_source
+    for default_arg in (
+        "-DBUILD_TESTS=OFF",
+        "-DENABLE_CAPNPROTO=OFF",
+        "-DBUILD_CORES=gb;nes;snes;genesis;atari2600;gba;32x;saturn;ds",
+    ):
+        assert default_arg in setup_source
 
 
 def test_release_wheel_builds_use_persistent_ccache():
@@ -243,6 +362,17 @@ def test_release_publish_requires_full_python_and_cpp_suites():
     publish = workflow.split("  publish:", maxsplit=1)[1]
     assert "- test-python" in publish
     assert "- test-cpp" in publish
+
+
+def test_release_publishes_audited_sdist_and_github_release():
+    root = Path(__file__).resolve().parents[2]
+    workflow = (root / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8",
+    )
+
+    assert "release_build.py build-sdist" in workflow
+    assert "dist/*.tar.gz" in workflow
+    assert "gh release create" in workflow
 
 
 def test_release_cache_paths_are_platform_scoped(tmp_path):

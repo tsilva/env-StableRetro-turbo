@@ -49,6 +49,11 @@ PUBLIC_DATA_PLATFORMS = frozenset(
     for platform in os.environ.get("STABLE_RETRO_PUBLIC_DATA_PLATFORMS", "").split(",")
     if platform.strip()
 )
+DEFAULT_CMAKE_ARGS = (
+    "-DBUILD_TESTS=OFF",
+    "-DENABLE_CAPNPROTO=OFF",
+    "-DBUILD_CORES=gb;nes;snes;genesis;atari2600;gba;32x;saturn;ds",
+)
 
 DATA_PACKAGE_DIRS = {
     "stable_retro.data.stable": SCRIPT_DIR / "stable_retro" / "data" / "stable",
@@ -168,7 +173,7 @@ class CMakeBuild(build_ext):
         # Allow users to pass extra CMake configure flags when building via pip.
         # Example:
         #   CMAKE_ARGS="-DBUILD_N64=OFF -DENABLE_HW_RENDER=ON" pip3 install -e .
-        extra_cmake_args = []
+        extra_cmake_args = list(DEFAULT_CMAKE_ARGS)
         for env_var in ("STABLE_RETRO_CMAKE_ARGS", "CMAKE_ARGS"):
             value = os.environ.get(env_var)
             if value:

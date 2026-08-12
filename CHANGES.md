@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-* Nothing yet.
+* publish the promised ROM-free source distribution alongside the audited
+  macOS and Linux wheels and attach the exact distribution bundle to the tag
 
 ## 1.0.1.post39 - 2026-08-12
 

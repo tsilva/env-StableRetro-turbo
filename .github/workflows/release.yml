@@ -199,7 +199,7 @@ jobs:
           if-no-files-found: error
 
   final-check:
-    name: Audit release wheels
+    name: Audit release distributions
     needs:
       - validate
       - build
@@ -237,6 +237,9 @@ jobs:
           name: linux-x86_64-wheel-v${{ needs.validate.outputs.version }}
           path: wheelhouse-post${{ needs.validate.outputs.post }}-linux
 
+      - name: Build clean source distribution
+        run: .venv314/bin/python scripts/release_build.py build-sdist --version "${{ needs.validate.outputs.version }}"
+
       - name: Final audit
         run: .venv314/bin/python scripts/release_build.py final-check --version "${{ needs.validate.outputs.version }}"
 
@@ -246,11 +249,13 @@ jobs:
           cp wheelhouse-post*-repaired/*.whl dist/
           cp wheelhouse-post*-linux/*.whl dist/
 
-      - name: Upload final wheel bundle
+      - name: Upload final distribution bundle
         uses: actions/upload-artifact@v4
         with:
           name: release-v${{ needs.validate.outputs.version }}
-          path: dist/*.whl
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
           if-no-files-found: error
 
   publish:
@@ -266,6 +271,7 @@ jobs:
       name: pypi
       url: https://pypi.org/p/stable-retro-turbo
     permissions:
+      contents: write
       id-token: write
     steps:
       - name: Download audited distributions
@@ -276,3 +282,12 @@ jobs:
 
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Create immutable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ needs.validate.outputs.version }}" dist/* \
+            --verify-tag \
+            --title "stable-retro-turbo ${{ needs.validate.outputs.version }}" \
+            --generate-notes

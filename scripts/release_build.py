@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import urllib.error
 import urllib.request
@@ -41,6 +42,25 @@ PUBLIC_CORES = (
 PUBLIC_DATA_PLATFORMS = (
     "GameBoy,Nes,Snes,Genesis,Sms,SCD,Atari2600,GbAdvance,32x,Saturn,NintendoDs"
 )
+PUBLIC_CORE_SOURCE_DIRS = frozenset(
+    {
+        "32x",
+        "atari2600",
+        "ds",
+        "gb",
+        "gba",
+        "genesis",
+        "nes",
+        "saturn",
+        "snes",
+    },
+)
+KNOWN_CORE_SOURCE_DIRS = PUBLIC_CORE_SOURCE_DIRS | {
+    "fbneo",
+    "flycast",
+    "n64",
+    "pce",
+}
 MACOS_CMAKE_ARGS = (
     "-DCMAKE_BUILD_TYPE=Release "
     "-DCMAKE_C_COMPILER_LAUNCHER=ccache "
@@ -70,7 +90,7 @@ IGNORED_DIR_NAMES_ANYWHERE = {
 }
 IGNORED_ROOT_DIR_NAMES = {".ccache", "build", "dist", "env"}
 IGNORED_FILE_NAMES = {"CMakeCache.txt"}
-IGNORED_FILE_SUFFIXES = {".o", ".a", ".so", ".dylib", ".d"}
+IGNORED_FILE_SUFFIXES = {".o", ".a", ".so", ".dylib", ".dll", ".pyd", ".d"}
 ROM_PAYLOAD_NAMES = {
     "rom.nes",
     "rom.sfc",
@@ -185,6 +205,10 @@ def expected_wheels(version: str, platform_name: str) -> list[Path]:
     raise ValueError(f"unknown platform: {platform_name}")
 
 
+def expected_sdist(version: str) -> Path:
+    return REPO_ROOT / "dist" / f"stable_retro_turbo-{version}.tar.gz"
+
+
 def is_under(parts: tuple[str, ...], prefix: tuple[str, ...]) -> bool:
     return len(parts) >= len(prefix) and parts[: len(prefix)] == prefix
 
@@ -230,6 +254,58 @@ def copy_clean_tree(destination: Path, *, force: bool = False) -> None:
         return ignored
 
     shutil.copytree(REPO_ROOT, destination, symlinks=True, ignore=ignore)
+
+
+def data_dir_platform(name: str) -> str:
+    parts = name.rsplit("-", 2)
+    if len(parts) >= 3 and parts[-1].startswith("v"):
+        return parts[-2]
+    return name.rsplit("-", 1)[-1]
+
+
+def prune_sdist_tree(root: Path) -> None:
+    cores = root / "cores"
+    for path in cores.iterdir():
+        if path.is_dir() and path.name not in PUBLIC_CORE_SOURCE_DIRS:
+            shutil.rmtree(path)
+
+    public_platforms = frozenset(PUBLIC_DATA_PLATFORMS.split(","))
+    data = root / "stable_retro" / "data"
+    for collection in ("stable", "experimental", "contrib"):
+        collection_root = data / collection
+        if not collection_root.is_dir():
+            continue
+        for path in collection_root.iterdir():
+            if path.is_dir() and data_dir_platform(path.name) not in public_platforms:
+                shutil.rmtree(path)
+        for path in collection_root.rglob("*.state"):
+            path.unlink()
+
+    libzip_regress = root / "third-party" / "libzip" / "regress"
+    if libzip_regress.exists():
+        shutil.rmtree(libzip_regress)
+    for unused_dependency in ("capnproto", "gtest"):
+        path = root / "third-party" / unused_dependency
+        if path.exists():
+            shutil.rmtree(path)
+    pybind11 = root / "third-party" / "pybind11"
+    if pybind11.is_dir():
+        for unused_pybind11_path in ("docs", "pybind11", "tests", "tools"):
+            path = pybind11 / unused_pybind11_path
+            if path.exists():
+                shutil.rmtree(path)
+    for unused_core_asset in (
+        root / "cores" / "gba" / "cinema",
+        root / "cores" / "genesis" / "builds",
+    ):
+        if unused_core_asset.exists():
+            shutil.rmtree(unused_core_asset)
+    for core_root in (root / "cores").iterdir():
+        if not core_root.is_dir():
+            continue
+        for path in core_root.rglob("*"):
+            if path.is_file() and path.suffix in IGNORED_FILE_SUFFIXES:
+                path.unlink()
 
 
 def find_contamination(root: Path) -> dict[str, list[str]]:
@@ -522,6 +598,43 @@ def build_platform(args: argparse.Namespace) -> None:
         raise ValueError(args.platform)
 
 
+def build_sdist(args: argparse.Namespace) -> None:
+    version = args.version or read_version()
+    parse_version(version)
+    destination = expected_sdist(version)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.unlink(missing_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix=f"stable-retro-turbo-{version}-sdist.",
+        dir=release_temp_root(),
+    ) as tmp:
+        source = Path(tmp) / "source"
+        copy_clean_tree(source)
+        prune_sdist_tree(source)
+        fail_on_contamination(source)
+        env = os.environ.copy()
+        env["STABLE_RETRO_PUBLIC_CORES"] = ",".join(PUBLIC_CORES)
+        env["STABLE_RETRO_PUBLIC_DATA_PLATFORMS"] = PUBLIC_DATA_PLATFORMS
+        run(
+            [
+                str(PYTHON),
+                "-m",
+                "build",
+                "--sdist",
+                "--no-isolation",
+                "--outdir",
+                str(destination.parent),
+            ],
+            cwd=source,
+            env=env,
+        )
+    if not destination.is_file():
+        raise SystemExit(f"source build did not produce {destination}")
+    result = audit_sdist(destination, version)
+    assert_sdist_audit_passed(result)
+    print(json.dumps(result, indent=2))
+
+
 def wheel_names(wheel: Path) -> list[str]:
     with zipfile.ZipFile(wheel) as zf:
         return zf.namelist()
@@ -623,6 +736,97 @@ def audit_wheels(args: argparse.Namespace) -> None:
     ]
     assert_audit_passed(results)
     print(json.dumps(results, indent=2))
+
+
+def audit_sdist(sdist: Path, version: str) -> dict[str, object]:
+    expected_name = expected_sdist(version).name
+    compiled_artifacts: list[str] = []
+    rom_payloads: list[str] = []
+    unsafe_paths: list[str] = []
+    source_core_dirs: set[str] = set()
+    data_platforms: set[str] = set()
+    with tarfile.open(sdist, mode="r:gz") as archive:
+        names = [member.name for member in archive.getmembers()]
+    for name in names:
+        path = Path(name)
+        parts = path.parts
+        if path.is_absolute() or ".." in parts:
+            unsafe_paths.append(name)
+            continue
+        rel = Path(*parts[1:]) if len(parts) > 1 else Path()
+        if len(parts) >= 3 and parts[1] == "cores":
+            core_dir = parts[2]
+            if core_dir in KNOWN_CORE_SOURCE_DIRS:
+                source_core_dirs.add(core_dir)
+        if (
+            len(parts) >= 5
+            and parts[1:3] == ("stable_retro", "data")
+            and parts[3] in {"stable", "experimental", "contrib"}
+            and "-" in parts[4]
+        ):
+            data_platforms.add(data_dir_platform(parts[4]))
+        if rel.suffix in IGNORED_FILE_SUFFIXES:
+            compiled_artifacts.append(name)
+        if is_rom_payload(rel):
+            rom_payloads.append(name)
+    root = f"stable_retro_turbo-{version}"
+    public_platforms = frozenset(PUBLIC_DATA_PLATFORMS.split(","))
+    checks = {
+        "expected_filename": sdist.name == expected_name,
+        "single_versioned_root": bool(names)
+        and all(name == root or name.startswith(f"{root}/") for name in names),
+        "safe_paths": not unsafe_paths,
+        "no_compiled_artifacts": not compiled_artifacts,
+        "no_rom_payloads": not rom_payloads,
+        "all_public_core_sources": PUBLIC_CORE_SOURCE_DIRS <= source_core_dirs,
+        "only_public_core_sources": source_core_dirs <= PUBLIC_CORE_SOURCE_DIRS,
+        "only_public_data_platforms": data_platforms <= public_platforms,
+        "no_bundled_saved_states": not any(
+            name.startswith(f"{root}/stable_retro/data/") and name.endswith(".state")
+            for name in names
+        ),
+        "no_libzip_regression_corpus": not any(
+            name.startswith(f"{root}/third-party/libzip/regress/") for name in names
+        ),
+        "no_disabled_capnproto_sources": not any(
+            name.startswith(f"{root}/third-party/capnproto/") for name in names
+        ),
+        "no_disabled_gtest_sources": not any(
+            name.startswith(f"{root}/third-party/gtest/") for name in names
+        ),
+        "no_core_test_rom_corpus": not any(
+            name.startswith(f"{root}/cores/gba/cinema/") for name in names
+        ),
+        "no_prebuilt_genesis_assets": not any(
+            name.startswith(f"{root}/cores/genesis/builds/") for name in names
+        ),
+        "no_unused_pybind11_trees": not any(
+            name.startswith(f"{root}/third-party/pybind11/{unused}/")
+            for name in names
+            for unused in ("docs", "pybind11", "tests", "tools")
+        ),
+        "within_pypi_file_limit": sdist.stat().st_size < 100_000_000,
+        "has_setup_py": f"{root}/setup.py" in names,
+        "has_version_file": f"{root}/stable_retro/VERSION.txt" in names,
+    }
+    return {
+        "sdist": str(sdist),
+        "checks": checks,
+        "compiled_artifacts": compiled_artifacts,
+        "rom_payloads": rom_payloads,
+        "unsafe_paths": unsafe_paths,
+        "source_core_dirs": sorted(source_core_dirs),
+        "data_platforms": sorted(data_platforms),
+    }
+
+
+def assert_sdist_audit_passed(result: dict[str, object]) -> None:
+    checks = result["checks"]
+    assert isinstance(checks, dict)
+    failures = [key for key, value in checks.items() if not value]
+    if failures:
+        print(json.dumps(result, indent=2), file=sys.stderr)
+        raise SystemExit(f"source distribution audit failed: {failures}")
 
 
 def run(args_list: list[str], **kwargs: object) -> None:
@@ -793,6 +997,7 @@ def publish_note(version: str) -> str:
 def final_check(args: argparse.Namespace) -> None:
     version = args.version or read_version()
     wheels = [*expected_macos_wheels(version), *expected_linux_wheels(version)]
+    sdist = expected_sdist(version)
     results = [
         *(
             audit_wheel(wheel, version, "macos-arm64")
@@ -804,9 +1009,25 @@ def final_check(args: argparse.Namespace) -> None:
         ),
     ]
     assert_audit_passed(results)
-    run([str(PYTHON), "-m", "twine", "check", *(str(wheel) for wheel in wheels)])
-    hashes = {str(wheel): sha256(wheel) for wheel in wheels}
-    print(json.dumps({"audits": results, "sha256": hashes}, indent=2))
+    sdist_result = audit_sdist(sdist, version)
+    assert_sdist_audit_passed(sdist_result)
+    distributions = [*wheels, sdist]
+    run(
+        [
+            str(PYTHON),
+            "-m",
+            "twine",
+            "check",
+            *(str(distribution) for distribution in distributions),
+        ],
+    )
+    hashes = {str(distribution): sha256(distribution) for distribution in distributions}
+    print(
+        json.dumps(
+            {"wheel_audits": results, "sdist_audit": sdist_result, "sha256": hashes},
+            indent=2,
+        ),
+    )
     print()
     print(publish_note(version))
 
@@ -881,6 +1102,13 @@ def main() -> None:
     build.add_argument("--version")
     build.set_defaults(func=build_platform)
 
+    sdist = subparsers.add_parser(
+        "build-sdist",
+        help="Build and audit the ROM-free source distribution",
+    )
+    sdist.add_argument("--version")
+    sdist.set_defaults(func=build_sdist)
+
     audit = subparsers.add_parser(
         "audit-wheels",
         help="Audit macOS and Linux wheel contents",
@@ -911,7 +1139,7 @@ def main() -> None:
 
     final = subparsers.add_parser(
         "final-check",
-        help="Audit wheels, run twine check, hash, and print publishing handoff",
+        help="Audit distributions, run twine check, hash, and print publishing handoff",
     )
     final.add_argument("--version")
     final.set_defaults(func=final_check)
