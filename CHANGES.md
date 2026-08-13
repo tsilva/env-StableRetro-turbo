@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Nothing yet.
+
+## 1.0.1.post42 - 2026-08-13
+
 * add the vector-only Gymnasium factory
   `stable_retro:StableRetro-Turbo-v0`, with an explicit `game` argument and the
   native `RetroVecEnv` as its result; retain the direct scalar API unchanged
