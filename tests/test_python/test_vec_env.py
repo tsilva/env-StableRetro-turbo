@@ -7,8 +7,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import gymnasium as gym
 import numpy as np
 import pytest
+from gymnasium.envs.registration import EnvSpec
 
 
 def _sha(array):
@@ -87,7 +89,6 @@ def test_retro_vec_env_legacy_aliases_are_removed():
 
 
 def test_retro_vec_env_public_export():
-    import gymnasium as gym
     import stable_retro as retro
     from gymnasium.vector import AutoresetMode
 
@@ -97,6 +98,56 @@ def test_retro_vec_env_public_export():
     assert retro.RetroVecEnv.metadata["render_modes"] == ["rgb_array"]
     assert "RetroVectorEnv" not in retro.__all__
     assert not hasattr(retro, "RetroVectorEnv")
+
+
+def test_generic_gymnasium_registration_is_vector_only_and_idempotent(monkeypatch):
+    import stable_retro as retro
+
+    spec = gym.spec(retro.GYMNASIUM_ENV_ID)
+    assert spec.entry_point is None
+    assert spec.vector_entry_point == "stable_retro:_make_gymnasium_vec_env"
+    assert spec.kwargs == {}
+    retro._register_gymnasium_env()
+
+    with pytest.raises(gym.error.Error, match="entry_point is not specified"):
+        gym.make(retro.GYMNASIUM_ENV_ID, game="Dr88-FamiconIntro")
+    with pytest.raises(TypeError, match="game"):
+        gym.make_vec(retro.GYMNASIUM_ENV_ID, num_envs=1)
+
+    monkeypatch.setitem(
+        gym.registry,
+        retro.GYMNASIUM_ENV_ID,
+        EnvSpec(
+            id=retro.GYMNASIUM_ENV_ID,
+            entry_point=None,
+            vector_entry_point="tests:conflicting_factory",
+        ),
+    )
+    with pytest.raises(gym.error.Error, match="conflicting specification"):
+        retro._register_gymnasium_env()
+
+
+def test_module_qualified_gymnasium_id_registers_in_a_clean_process():
+    root = Path(__file__).resolve().parents[2]
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            'exec("""import gymnasium as gym\n'
+            "assert 'StableRetro-Turbo-v0' not in gym.registry\n"
+            "try:\n"
+            "    gym.make_vec('stable_retro:StableRetro-Turbo-v0', num_envs=1)\n"
+            "except TypeError as exc:\n"
+            "    assert 'game' in str(exc)\n"
+            "else:\n"
+            "    raise AssertionError('game was not required')\n"
+            "spec = gym.spec('StableRetro-Turbo-v0')\n"
+            "assert spec.vector_entry_point == "
+            '\'stable_retro:_make_gymnasium_vec_env\'\n""")',
+        ],
+        check=True,
+        cwd=root,
+    )
 
 
 def test_retro_vec_env_imports_without_sb3():
@@ -219,6 +270,36 @@ def _make_test_retro_vec_env(tmp_path, **kwargs):
         num_threads=2,
         **kwargs,
     )
+
+
+def test_generic_gymnasium_factory_runs_native_vector_env(tmp_path):
+    import stable_retro as retro
+    from stable_retro.vec_env import RetroVecEnv
+
+    root = Path(__file__).resolve().parents[1]
+    rom_path = root / "roms" / "Dr88-FamiconIntro.nes"
+    empty_info = _empty_info_path(tmp_path)
+    env = gym.make_vec(
+        "stable_retro:StableRetro-Turbo-v0",
+        game="Dr88-FamiconIntro",
+        state=retro.State.NONE,
+        num_envs=2,
+        num_threads=2,
+        rom_path=str(rom_path),
+        info=str(empty_info),
+        scenario=str(empty_info),
+        frame_skip=1,
+    )
+    try:
+        assert isinstance(env, RetroVecEnv)
+        observations, _infos = env.reset(seed=7)
+        assert env.observation_space.contains(observations)
+        transition = env.step(
+            np.zeros((2, env.num_buttons), dtype=np.uint8),
+        )
+        assert env.observation_space.contains(transition[0])
+    finally:
+        env.close()
 
 
 def test_retro_vec_env_ram_is_lane_aligned_owned_and_read_only(tmp_path):

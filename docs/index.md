@@ -27,11 +27,13 @@ stable-retro lets you turn classic video games into Gymnasium environments for r
 ```{code-block} python
 """Run batched native stable-retro rollouts through Gymnasium VectorEnv."""
 
+import gymnasium as gym
 import stable_retro as retro
 
 
-env = retro.RetroVecEnv(
-    "Airstriker-Genesis-v0",
+env = gym.make_vec(
+    "stable_retro:StableRetro-Turbo-v0",
+    game="Airstriker-Genesis-v0",
     num_envs=8,
     state=retro.State.DEFAULT,
     render_mode="rgb_array",
@@ -50,8 +52,11 @@ obs, rewards, terminations, truncations, infos = env.step(env.action_space.sampl
 env.close()
 ```
 
-`RetroVecEnv` is Gymnasium-first. SB3 `VecEnv` adaptation belongs downstream,
-for example in an `rlab` adapter.
+The registered Turbo ID is vector-only and requires `game`. Direct
+`RetroVecEnv` construction remains available, and the inherited scalar
+`stable_retro.make()` and `RetroEnv` APIs are unchanged. `RetroVecEnv` is
+Gymnasium-first; SB3 `VecEnv` adaptation belongs downstream, for example in an
+`rlab` adapter.
 
 ```{toctree}
 :hidden:

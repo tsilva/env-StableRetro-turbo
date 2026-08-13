@@ -42,11 +42,12 @@ cartridge variants. Use `--state none` to launch a game from its power-on state.
 ## Use
 
 ```python
+import gymnasium as gym
 import numpy as np
-import stable_retro as retro
 
-env = retro.RetroVecEnv(
-    "SuperMarioBros-Nes-v0",
+env = gym.make_vec(
+    "stable_retro:StableRetro-Turbo-v0",
+    game="SuperMarioBros-Nes-v0",
     state="Level1-1",
     num_envs=32,
     num_threads=16,
@@ -72,6 +73,11 @@ done = terminations | truncations
 if done.any():
     obs, reset_infos = env.reset(options={"reset_mask": done})
 ```
+
+The module-qualified ID imports the package and registers the factory. This ID
+is vector-only and requires an explicit `game`; `RetroVecEnv` remains available
+for direct use. Stable Retro's existing scalar `stable_retro.make()` and
+`RetroEnv` APIs are unchanged and are not registered under the Turbo ID.
 
 `RetroVecEnv` uses Gymnasium's disabled-autoreset semantics. A finished lane keeps its terminal observation and cannot be stepped again until it is selected by a masked reset; unselected lanes keep their emulator state, RNG stream, frame stack, and sticky-action history.
 

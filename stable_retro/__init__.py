@@ -2,6 +2,8 @@ import os
 import subprocess
 import sys
 
+import gymnasium as gym
+
 
 def _is_macos_rosetta_process():
     if sys.platform != "darwin":
@@ -36,6 +38,9 @@ from stable_retro._retro import core_path
 from stable_retro.enums import Actions, Observations, State
 from stable_retro.retro_env import RetroEnv
 
+GYMNASIUM_ENV_ID = "StableRetro-Turbo-v0"
+_GYMNASIUM_VECTOR_ENTRY_POINT = "stable_retro:_make_gymnasium_vec_env"
+
 ROOT_DIR = os.path.abspath(os.path.dirname(__file__))
 core_path(os.path.join(os.path.dirname(__file__), "cores"))
 
@@ -45,6 +50,7 @@ with open(os.path.join(os.path.dirname(__file__), "VERSION.txt")) as f:
 
 __all__ = [
     "Movie",
+    "GYMNASIUM_ENV_ID",
     "RetroEmulator",
     "Actions",
     "ActionTable",
@@ -69,6 +75,38 @@ def __getattr__(name):
 
         return RetroVecEnv
     raise AttributeError(name)
+
+
+def _make_gymnasium_vec_env(*, game, num_envs=1, **kwargs):
+    from stable_retro.vec_env import RetroVecEnv
+
+    return RetroVecEnv(game=game, num_envs=num_envs, **kwargs)
+
+
+def _register_gymnasium_env() -> None:
+    existing = gym.registry.get(GYMNASIUM_ENV_ID)
+    if existing is None:
+        gym.register(
+            id=GYMNASIUM_ENV_ID,
+            entry_point=None,
+            vector_entry_point=_GYMNASIUM_VECTOR_ENTRY_POINT,
+        )
+        return
+    if (
+        existing.entry_point is None
+        and existing.vector_entry_point == _GYMNASIUM_VECTOR_ENTRY_POINT
+        and existing.kwargs == {}
+        and existing.max_episode_steps is None
+        and existing.additional_wrappers == ()
+    ):
+        return
+    raise gym.error.Error(
+        f"Gymnasium environment ID {GYMNASIUM_ENV_ID!r} is already registered "
+        "with a conflicting specification",
+    )
+
+
+_register_gymnasium_env()
 
 
 RetroEmulator = NativeRetroEmulator
