@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Nothing yet.
+
+## 1.0.1.post43 - 2026-08-13
+
 * migrate `RetroVecEnv` to the breaking Turbo Vector API v2 common constructor,
   shared 84x84 grayscale CHW defaults, resolved NumPy transport, exact
   capabilities, and portable signal schema
