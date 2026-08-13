@@ -161,45 +161,61 @@ class RetroVecEnv(VectorEnv):
     metadata = {
         "autoreset_mode": AutoresetMode.DISABLED,
         "render_modes": ["rgb_array"],
-        "turbo_api_version": 1,
+        "turbo_api_version": 2,
+        "transition_transport": "numpy",
     }
 
     def __init__(
         self,
         game,
-        state=_STATE_UNSET,
+        state=None,
         scenario=None,
         info=None,
-        use_restricted_actions: Actions | str | ActionTable = Actions.FILTERED,
+        use_restricted_actions: Actions | str | ActionTable = "default",
         record=False,
         players=1,
-        inttype=retro_data.Integrations.STABLE,
-        obs_type=Observations.IMAGE,
+        inttype="stable",
+        obs_type="image",
         render_mode: Literal["rgb_array"] | None = None,
         *,
         num_envs: int = 1,
         num_threads: int | None = None,
         rom_path: str | None = None,
-        obs_copy="copy",
-        obs_resize=None,
+        transport="default",
+        obs_copy="safe_view",
+        obs_resize=(84, 84),
         obs_crop=None,
         obs_crop_mode: Literal["remove", "mask"] = "remove",
         obs_crop_fill: int = 0,
-        obs_grayscale=False,
-        obs_resize_algorithm="nearest",
-        obs_layout="hwc",
-        frame_skip=1,
-        frame_stack=1,
+        obs_grayscale=True,
+        obs_resize_algorithm="area",
+        obs_layout="chw",
+        frame_skip=4,
+        frame_stack=4,
         maxpool_last_two=False,
         noop_reset_max=0,
         use_fire_reset=False,
         sticky_action_prob=0.0,
         reward_clip=False,
         info_filter="all",
+        info_frame_stack_keys=None,
         state_catalog=None,
     ):
         import stable_retro as retro
         from stable_retro import _retro
+
+        if transport == "default":
+            transport = "numpy"
+        if transport != "numpy":
+            raise ValueError("transport must be 'default' or 'numpy'")
+        if info_frame_stack_keys is not None:
+            raise ValueError("info_frame_stack_keys is unsupported and must be None")
+        if isinstance(use_restricted_actions, str) and use_restricted_actions == "default":
+            use_restricted_actions = Actions.FILTERED
+        if inttype == "stable":
+            inttype = retro_data.Integrations.STABLE
+        if obs_type == "image":
+            obs_type = Observations.IMAGE
 
         num_envs = _normalize_positive_int(num_envs, "num_envs")
         if num_threads is not None:
@@ -225,6 +241,7 @@ class RetroVecEnv(VectorEnv):
 
         self.closed = False
         self.autoreset_mode = AutoresetMode.DISABLED
+        self.transport = transport
         self._observations = None
         self._seeds = [None for _ in range(num_envs)]
         self.use_fire_reset = use_fire_reset
@@ -444,7 +461,7 @@ class RetroVecEnv(VectorEnv):
             {
                 name: MappingProxyType(
                     {
-                        "dtype": np.dtype(np.int64),
+                        "dtype": "int64",
                         "shape": (),
                         "available_on_reset": info_filter_mode == "all",
                         "available_on_step": info_filter_mode != "none",
@@ -465,19 +482,31 @@ class RetroVecEnv(VectorEnv):
                     "custom_discrete",
                 ),
                 "supported_observation_layouts": ("chw", "hwc"),
+                "supported_observation_color_modes": ("grayscale", "rgb"),
                 "supported_resize_algorithms": ("nearest", "bilinear", "area"),
+                "supported_crop_modes": ("remove", "mask"),
                 "supported_observation_copy_modes": (
                     "copy",
                     "safe_view",
                     "unsafe_view",
                 ),
-                "supports_maxpool_last_two": True,
-                "supports_sticky_action_prob": True,
-                "supports_reward_clipping": True,
-                "supports_noop_reset": True,
-                "supports_state_catalog": True,
+                "supported_transition_transports": ("numpy",),
+                "supports_async_step": False,
+                "supports_branching": False,
+                "supports_device_api": False,
+                "supports_emulator_ram": True,
+                "supports_enemy_variants": False,
+                "supports_fire_reset": True,
+                "supports_info_frame_stack": False,
                 "supports_live_snapshots": self.supports_live_snapshots,
-                "supports_per_lane_rgb": True,
+                "supports_maxpool_last_two": True,
+                "supports_noop_reset": True,
+                "supports_per_lane_rgb": render_mode == "rgb_array",
+                "supports_reward_clipping": True,
+                "supports_snapshot_codec": False,
+                "supports_state_catalog": True,
+                "supports_sticky_action_prob": True,
+                "supports_surface_variants": False,
             }
         )
         self._initialized = np.zeros(self.num_envs, dtype=np.bool_)
@@ -645,7 +674,7 @@ class RetroVecEnv(VectorEnv):
     @staticmethod
     def _resolve_state_config(retro, game, state, state_catalog):
         if state_catalog is None:
-            if state is _STATE_UNSET:
+            if state is _STATE_UNSET or state is None:
                 state = retro.State.DEFAULT
             if isinstance(state, Mapping) or (
                 isinstance(state, Sequence)
@@ -654,9 +683,14 @@ class RetroVecEnv(VectorEnv):
                 raise TypeError(
                     "state must be a single state; use state_catalog for multiple states",
                 )
-            return [state], [str(state)], False
+            label = (
+                "default"
+                if state == retro.State.DEFAULT
+                else "none" if state == retro.State.NONE else str(state)
+            )
+            return [state], [label], False
 
-        if state is not _STATE_UNSET:
+        if state is not _STATE_UNSET and state is not None:
             raise ValueError("state and state_catalog are mutually exclusive")
         if isinstance(state_catalog, (str, bytes, bytearray)) or not isinstance(
             state_catalog,
@@ -746,7 +780,7 @@ class RetroVecEnv(VectorEnv):
                 raise ValueError("states must resolve to non-empty start states")
             initial_state = initial_states
             initial_state_labels = state_labels
-        elif initial_state is not None:
+        else:
             initial_state_labels = state_labels
         return initial_state, initial_state_labels
 
@@ -943,7 +977,10 @@ class RetroVecEnv(VectorEnv):
         return vector_infos
 
     def _step_infos_to_dict(self, infos):
-        return self._list_infos_to_dict(infos)
+        vector_infos = self._list_infos_to_dict(infos)
+        for legacy_key in ("state", "_state", "start_state", "_start_state"):
+            vector_infos.pop(legacy_key, None)
+        return vector_infos
 
     def reset(self, *, seed: int | Sequence[int | None] | None = None, options=None):
         if self.closed:
@@ -1047,15 +1084,21 @@ class RetroVecEnv(VectorEnv):
             copy=True,
         )
         vector_infos["_state_index"] = reset_mask.copy()
-        start_source = np.full(self.num_envs, "environment", dtype=object)
-        start_source[snapshot_mask] = "snapshot"
-        vector_infos["start_source"] = start_source
+        vector_infos["start_source"] = snapshot_mask.astype(np.int8, copy=True)
         vector_infos["_start_source"] = reset_mask.copy()
+        noop_counts = np.asarray(
+            self.native.last_noop_reset_counts(), dtype=np.int64
+        ).copy()
+        noop_counts[snapshot_mask] = 0
+        vector_infos["noop_reset_count"] = noop_counts
+        vector_infos["_noop_reset_count"] = static_mask.copy()
         return self._obs(), vector_infos
 
     def step(self, actions):
         if self.closed:
             raise RuntimeError("cannot step a closed environment")
+        if not isinstance(actions, np.ndarray):
+            raise TypeError("actions must be a NumPy array")
         if not np.all(self._initialized):
             raise RuntimeError("all lanes must be reset before the first step")
         masks = self._actions_to_masks(actions)

@@ -1841,6 +1841,7 @@ public:
 		m_rewardArray = py::array_t<float>(vecShape);
 		m_doneArray = py::array_t<bool>(vecShape);
 		m_activeInitialStateIndices.assign(m_slots.size(), -1);
+		m_lastNoopResetCounts.assign(m_slots.size(), 0);
 		for (size_t i = 0; i < m_slots.size(); ++i) {
 			m_emptyInfos.append(py::dict());
 		}
@@ -1873,9 +1874,13 @@ public:
 		m_stateCatalog.clear();
 		m_reportInitialState = false;
 		if (initialStateObj.is_none()) {
-			if (!labelsObj.is_none()) {
-				throw std::runtime_error("initial_state labels require initial_state");
+			if (labelsObj.is_none()) {
+				return;
 			}
+			std::vector<std::string> labels = parseInitialStateLabels(labelsObj, 1);
+			m_stateCatalog.push_back(labels[0]);
+			m_initialStates.push_back({ std::string(), labels[0] });
+			m_reportInitialState = true;
 			return;
 		}
 		if (PyBytes_Check(initialStateObj.ptr())) {
@@ -2220,6 +2225,15 @@ public:
 			{ static_cast<py::ssize_t>(sizeof(int32_t)) },
 			m_activeInitialStateIndices.data(),
 			py::none());
+	}
+
+	py::array_t<int64_t> lastNoopResetCounts() const {
+		py::array_t<int64_t> result(m_lastNoopResetCounts.size());
+		auto values = result.mutable_unchecked<1>();
+		for (size_t i = 0; i < m_lastNoopResetCounts.size(); ++i) {
+			values(static_cast<py::ssize_t>(i)) = m_lastNoopResetCounts[i];
+		}
+		return result;
 	}
 
 	py::tuple stateCatalog() const {
@@ -3005,8 +3019,10 @@ private:
 		slot.restoredScreen.clear();
 		const InitialStateChoice* initialState =
 			initialStateIndex >= 0 ? &m_initialStates[static_cast<size_t>(initialStateIndex)] : nullptr;
-		if (initialState && !initialState->state.empty()) {
-			if (!slot.emulator->m_re.unserialize(initialState->state.data(), initialState->state.size())) {
+		if (initialState) {
+			if (initialState->state.empty()) {
+				slot.emulator->m_re.reset();
+			} else if (!slot.emulator->m_re.unserialize(initialState->state.data(), initialState->state.size())) {
 				throw std::runtime_error("failed to load initial state");
 			}
 			slot.currentStartStateLabel = initialState->label;
@@ -3031,9 +3047,11 @@ private:
 			slot.data.m_data.updateRam();
 			slot.data.m_scen.update(1);
 		}
+		m_lastNoopResetCounts[slot.index] = 0;
 		if (m_noopResetMax > 0) {
-			std::uniform_int_distribution<int> noopDist(0, m_noopResetMax);
-			const int noopCount = std::max(0, noopDist(slot.rng) - static_cast<int>(useFireReset));
+			std::uniform_int_distribution<int> noopDist(1, m_noopResetMax);
+			const int noopCount = noopDist(slot.rng);
+			m_lastNoopResetCounts[slot.index] = static_cast<int64_t>(noopCount);
 			for (int i = 0; i < noopCount; ++i) {
 				slot.emulator->m_re.run();
 				slot.data.m_data.updateRam();
@@ -3347,6 +3365,7 @@ private:
 	std::vector<InitialStateChoice> m_initialStates;
 	std::vector<std::string> m_stateCatalog;
 	std::vector<int32_t> m_activeInitialStateIndices;
+	std::vector<int64_t> m_lastNoopResetCounts;
 	bool m_reportInitialState = false;
 	int m_numButtons = 0;
 	int m_frameSkip = 1;
@@ -3623,6 +3642,7 @@ PYBIND11_MODULE(_retro, m) {
 		.def("get_rams", &PyRetroVecEnv::getRams)
 		.def("step", &PyRetroVecEnv::step)
 		.def("active_state_indices", &PyRetroVecEnv::activeStateIndices)
+		.def("last_noop_reset_counts", &PyRetroVecEnv::lastNoopResetCounts)
 		.def("observation_shape", &PyRetroVecEnv::observationShape)
 		.def("get_screen", &PyRetroVecEnv::getScreen, py::arg("index") = 0)
 		.def_property_readonly("state_catalog", &PyRetroVecEnv::stateCatalog)

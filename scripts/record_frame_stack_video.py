@@ -143,6 +143,7 @@ def main(argv=None) -> int:
         render_mode="rgb_array",
         obs_resize=obs_resize,
         obs_grayscale=obs_grayscale,
+        obs_layout="hwc",
         obs_crop=crop,
         obs_resize_algorithm=resize_algorithm,
         frame_skip=frame_skip,

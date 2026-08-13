@@ -112,6 +112,7 @@ def make_mario_level1_policy_env(*, info_filter="all") -> RetroVecEnv:
         rom_path=rom_path,
         use_restricted_actions=retro.Actions.ALL,
         render_mode="rgb_array",
+        obs_copy="copy",
         obs_crop=(32, 0, 0, 0),
         obs_resize=(84, 84),
         obs_grayscale=True,

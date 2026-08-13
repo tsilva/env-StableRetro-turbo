@@ -76,6 +76,26 @@ def test_retro_vec_env_legacy_aliases_are_removed():
     assert not any(
         param.kind is inspect.Parameter.VAR_KEYWORD for param in params.values()
     )
+    assert tuple(params) == (
+        "self", "game", "state", "scenario", "info", "use_restricted_actions",
+        "record", "players", "inttype", "obs_type", "render_mode", "num_envs",
+        "num_threads", "rom_path", "transport", "obs_copy", "obs_resize",
+        "obs_crop", "obs_crop_mode", "obs_crop_fill", "obs_grayscale",
+        "obs_resize_algorithm", "obs_layout", "frame_skip", "frame_stack",
+        "maxpool_last_two", "noop_reset_max", "use_fire_reset",
+        "sticky_action_prob", "reward_clip", "info_filter",
+        "info_frame_stack_keys", "state_catalog",
+    )
+    assert tuple(parameter.default for parameter in tuple(params.values())[1:]) == (
+        inspect.Parameter.empty, None, None, None, "default", False, 1, "stable",
+        "image", None, 1, None, None, "default", "safe_view", (84, 84), None,
+        "remove", 0, True, "area", "chw", 4, 4, False, 0, False, 0.0,
+        False, "all", None, None,
+    )
+    assert all(
+        parameter.kind is inspect.Parameter.KEYWORD_ONLY
+        for parameter in tuple(params.values())[11:]
+    )
     for name in (
         "copy_observations",
         "unsafe_zero_copy",
@@ -94,7 +114,8 @@ def test_retro_vec_env_public_export():
 
     assert issubclass(retro.RetroVecEnv, gym.vector.VectorEnv)
     assert retro.RetroVecEnv.metadata["autoreset_mode"] is AutoresetMode.DISABLED
-    assert retro.RetroVecEnv.metadata["turbo_api_version"] == 1
+    assert retro.RetroVecEnv.metadata["turbo_api_version"] == 2
+    assert retro.RetroVecEnv.metadata["transition_transport"] == "numpy"
     assert retro.RetroVecEnv.metadata["render_modes"] == ["rgb_array"]
     assert "RetroVectorEnv" not in retro.__all__
     assert not hasattr(retro, "RetroVectorEnv")
@@ -256,6 +277,15 @@ def _make_test_retro_vec_env(tmp_path, **kwargs):
     rom_path = root / "roms" / "Dr88-FamiconIntro.nes"
     empty_info = _empty_info_path(tmp_path)
 
+    defaults = {
+        "obs_resize": (84, 84),
+        "obs_grayscale": True,
+        "obs_layout": "hwc",
+        "frame_skip": 2,
+        "frame_stack": 4,
+        "num_threads": 2,
+    }
+    defaults.update(kwargs)
     return RetroVecEnv(
         "Dr88-FamiconIntro",
         state=retro.State.NONE,
@@ -263,12 +293,7 @@ def _make_test_retro_vec_env(tmp_path, **kwargs):
         rom_path=str(rom_path),
         info=str(empty_info),
         scenario=str(empty_info),
-        obs_resize=(84, 84),
-        obs_grayscale=True,
-        frame_skip=2,
-        frame_stack=4,
-        num_threads=2,
-        **kwargs,
+        **defaults,
     )
 
 
@@ -349,6 +374,11 @@ def test_retro_vec_env_genesis_geometry_matches_scalar_if_rom_present(state):
         num_threads=1,
         rom_path=rom_path,
         render_mode="rgb_array",
+        obs_resize=None,
+        obs_grayscale=False,
+        obs_layout="hwc",
+        frame_skip=1,
+        frame_stack=1,
     )
     try:
         assert env.single_observation_space.shape == (200, 256, 3)
@@ -448,7 +478,10 @@ def test_retro_vec_env_genesis_catalog_masked_reset_geometry_if_rom_present():
         num_threads=2,
         rom_path=_street_fighter_rom_path_or_skip(),
         obs_copy="safe_view",
+        obs_resize=None,
         obs_grayscale=True,
+        obs_layout="hwc",
+        frame_skip=1,
         frame_stack=2,
     )
     try:
@@ -510,17 +543,42 @@ def test_retro_vec_env_gymnasium_contract(tmp_path):
         env.close()
 
 
-def test_retro_vec_env_turbo_api_v1_capabilities_ownership_and_rendering(tmp_path):
+def test_retro_vec_env_turbo_api_v2_capabilities_ownership_and_rendering(tmp_path):
     env = _make_test_retro_vec_env(
         tmp_path,
         obs_copy="safe_view",
         render_mode="rgb_array",
     )
     try:
-        env.reset(seed=41)
+        observations, infos = env.reset(seed=41)
         assert env.observation_ownership == "safe_view"
         assert env.observation_buffer_depth == 2
         assert env.live_snapshots_deterministic is env.supports_live_snapshots
+        assert tuple(env.capabilities) == (
+            "supported_action_modes",
+            "supported_observation_layouts",
+            "supported_observation_color_modes",
+            "supported_resize_algorithms",
+            "supported_crop_modes",
+            "supported_observation_copy_modes",
+            "supported_transition_transports",
+            "supports_async_step",
+            "supports_branching",
+            "supports_device_api",
+            "supports_emulator_ram",
+            "supports_enemy_variants",
+            "supports_fire_reset",
+            "supports_info_frame_stack",
+            "supports_live_snapshots",
+            "supports_maxpool_last_two",
+            "supports_noop_reset",
+            "supports_per_lane_rgb",
+            "supports_reward_clipping",
+            "supports_snapshot_codec",
+            "supports_state_catalog",
+            "supports_sticky_action_prob",
+            "supports_surface_variants",
+        )
         assert env.capabilities["supported_action_modes"] == (
             "all",
             "filtered",
@@ -529,6 +587,13 @@ def test_retro_vec_env_turbo_api_v1_capabilities_ownership_and_rendering(tmp_pat
             "custom_discrete",
         )
         assert tuple(env.signal_schema) == ()
+        with pytest.raises(TypeError, match="NumPy array"):
+            env.step([0] * env.num_envs)
+        transition = env.step(
+            np.zeros((env.num_envs, env.num_buttons), dtype=np.uint8)
+        )
+        for value in (observations, *transition[:4], *infos.values(), *transition[4].values()):
+            assert value.dtype != np.dtype(object)
         images = env.get_images()
         assert len(images) == env.num_envs
         assert all(image is not None and image.dtype == np.uint8 for image in images)
@@ -545,6 +610,29 @@ def test_retro_vec_env_rendering_is_disabled_by_default(tmp_path):
         assert env.render() is None
         assert env.render_lane(1) is None
         assert env.get_images() == [None, None]
+    finally:
+        env.close()
+
+
+def test_retro_vec_env_v2_shared_defaults_resolve_filtered_chw_stack():
+    import stable_retro as retro
+
+    env = retro.RetroVecEnv(
+        "SuperMarioBros-Nes-v0",
+        rom_path=_mario_rom_path_or_skip(),
+    )
+    try:
+        observations, infos = env.reset(seed=23)
+        assert observations.shape == (1, 4, 84, 84)
+        assert env.action_mode == "filtered"
+        assert infos["state_index"].tolist() == [0]
+        for name, spec in env.signal_schema.items():
+            assert isinstance(spec["dtype"], str)
+            assert isinstance(spec["shape"], tuple)
+            if spec["available_on_reset"]:
+                assert np.dtype(spec["dtype"]) == infos[name].dtype
+                assert infos[name].shape[1:] == spec["shape"]
+        assert env.render() is None
     finally:
         env.close()
 
@@ -630,6 +718,7 @@ def _make_crop_retro_vec_env(tmp_path, **kwargs):
     defaults = {
         "obs_resize": None,
         "obs_grayscale": False,
+        "obs_layout": "hwc",
         "frame_skip": 1,
         "frame_stack": 1,
         "num_threads": 1,
@@ -964,11 +1053,11 @@ def test_retro_vec_env_manual_reset_validates_before_mutation(tmp_path):
                     "state_indices": np.array([-1, -1], dtype=np.int64),
                 },
             )
-        with pytest.raises(ValueError, match="state_indices require"):
+        with pytest.raises(ValueError, match="index state_catalog"):
             env.reset(
                 options={
                     "reset_mask": invalid_mask,
-                    "state_indices": np.array([0, -1], dtype=np.int32),
+                    "state_indices": np.array([1, -1], dtype=np.int32),
                 },
             )
         with pytest.raises(ValueError, match="unsupported reset option"):
@@ -979,18 +1068,18 @@ def test_retro_vec_env_manual_reset_validates_before_mutation(tmp_path):
         env.close()
 
 
-def test_retro_vec_env_direct_rom_reports_no_active_state(tmp_path):
+def test_retro_vec_env_direct_rom_uses_power_on_catalog_index_zero(tmp_path):
     env = _make_test_retro_vec_env(tmp_path)
     try:
         _observations, infos = env.reset()
-        assert env.state_catalog == ()
+        assert env.state_catalog == ("none",)
         np.testing.assert_array_equal(
             env.active_state_indices(),
-            np.full(env.num_envs, -1, dtype=np.int32),
+            np.zeros(env.num_envs, dtype=np.int32),
         )
         np.testing.assert_array_equal(
             infos["state_index"],
-            np.full(env.num_envs, -1, dtype=np.int32),
+            np.zeros(env.num_envs, dtype=np.int32),
         )
     finally:
         env.close()
@@ -1006,6 +1095,19 @@ def test_retro_vec_env_rejects_invalid_sticky_action_prob(
             tmp_path,
             sticky_action_prob=sticky_action_prob,
         )
+
+
+def test_retro_vec_env_seeded_positive_noop_counts_are_inclusive(tmp_path):
+    env = _make_test_retro_vec_env(tmp_path, noop_reset_max=3)
+    try:
+        _observations, first = env.reset(seed=[17, 18])
+        _observations, second = env.reset(seed=[17, 18])
+        assert first["noop_reset_count"].dtype == np.int64
+        np.testing.assert_array_equal(first["noop_reset_count"], second["noop_reset_count"])
+        assert np.all(first["noop_reset_count"] >= 1)
+        assert np.all(first["noop_reset_count"] <= 3)
+    finally:
+        env.close()
 
 
 def _make_dr88_retro_vec_env(tmp_path, info_path, **kwargs):
@@ -1566,6 +1668,9 @@ def test_retro_vec_env_forwards_per_env_reset_seeds():
                 (seed, reset_mask.copy(), state_indices.copy()),
             )
             return np.zeros((3, 2, 2, 1), dtype=np.uint8), [{}, {}, {}]
+
+        def last_noop_reset_counts(self):
+            return [0, 0, 0]
 
     env = RetroVecEnv.__new__(RetroVecEnv)
     env.native = FakeNative()
@@ -2776,21 +2881,21 @@ def test_retro_vec_env_mario_noop_seed_divergence(obs_copy):
         4,
         123,
         actions,
-        noop_reset_max=1,
+        noop_reset_max=30,
     )
     seed_123_second = _mario_native_trace(
         obs_copy,
         4,
         123,
         actions,
-        noop_reset_max=1,
+        noop_reset_max=30,
     )
     seed_456 = _mario_native_trace(
         obs_copy,
         4,
         456,
         actions,
-        noop_reset_max=1,
+        noop_reset_max=30,
     )
 
     _assert_native_traces_equal(seed_123_first, seed_123_second)
@@ -2870,6 +2975,7 @@ def test_retro_vec_env_live_snapshots_support_fanout_and_exact_replay(tmp_path):
         reset_mask = np.array([True, True, True, False], dtype=np.bool_)
         snapshot_reset_mask = np.array([True, False, True, False], dtype=np.bool_)
         starts = np.full(4, -1, dtype=np.int32)
+        starts[1] = 0
         reset_obs, infos = env.reset(
             options={
                 "reset_mask": reset_mask,
@@ -2883,12 +2989,8 @@ def test_retro_vec_env_live_snapshots_support_fanout_and_exact_replay(tmp_path):
             env.native.get_screen(0),
             env.native.get_screen(2),
         )
-        assert infos["start_source"].tolist() == [
-            "snapshot",
-            "environment",
-            "snapshot",
-            "environment",
-        ]
+        assert infos["start_source"].dtype == np.int8
+        assert infos["start_source"].tolist() == [1, 0, 1, 0]
         np.testing.assert_array_equal(infos["_start_source"], reset_mask)
 
         replay_actions = np.zeros_like(actions)

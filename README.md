@@ -81,11 +81,12 @@ for direct use. Stable Retro's existing scalar `stable_retro.make()` and
 
 `RetroVecEnv` uses Gymnasium's disabled-autoreset semantics. A finished lane keeps its terminal observation and cannot be stepped again until it is selected by a masked reset; unselected lanes keep their emulator state, RNG stream, frame stack, and sticky-action history.
 
-## Turbo Vector API v1
+## Turbo Vector API v2
 
-`RetroVecEnv` implements the strict Turbo Vector API v1:
+`RetroVecEnv` implements the strict Turbo Vector API v2:
 
-- `metadata["turbo_api_version"]` is `1`, and `metadata["render_modes"]`
+- `metadata["turbo_api_version"]` is `2`,
+  `metadata["transition_transport"]` is `"numpy"`, and `metadata["render_modes"]`
   advertises `rgb_array`.
 - Immutable `capabilities` and `signal_schema` declarations describe supported
   features and the dtype, shape, and reset/step availability of every signal.
@@ -123,14 +124,17 @@ env.close()
 
 Handles are reusable, session-local, and intentionally not pickleable. A
 single masked reset can mix snapshot starts with ordinary `state_indices`;
-`infos["start_source"]` distinguishes `"snapshot"` from `"environment"`.
+`infos["start_source"]` is `int8`: `0` means an environment state and `1`
+means a snapshot.
 Scripted scenarios and cores that cannot serialize exact state report the
 capability as unavailable.
 
 The fast path also supports:
 
 - native crop, mask, resize, grayscale, layout conversion, frame skip, frame stack, and two-frame max-pooling;
-- ordered saved-state catalogs with explicit per-lane `state_indices`; state sampling and curriculum routing stay with the caller;
+- ordered reset-state catalogs (including power-on as index zero when no saved
+  state exists) with explicit per-lane `state_indices`; state sampling and
+  curriculum routing stay with the caller;
 - copy-safe, safe-view, and benchmark-only unsafe-view observation ownership;
 - sticky actions, random no-op starts, reward clipping, and native info filtering;
 - Atari through the packaged Stella core, using the same `RetroEnv` and `RetroVecEnv` APIs.

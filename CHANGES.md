@@ -2,7 +2,15 @@
 
 ## Unreleased
 
-* Nothing yet.
+* migrate `RetroVecEnv` to the breaking Turbo Vector API v2 common constructor,
+  shared 84x84 grayscale CHW defaults, resolved NumPy transport, exact
+  capabilities, and portable signal schema
+* standardize numeric reset-source and reset-NOOP infos and sample enabled
+  reset NOOPs uniformly from the inclusive `1..N` range
+* represent power-on starts as catalog index zero and remove legacy string
+  `state`/`start_state` arrays from vector transitions
+* preserve existing examples, release checks, policy parity, and recording
+  workloads by supplying their former tuned settings explicitly
 
 ## 1.0.1.post42 - 2026-08-13
 

@@ -950,8 +950,11 @@ env = stable_retro.RetroVecEnv(
     rom_path=str(rom_path),
     info=str(empty_info),
     scenario=str(empty_info),
+    obs_copy="copy",
     obs_resize=(84, 84),
     obs_grayscale=True,
+    obs_resize_algorithm="nearest",
+    obs_layout="hwc",
     frame_skip=1,
     frame_stack=1,
     render_mode="rgb_array",
@@ -975,7 +978,7 @@ try:
     }}
     restored, restored_infos = env.reset(options=reset_options)
     np.testing.assert_array_equal(restored[0], restored[1])
-    assert restored_infos["start_source"].tolist() == ["snapshot", "snapshot"]
+    assert restored_infos["start_source"].tolist() == [1, 1]
 
     replay_actions = np.zeros_like(warmup)
     replay_actions[:, 0] = 1
