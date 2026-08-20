@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bump, commit, tag, and push a stable-retro-turbo release."""
+"""Bump, commit, tag, and push an env-StableRetro-turbo release."""
 
 from __future__ import annotations
 
@@ -13,6 +13,8 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+MIGRATION_VERSION = "1.0.1.post44"
+REDIRECT_PACKAGE = "stable-retro-turbo"
 RELEASE_HELPER = REPO_ROOT / "scripts" / "release_build.py"
 PYTHON = REPO_ROOT / ".venv314" / "bin" / "python"
 VERSION_PATH = REPO_ROOT / "stable_retro" / "VERSION.txt"
@@ -104,6 +106,14 @@ def target_version(args: argparse.Namespace) -> str:
         )
     helper("check-version")
     helper("check-pypi", "--version", version)
+    if version == MIGRATION_VERSION:
+        helper(
+            "check-pypi",
+            "--version",
+            version,
+            "--package",
+            REDIRECT_PACKAGE,
+        )
     return version
 
 

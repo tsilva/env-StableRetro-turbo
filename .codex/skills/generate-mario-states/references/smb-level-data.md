@@ -4,7 +4,7 @@ Use these facts when generating `SuperMarioBros-Nes-v0` states.
 
 ## Savestate Layout
 
-In the local stable-retro-turbo NES savestate format, the first 2 KiB NES RAM block starts at byte offset `93` in the raw decompressed `.state` file.
+In the local env-StableRetro-turbo NES savestate format, the first 2 KiB NES RAM block starts at byte offset `93` in the raw decompressed `.state` file.
 
 State files are gzip-compressed native emulator savestates.
 

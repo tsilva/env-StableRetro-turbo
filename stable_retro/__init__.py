@@ -23,7 +23,7 @@ def _is_macos_rosetta_process():
 def _reject_rosetta_process():
     if _is_macos_rosetta_process():
         raise RuntimeError(
-            "stable-retro-turbo does not support running under Rosetta. "
+            "env-StableRetro-turbo does not support running under Rosetta. "
             "Use a native arm64 Python and native arm64 libretro cores.",
         )
 

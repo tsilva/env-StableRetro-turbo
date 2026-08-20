@@ -1,6 +1,6 @@
 ---
 name: generate-mario-states
-description: Generate and validate Super Mario Bros NES stable-retro state files in stable-retro-turbo. Use when asked to create missing SuperMarioBros-Nes-v0 Level*.state files, inspect which Mario checkpoint states are missing, compare generated states to NESMaps screenshots, or deploy generated SMB states into a local installed stable-retro-turbo package.
+description: Generate and validate Super Mario Bros NES stable-retro state files in env-StableRetro-turbo. Use when asked to create missing SuperMarioBros-Nes-v0 Level*.state files, inspect which Mario checkpoint states are missing, compare generated states to NESMaps screenshots, or deploy generated SMB states into a local installed env-stableretro-turbo package.
 ---
 
 # Generate Mario States

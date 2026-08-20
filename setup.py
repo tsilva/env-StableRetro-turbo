@@ -32,7 +32,7 @@ def is_macos_rosetta_process():
 
 if is_macos_rosetta_process():
     raise RuntimeError(
-        "stable-retro-turbo does not support Rosetta builds. "
+        "env-StableRetro-turbo does not support Rosetta builds. "
         "Use a native arm64 Python on Apple Silicon.",
     )
 
@@ -219,13 +219,13 @@ class CMakeBuild(build_ext):
 
 
 setup(
-    name="stable-retro-turbo",
+    name="env-stableretro-turbo",
     description="Blazing-fast Stable Retro fork with native vectorization and preprocessing",
     long_description=README,
     long_description_content_type="text/markdown",
     author="Farama Foundation",
     author_email="contact@farama.org",
-    url="https://github.com/tsilva/stable-retro-turbo",
+    url="https://github.com/tsilva/env-StableRetro-turbo",
     version=VERSION_PATH.read_text(encoding="utf-8").strip(),
     license="GPL-2.0-only",
     license_files=["LICENSE", "LICENSES.md"],

@@ -1,4 +1,4 @@
 interface:
   display_name: "Build Release"
-  short_description: "Build next stable-retro-turbo release wheels"
+  short_description: "Build next env-stableretro-turbo release wheels"
   default_prompt: "Use $build-release to build and validate the next post-version macOS and Linux wheels."

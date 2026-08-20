@@ -1,11 +1,11 @@
 ---
 name: build-release
-description: Launch and monitor the stable-retro-turbo release flow. Use when the user says /build-release, asks to build/publish/cut the next release, asks for a specific post-version release, or wants the PyPI link after publishing.
+description: Launch and monitor the env-stableretro-turbo release flow. Use when the user says /build-release, asks to build/publish/cut the next release, asks for a specific post-version release, or wants the PyPI link after publishing.
 ---
 
 # Build Release
 
-Use this skill to cut a `stable-retro-turbo` release by delegating to the
+Use this skill to cut an `env-stableretro-turbo` release by delegating to the
 repo-owned release target. Do not recreate the old hand-written build workflow
 unless `make release` itself is blocked and the user explicitly asks for manual
 recovery.
@@ -91,7 +91,7 @@ gh run view <run-id> --log-failed
 Use the workflow URL as supporting context, not as the final success signal:
 
 ```text
-https://github.com/tsilva/stable-retro-turbo/actions/workflows/release.yml
+https://github.com/tsilva/env-StableRetro-turbo/actions/workflows/release.yml
 ```
 
 5. Poll PyPI until the released version exists. The release is not done until
@@ -104,7 +104,7 @@ import sys
 import time
 import urllib.request
 
-package = "stable-retro-turbo"
+package = "env-stableretro-turbo"
 version = sys.argv[1]
 url = f"https://pypi.org/pypi/{package}/json"
 for attempt in range(90):
@@ -128,7 +128,7 @@ link first:
 
 ```text
 Released v1.0.1.postN and it is live on PyPI:
-https://pypi.org/project/stable-retro-turbo/1.0.1.postN/
+https://pypi.org/project/env-stableretro-turbo/1.0.1.postN/
 ```
 
 Also mention any relevant GitHub Actions result or failure. Do not report a

@@ -6,14 +6,6 @@ requires-python = "==3.14.*"
 exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
 exclude-newer-span = "P7D"
 
-[options.exclude-newer-package]
-stable-retro-turbo = false
-vizdoom-turbo = false
-gradoom = false
-supermariobrosnes-turbo = false
-breakout-turbo-env = false
-gradlab = false
-
 [manifest]
 constraints = [
     { name = "guardrails-ai", specifier = "!=0.10.1" },
@@ -37,6 +29,32 @@ sdist = { url = "https://files.pythonhosted.org/packages/d8/53/6f443c9a4a8358a93
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6", size = 25335, upload-time = "2022-10-25T02:36:20.889Z" },
 ]
+
+[[package]]
+name = "env-stableretro-turbo"
+source = { editable = "." }
+dependencies = [
+    { name = "farama-notifications" },
+    { name = "gymnasium" },
+    { name = "numpy" },
+    { name = "pyglet" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "farama-notifications", specifier = ">=0.0.1" },
+    { name = "gymnasium", specifier = ">=1.1,<2" },
+    { name = "numpy", specifier = ">=1.26,<3" },
+    { name = "pyglet", specifier = ">=1.5.27,<2" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8,<10" }]
 
 [[package]]
 name = "farama-notifications"
@@ -151,32 +169,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/e4/47/b9efed96c114afcfa
 wheels = [
     { url = "https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-9.1.1-py3-none-any.whl", hash = "sha256:37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c", size = 386536, upload-time = "2026-06-19T10:58:31.347Z" },
 ]
-
-[[package]]
-name = "stable-retro-turbo"
-source = { editable = "." }
-dependencies = [
-    { name = "farama-notifications" },
-    { name = "gymnasium" },
-    { name = "numpy" },
-    { name = "pyglet" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "farama-notifications", specifier = ">=0.0.1" },
-    { name = "gymnasium", specifier = ">=1.1,<2" },
-    { name = "numpy", specifier = ">=1.26,<3" },
-    { name = "pyglet", specifier = ">=1.5.27,<2" },
-]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8,<10" }]
 
 [[package]]
 name = "typing-extensions"

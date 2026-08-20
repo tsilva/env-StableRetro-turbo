@@ -1,9 +1,10 @@
 ## PROJECT PURPOSE
 
-`stable-retro-turbo` gives reinforcement-learning developers a high-throughput way to run classic-console games in batches while retaining Stable Retro's integrations and single-environment behavior. It must preserve faithful, controllable rollouts through the upstream-compatible Python API and a Gymnasium-native vector API, with users supplying any required ROMs.
+`env-StableRetro-turbo` gives reinforcement-learning developers a high-throughput way to run classic-console games in batches while retaining Stable Retro's integrations and single-environment behavior. It must preserve faithful, controllable rollouts through the upstream-compatible Python API and a Gymnasium-native vector API, with users supplying any required ROMs.
 
 ## PROJECT REQUIREMENTS
 
+- Publish the Python distribution as `env-stableretro-turbo` while preserving the public `stable_retro` import package.
 - The project must preserve Stable Retro's supported game integrations and public single-environment semantics, including saved-state loading, scenario rewards and termination, raw info variables, and ROM import; Turbo features must not reinterpret or remove them.
 - Scalar and vector environments must accept every Stable Retro built-in action mode, exact caller-supplied button-label action tables, and game-owned named tables with identical ordered controller semantics.
 - Published package artifacts must exclude ROM payloads and allow users to supply required ROMs through the supported import workflow.

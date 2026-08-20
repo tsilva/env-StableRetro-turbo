@@ -1,10 +1,10 @@
 <div align="center">
-  <img src="./logo.png" alt="stable-retro-turbo" width="260" />
+  <img src="./logo.png" alt="env-StableRetro-turbo" width="260" />
 
   **🚀 Blazing-fast Stable Retro fork with native vectorization and preprocessing 🚀**
 </div>
 
-`stable-retro-turbo` is a Python library for reinforcement-learning developers who need faster batched rollouts from classic console games. It keeps Stable Retro's game integrations and single-environment API, and adds `RetroVecEnv`, a Gymnasium vector environment that steps many libretro emulators and preprocesses observations in native code.
+`env-StableRetro-turbo` is a Python library for reinforcement-learning developers who need faster batched rollouts from classic console games. It keeps Stable Retro's game integrations and single-environment API, and adds `RetroVecEnv`, a Gymnasium vector environment that steps many libretro emulators and preprocesses observations in native code.
 
 Install the package, import your legally obtained ROMs, and use the upstream-compatible `stable_retro` import. The native path is useful for parallel training workloads that would otherwise spend substantial time crossing between Python wrappers and individual emulator instances.
 
@@ -15,7 +15,7 @@ Release wheels require Python 3.14 and support macOS on Apple Silicon and Linux 
 ```bash
 uv venv --python 3.14
 source .venv/bin/activate
-uv pip install stable-retro-turbo
+uv pip install env-stableretro-turbo
 python -m stable_retro.import /path/to/your/roms
 ```
 
@@ -144,8 +144,8 @@ The inherited `RetroEnv` API remains available for single-environment use. `Retr
 ## Develop
 
 ```bash
-git clone https://github.com/tsilva/stable-retro-turbo.git
-cd stable-retro-turbo
+git clone https://github.com/tsilva/env-StableRetro-turbo.git
+cd env-StableRetro-turbo
 uv sync --frozen
 ```
 
@@ -186,7 +186,7 @@ uv tool install \
 
 ## Notes
 
-- The distribution is `stable-retro-turbo`; the Python package is `stable_retro`. The upstream-compatible `retro` import remains available for scalar integrations, while new code should import `stable_retro`.
+- The distribution is `env-stableretro-turbo`; the Python package is `stable_retro`. The upstream-compatible `retro` import remains available for scalar integrations, while new code should import `stable_retro`.
 - `RetroVecEnv` implements Gymnasium's vector API directly. It is not a Stable-Baselines3 `VecEnv`, and Stable-Baselines3 is not a runtime dependency.
 - A scalar reset seed expands to `seed + lane_index`. Seed sequences must contain one integer or `None` per lane.
 - `state_catalog` preloads an ordered saved-state catalog. Select reset lanes with `reset_mask` and their exact catalog entries with `state_indices`; Turbo does not sample states.
@@ -207,7 +207,7 @@ configuration in dotenv files.
 
 ## Architecture
 
-![stable-retro-turbo architecture diagram](./architecture.png)
+![env-StableRetro-turbo architecture diagram](./architecture.png)
 
 ## License
 

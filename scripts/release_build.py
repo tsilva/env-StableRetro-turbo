@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic helpers for stable-retro-turbo release wheel builds."""
+"""Deterministic helpers for env-StableRetro-turbo release builds."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VERSION_PATH = REPO_ROOT / "stable_retro" / "VERSION.txt"
 PYTHON = REPO_ROOT / ".venv314" / "bin" / "python"
-PACKAGE_NAME = "stable-retro-turbo"
+PACKAGE_NAME = "env-stableretro-turbo"
 PYTHON_TAGS = ("cp314",)
 RELEASE_PLATFORMS = (
     "macos-arm64",
@@ -181,7 +181,7 @@ def expected_wheelhouse(version: str, platform_name: str) -> Path:
 def expected_macos_wheels(version: str) -> list[Path]:
     return [
         expected_wheelhouse(version, "macos-arm64")
-        / f"stable_retro_turbo-{version}-{tag}-{tag}-macosx_14_0_arm64.whl"
+        / f"env_stableretro_turbo-{version}-{tag}-{tag}-macosx_14_0_arm64.whl"
         for tag in PYTHON_TAGS
     ]
 
@@ -190,7 +190,7 @@ def expected_linux_wheels(version: str) -> list[Path]:
     return [
         expected_wheelhouse(version, "linux-x86_64")
         / (
-            f"stable_retro_turbo-{version}-{tag}-{tag}-"
+            f"env_stableretro_turbo-{version}-{tag}-{tag}-"
             "manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
         )
         for tag in PYTHON_TAGS
@@ -206,7 +206,7 @@ def expected_wheels(version: str, platform_name: str) -> list[Path]:
 
 
 def expected_sdist(version: str) -> Path:
-    return REPO_ROOT / "dist" / f"stable_retro_turbo-{version}.tar.gz"
+    return REPO_ROOT / "dist" / f"env_stableretro_turbo-{version}.tar.gz"
 
 
 def is_under(parts: tuple[str, ...], prefix: tuple[str, ...]) -> bool:
@@ -415,7 +415,7 @@ def prepare_sources(args: argparse.Namespace) -> None:
     post = post_number(version)
     root = args.root or Path(
         tempfile.mkdtemp(
-            prefix=f"stable-retro-turbo-post{post}-builds.",
+            prefix=f"env-stableretro-turbo-post{post}-builds.",
             dir=release_temp_root(),
         ),
     )
@@ -448,8 +448,8 @@ def bump_version(args: argparse.Namespace) -> None:
     print(target)
 
 
-def fetch_pypi_project() -> dict[str, object]:
-    url = f"https://pypi.org/pypi/{PACKAGE_NAME}/json"
+def fetch_pypi_project(package: str = PACKAGE_NAME) -> dict[str, object]:
+    url = f"https://pypi.org/pypi/{package}/json"
     with urllib.request.urlopen(url, timeout=20) as response:
         return json.loads(response.read().decode("utf-8"))
 
@@ -480,14 +480,15 @@ def latest_non_yanked_pypi_version(releases: object) -> str | None:
 
 def check_pypi(args: argparse.Namespace) -> None:
     version = args.version or read_version()
+    package = args.package or PACKAGE_NAME
     parse_version(version)
     try:
-        data = fetch_pypi_project()
+        data = fetch_pypi_project(package)
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             print(
                 json.dumps(
-                    {"package": PACKAGE_NAME, "exists": False, "version_exists": False},
+                    {"package": package, "exists": False, "version_exists": False},
                     indent=2,
                 ),
             )
@@ -497,12 +498,12 @@ def check_pypi(args: argparse.Namespace) -> None:
     exists = version in releases and bool(releases[version])
     print(
         json.dumps(
-            {"package": PACKAGE_NAME, "version": version, "version_exists": exists},
+            {"package": package, "version": version, "version_exists": exists},
             indent=2,
         ),
     )
     if exists:
-        raise SystemExit(f"{PACKAGE_NAME} {version} already exists on PyPI")
+        raise SystemExit(f"{package} {version} already exists on PyPI")
 
 
 def latest_pypi(args: argparse.Namespace) -> None:
@@ -625,7 +626,7 @@ def build_sdist(args: argparse.Namespace) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.unlink(missing_ok=True)
     with tempfile.TemporaryDirectory(
-        prefix=f"stable-retro-turbo-{version}-sdist.",
+        prefix=f"env-stableretro-turbo-{version}-sdist.",
         dir=release_temp_root(),
     ) as tmp:
         source = Path(tmp) / "source"
@@ -789,7 +790,7 @@ def audit_sdist(sdist: Path, version: str) -> dict[str, object]:
             compiled_artifacts.append(name)
         if is_rom_payload(rel):
             rom_payloads.append(name)
-    root = f"stable_retro_turbo-{version}"
+    root = f"env_stableretro_turbo-{version}"
     public_platforms = frozenset(PUBLIC_DATA_PLATFORMS.split(","))
     checks = {
         "expected_filename": sdist.name == expected_name,
@@ -1086,6 +1087,7 @@ def main() -> None:
         help="Check whether a PyPI version is still unused",
     )
     pypi.add_argument("--version")
+    pypi.add_argument("--package")
     pypi.set_defaults(func=check_pypi)
 
     latest = subparsers.add_parser(

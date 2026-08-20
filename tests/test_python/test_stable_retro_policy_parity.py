@@ -44,7 +44,7 @@ def emit(payload):
 
 
 def import_retro(package):
-    if package == "stable-retro-turbo":
+    if package == "env-stableretro-turbo":
         import stable_retro as retro
     elif package == "stable-retro":
         import retro
@@ -208,7 +208,7 @@ def load_policy(args):
 
 
 def make_env(package, retro, rom_path):
-    if package == "stable-retro-turbo":
+    if package == "env-stableretro-turbo":
         return retro.RetroVecEnv(
             GAME,
             state=STATE,
@@ -241,7 +241,7 @@ def make_env(package, retro, rom_path):
 
 
 def reset_env(package, env, seed):
-    if package == "stable-retro-turbo":
+    if package == "env-stableretro-turbo":
         if hasattr(env, "seed"):
             env.seed(seed)
         obs_batch = env.reset()
@@ -254,7 +254,7 @@ def reset_env(package, env, seed):
 
 
 def step_env(package, env, mask, action_id, raw_stack):
-    if package == "stable-retro-turbo":
+    if package == "env-stableretro-turbo":
         obs_batch, rewards, dones, infos = env.step(mask[None, :])
         return (
             np.asarray(obs_batch[0], dtype=np.uint8),
@@ -422,7 +422,7 @@ def _run_runner(
     env = os.environ.copy()
     env["PYTHONWARNINGS"] = "ignore::DeprecationWarning"
 
-    if package == "stable-retro-turbo":
+    if package == "env-stableretro-turbo":
         cwd = repo_root
         pythonpath = str(repo_root)
         python_executable = os.environ.get("STABLE_RETRO_TURBO_PYTHON", sys.executable)
@@ -500,16 +500,16 @@ def test_huggingface_level1_policy_trace_matches_stable_retro(tmp_path):
     if stable_retro_probe.get("status") != "ok":
         _skip_or_fail(stable_retro_probe.get("reason", "stable-retro oracle is unavailable"))
 
-    turbo_probe = _run_runner("stable-retro-turbo", tmp_path, probe=True)
+    turbo_probe = _run_runner("env-stableretro-turbo", tmp_path, probe=True)
     assert turbo_probe.get("status") == "ok", turbo_probe
 
     stable_retro_trace = _run_runner("stable-retro", tmp_path)
     if stable_retro_trace.get("status") != "ok":
         _skip_or_fail(stable_retro_trace.get("reason", "stable-retro policy trace is unavailable"))
 
-    turbo_trace = _run_runner("stable-retro-turbo", tmp_path)
+    turbo_trace = _run_runner("env-stableretro-turbo", tmp_path)
     if turbo_trace.get("status") != "ok":
-        _skip_or_fail(turbo_trace.get("reason", "stable-retro-turbo policy trace is unavailable"))
+        _skip_or_fail(turbo_trace.get("reason", "env-stableretro-turbo policy trace is unavailable"))
 
     assert turbo_trace["completed"] is True, json.dumps(
         {

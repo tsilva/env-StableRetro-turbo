@@ -149,7 +149,7 @@ def test_expected_sdist_uses_normalized_package_name(tmp_path, monkeypatch):
     monkeypatch.setattr(release_build, "REPO_ROOT", tmp_path)
 
     assert release_build.expected_sdist("1.0.1.post40") == (
-        tmp_path / "dist" / "stable_retro_turbo-1.0.1.post40.tar.gz"
+        tmp_path / "dist" / "env_stableretro_turbo-1.0.1.post40.tar.gz"
     )
 
 
@@ -160,7 +160,7 @@ def test_sdist_audit_accepts_clean_source_and_rejects_rom_payload(
     release_build = _release_build_module()
     monkeypatch.setattr(release_build, "REPO_ROOT", tmp_path)
     version = "1.0.1.post40"
-    root = f"stable_retro_turbo-{version}"
+    root = f"env_stableretro_turbo-{version}"
     source = tmp_path / "source"
     (source / "stable_retro").mkdir(parents=True)
     (source / "setup.py").write_text("from setuptools import setup\n", encoding="utf-8")

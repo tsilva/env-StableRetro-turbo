@@ -1,19 +1,17 @@
 # Publishing
 
-This repository keeps the upstream Stable Retro package identity. The repository
-may be named `stable-retro-turbo`, but the Python package metadata remains
-`stable-retro`.
+This repository publishes the `env-stableretro-turbo` distribution while
+preserving the upstream-compatible `stable_retro` and `retro` imports and the
+existing `stable-retro-turbo` command.
 
 ## Policy
 
-- Do not publish fork builds to PyPI under a separate package name.
-- Do not publish fork builds to PyPI as `stable-retro`.
-- Use GitHub Releases for branch-specific wheel artifacts when needed.
-- Keep `stable_retro/VERSION.txt` aligned with upstream unless preparing a
-  deliberate downstream release strategy.
+- Publish only through `.github/workflows/release.yml` and the protected `pypi` environment.
+- Keep the downstream post-release version in `stable_retro/VERSION.txt` aligned across every artifact.
+- Publish binary wheels only for Apple-silicon macOS and x86-64 Linux, plus one source distribution.
+- Never publish this fork as the upstream `stable-retro` distribution.
 
-## Release Artifacts
-
-The release workflow builds macOS Apple Silicon and Linux x86_64 wheels and
-attaches them to GitHub Releases. Those artifacts are for validation and direct
-download, not PyPI publication.
+The migration release also publishes one final metadata-only
+`stable-retro-turbo` wheel and source distribution that depend exactly on
+`env-stableretro-turbo` at the same version. Later releases publish only the
+new distribution.

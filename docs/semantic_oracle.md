@@ -24,24 +24,24 @@ With lawful local ROMs imported, run:
 ```bash
 turbobench oracle supermario/canonical-v2 \
   --left stable-retro@1.0.1 \
-  --right stable-retro-turbo@checkout:"$PWD" \
+  --right env-stableretro-turbo@checkout:"$PWD" \
   --output /external/evidence/mario-stable-retro-turbo
 
 turbobench oracle breakout/start-v2 \
   --left stable-retro@1.0.1 \
-  --right stable-retro-turbo@checkout:"$PWD" \
+  --right env-stableretro-turbo@checkout:"$PWD" \
   --output /external/evidence/breakout-stable-retro-turbo
 ```
 
 After publishing the candidate, regenerate both commands with
-`stable-retro-turbo@VERSION` instead of the checkout selector, then verify the
+`env-stableretro-turbo@VERSION` instead of the checkout selector, then verify the
 published-release receipts:
 
 ```bash
 turbobench verify-oracle /external/evidence/mario-stable-retro-turbo \
-  --require-canonical --require-provider stable-retro-turbo
+  --require-canonical --require-provider env-stableretro-turbo
 turbobench verify-oracle /external/evidence/breakout-stable-retro-turbo \
-  --require-canonical --require-provider stable-retro-turbo
+  --require-canonical --require-provider env-stableretro-turbo
 ```
 
 The canonical gate rejects shortened workloads, missing shapes, every checkout
