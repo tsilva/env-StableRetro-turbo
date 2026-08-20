@@ -1182,7 +1182,7 @@ def test_retro_vec_env_rgb_array_render_returns_raw_screen(tmp_path):
 def test_retro_vec_env_rgb_array_render_updates_with_indexed_video(
     tmp_path,
 ):
-    os.environ["STABLE_RETRO_DISABLE_RENDER_SKIP"] = "1"
+    os.environ["ENV_STABLERETRO_TURBO_DISABLE_RENDER_SKIP"] = "1"
     env = _make_test_retro_vec_env(
         tmp_path,
         num_envs=1,
@@ -1202,7 +1202,7 @@ def test_retro_vec_env_rgb_array_render_updates_with_indexed_video(
         assert len(set(frame_hashes)) > 1
     finally:
         env.close()
-        os.environ.pop("STABLE_RETRO_DISABLE_RENDER_SKIP", None)
+        os.environ.pop("ENV_STABLERETRO_TURBO_DISABLE_RENDER_SKIP", None)
 
 
 def test_env_stableretro_turbo_simple_image_viewer_close_ignores_cocoa_shutdown_error():
@@ -1804,9 +1804,9 @@ def _native_render_skip_trace(tmp_path, *, disable_render_skip, maxpool_last_two
     from env_stableretro_turbo.vec_env import RetroVecEnv
 
     if disable_render_skip:
-        os.environ["STABLE_RETRO_DISABLE_RENDER_SKIP"] = "1"
+        os.environ["ENV_STABLERETRO_TURBO_DISABLE_RENDER_SKIP"] = "1"
     else:
-        os.environ.pop("STABLE_RETRO_DISABLE_RENDER_SKIP", None)
+        os.environ.pop("ENV_STABLERETRO_TURBO_DISABLE_RENDER_SKIP", None)
 
     root = Path(__file__).resolve().parents[1]
     rom_path = root / "roms" / "Dr88-FamiconIntro.nes"
@@ -1850,7 +1850,7 @@ def _native_render_skip_trace(tmp_path, *, disable_render_skip, maxpool_last_two
         return trace
     finally:
         env.close()
-        os.environ.pop("STABLE_RETRO_DISABLE_RENDER_SKIP", None)
+        os.environ.pop("ENV_STABLERETRO_TURBO_DISABLE_RENDER_SKIP", None)
 
 
 @pytest.mark.parametrize("maxpool_last_two", [True, False])
@@ -2178,9 +2178,9 @@ def test_retro_vec_env_atari_crop_mask_area_indexed_matches_framebuffer(monkeypa
 
     def trace(*, indexed: bool):
         if indexed:
-            monkeypatch.delenv("STABLE_RETRO_DISABLE_ATARI_INDEXED_VIDEO", raising=False)
+            monkeypatch.delenv("ENV_STABLERETRO_TURBO_DISABLE_ATARI_INDEXED_VIDEO", raising=False)
         else:
-            monkeypatch.setenv("STABLE_RETRO_DISABLE_ATARI_INDEXED_VIDEO", "1")
+            monkeypatch.setenv("ENV_STABLERETRO_TURBO_DISABLE_ATARI_INDEXED_VIDEO", "1")
         env = _make_breakout_vec_env(**common)
         actions = np.zeros((1, env.num_buttons), dtype=np.uint8)
         try:
@@ -2297,9 +2297,9 @@ def _native_atari_render_skip_trace(tmp_path, *, disable_render_skip, state_path
     from env_stableretro_turbo.vec_env import RetroVecEnv
 
     if disable_render_skip:
-        os.environ["STABLE_RETRO_DISABLE_RENDER_SKIP"] = "1"
+        os.environ["ENV_STABLERETRO_TURBO_DISABLE_RENDER_SKIP"] = "1"
     else:
-        os.environ.pop("STABLE_RETRO_DISABLE_RENDER_SKIP", None)
+        os.environ.pop("ENV_STABLERETRO_TURBO_DISABLE_RENDER_SKIP", None)
 
     root = Path(__file__).resolve().parents[1]
     rom_path = root / "roms" / "automaton.a26"
@@ -2339,7 +2339,7 @@ def _native_atari_render_skip_trace(tmp_path, *, disable_render_skip, state_path
         return trace
     finally:
         env.close()
-        os.environ.pop("STABLE_RETRO_DISABLE_RENDER_SKIP", None)
+        os.environ.pop("ENV_STABLERETRO_TURBO_DISABLE_RENDER_SKIP", None)
 
 
 def test_retro_vec_env_atari_render_skip_preserves_control_trace(tmp_path):

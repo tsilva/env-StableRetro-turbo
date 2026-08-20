@@ -39,14 +39,14 @@ if is_macos_rosetta_process():
 PUBLIC_CORE_NAMES = tuple(
     core.strip()
     for core in os.environ.get(
-        "STABLE_RETRO_PUBLIC_CORES",
+        "ENV_STABLERETRO_TURBO_PUBLIC_CORES",
         "gambatte,fceumm,snes9x,genesis_plus_gx,stella,mgba,picodrive,mednafen_saturn,melonds",
     ).split(",")
     if core.strip()
 )
 PUBLIC_DATA_PLATFORMS = frozenset(
     platform.strip()
-    for platform in os.environ.get("STABLE_RETRO_PUBLIC_DATA_PLATFORMS", "").split(",")
+    for platform in os.environ.get("ENV_STABLERETRO_TURBO_PUBLIC_DATA_PLATFORMS", "").split(",")
     if platform.strip()
 )
 DEFAULT_CMAKE_ARGS = (
@@ -174,7 +174,7 @@ class CMakeBuild(build_ext):
         # Example:
         #   CMAKE_ARGS="-DBUILD_N64=OFF -DENABLE_HW_RENDER=ON" pip3 install -e .
         extra_cmake_args = list(DEFAULT_CMAKE_ARGS)
-        for env_var in ("STABLE_RETRO_CMAKE_ARGS", "CMAKE_ARGS"):
+        for env_var in ("ENV_STABLERETRO_TURBO_CMAKE_ARGS", "CMAKE_ARGS"):
             value = os.environ.get(env_var)
             if value:
                 extra_cmake_args.extend(shlex.split(value))

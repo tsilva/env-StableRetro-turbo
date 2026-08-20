@@ -111,7 +111,7 @@ def main(argv=None) -> int:
     profile = _load_profile(Path(args.profiles_json), args.profile)
 
     os.environ.setdefault("MPLCONFIGDIR", "/private/tmp/matplotlib-stable-retro")
-    os.environ["STABLE_RETRO_DISABLE_AUDIO"] = "1"
+    os.environ["ENV_STABLERETRO_TURBO_DISABLE_AUDIO"] = "1"
 
     import env_stableretro_turbo as retro
     from env_stableretro_turbo.vec_env import RetroVecEnv

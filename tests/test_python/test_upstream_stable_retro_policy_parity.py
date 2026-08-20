@@ -177,7 +177,7 @@ def load_policy(args):
     except ImportError as exc:
         unavailable(f"stable_baselines3 is not installed: {exc}")
         return None
-    policy_path = os.environ.get("STABLE_RETRO_POLICY_PATH")
+    policy_path = os.environ.get("ENV_STABLERETRO_TURBO_POLICY_PATH")
     try:
         if policy_path:
             resolved = Path(policy_path).expanduser()
@@ -428,8 +428,8 @@ def _run_runner(
         python_executable = os.environ.get("ENV_STABLERETRO_TURBO_PYTHON", sys.executable)
     else:
         cwd = tmp_path
-        pythonpath = os.environ.get("STABLE_RETRO_ORACLE_PATH", "")
-        python_executable = os.environ.get("STABLE_RETRO_ORACLE_PYTHON", sys.executable)
+        pythonpath = os.environ.get("ENV_STABLERETRO_TURBO_ORACLE_PATH", "")
+        python_executable = os.environ.get("ENV_STABLERETRO_TURBO_ORACLE_PYTHON", sys.executable)
 
     if pythonpath:
         env["PYTHONPATH"] = pythonpath
@@ -480,7 +480,7 @@ def _run_runner(
 
 
 def _oracle_is_required() -> bool:
-    return os.environ.get("STABLE_RETRO_REQUIRE_ORACLE", "").lower() in {
+    return os.environ.get("ENV_STABLERETRO_TURBO_REQUIRE_ORACLE", "").lower() in {
         "1",
         "true",
         "yes",
@@ -495,17 +495,17 @@ def _skip_or_fail(reason: str) -> None:
 
 
 @pytest.mark.retro_oracle
-def test_huggingface_level1_policy_trace_matches_stable_retro(tmp_path):
-    stable_retro_probe = _run_runner("stable-retro", tmp_path, probe=True)
-    if stable_retro_probe.get("status") != "ok":
-        _skip_or_fail(stable_retro_probe.get("reason", "stable-retro oracle is unavailable"))
+def test_huggingface_level1_policy_trace_matches_upstream_stable_retro(tmp_path):
+    upstream_stable_retro_probe = _run_runner("stable-retro", tmp_path, probe=True)
+    if upstream_stable_retro_probe.get("status") != "ok":
+        _skip_or_fail(upstream_stable_retro_probe.get("reason", "stable-retro oracle is unavailable"))
 
     turbo_probe = _run_runner("env-stableretro-turbo", tmp_path, probe=True)
     assert turbo_probe.get("status") == "ok", turbo_probe
 
-    stable_retro_trace = _run_runner("stable-retro", tmp_path)
-    if stable_retro_trace.get("status") != "ok":
-        _skip_or_fail(stable_retro_trace.get("reason", "stable-retro policy trace is unavailable"))
+    upstream_stable_retro_trace = _run_runner("stable-retro", tmp_path)
+    if upstream_stable_retro_trace.get("status") != "ok":
+        _skip_or_fail(upstream_stable_retro_trace.get("reason", "stable-retro policy trace is unavailable"))
 
     turbo_trace = _run_runner("env-stableretro-turbo", tmp_path)
     if turbo_trace.get("status") != "ok":
@@ -517,20 +517,20 @@ def test_huggingface_level1_policy_trace_matches_stable_retro(tmp_path):
                 "version": turbo_trace.get("version"),
                 "episode_summaries": turbo_trace.get("episode_summaries"),
             },
-            "stable_retro": {
-                "version": stable_retro_trace.get("version"),
-                "episode_summaries": stable_retro_trace.get("episode_summaries"),
+            "upstream_stable_retro": {
+                "version": upstream_stable_retro_trace.get("version"),
+                "episode_summaries": upstream_stable_retro_trace.get("episode_summaries"),
             },
         },
         indent=2,
         sort_keys=True,
     )
-    assert stable_retro_trace["completed"] is True, json.dumps(
-        stable_retro_trace.get("episode_summaries"),
+    assert upstream_stable_retro_trace["completed"] is True, json.dumps(
+        upstream_stable_retro_trace.get("episode_summaries"),
         indent=2,
         sort_keys=True,
     )
-    assert turbo_trace["trace"] == stable_retro_trace["trace"], json.dumps(
+    assert turbo_trace["trace"] == upstream_stable_retro_trace["trace"], json.dumps(
         {
             "env_stableretro_turbo": {
                 "version": turbo_trace.get("version"),
@@ -538,11 +538,11 @@ def test_huggingface_level1_policy_trace_matches_stable_retro(tmp_path):
                 "episode_summaries": turbo_trace.get("episode_summaries"),
                 "tail": turbo_trace.get("trace", [])[-3:],
             },
-            "stable_retro": {
-                "version": stable_retro_trace.get("version"),
-                "completed": stable_retro_trace.get("completed"),
-                "episode_summaries": stable_retro_trace.get("episode_summaries"),
-                "tail": stable_retro_trace.get("trace", [])[-3:],
+            "upstream_stable_retro": {
+                "version": upstream_stable_retro_trace.get("version"),
+                "completed": upstream_stable_retro_trace.get("completed"),
+                "episode_summaries": upstream_stable_retro_trace.get("episode_summaries"),
+                "tail": upstream_stable_retro_trace.get("trace", [])[-3:],
             },
         },
         indent=2,

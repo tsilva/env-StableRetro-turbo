@@ -34,14 +34,14 @@ endif()
 
 find_package(Git QUIET)
 
-file(READ "${CMAKE_SOURCE_DIR}/env_stableretro_turbo/VERSION.txt" STABLE_RETRO_VERSION)
-string(REGEX REPLACE "\n$" "" STABLE_RETRO_VERSION "${STABLE_RETRO_VERSION}")
+file(READ "${CMAKE_SOURCE_DIR}/env_stableretro_turbo/VERSION.txt" ENV_STABLERETRO_TURBO_VERSION)
+string(REGEX REPLACE "\n$" "" ENV_STABLERETRO_TURBO_VERSION "${ENV_STABLERETRO_TURBO_VERSION}")
 string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" PROJECT_VERSION
-             "${STABLE_RETRO_VERSION}")
+             "${ENV_STABLERETRO_TURBO_VERSION}")
 if(NOT PROJECT_VERSION)
   message(
     FATAL_ERROR
-      "Unable to derive a CMake project version from ${STABLE_RETRO_VERSION}")
+      "Unable to derive a CMake project version from ${ENV_STABLERETRO_TURBO_VERSION}")
 endif()
 set_property(
   DIRECTORY
@@ -65,7 +65,7 @@ set(CMAKE_CXX_FLAGS
 )
 
 include(CheckIncludeFileCXX)
-check_include_file_cxx("GL/gl.h" STABLE_RETRO_HAVE_GL_GL_H)
+check_include_file_cxx("GL/gl.h" ENV_STABLERETRO_TURBO_HAVE_GL_GL_H)
 
 if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" OR CMAKE_SYSTEM_PROCESSOR STREQUAL
                                                "AMD64")
@@ -86,7 +86,7 @@ option(ENABLE_HW_RENDER
        OFF)
 option(BUILD_N64 "Build Parallel N64 core (requires OpenGL headers)" ON)
 option(ENABLE_CAPNPROTO "Enable CapnProto-based search save/load support" ON)
-option(STABLE_RETRO_USE_SYSTEM_LIBZIP "Use system libzip when available" ON)
+option(ENV_STABLERETRO_TURBO_USE_SYSTEM_LIBZIP "Use system libzip when available" ON)
 
 set(BUILD_PYTHON
     ON
@@ -114,7 +114,7 @@ if(ENABLE_CAPNPROTO AND NOT BUILD_MANYLINUX)
   endif()
 endif()
 
-if(STABLE_RETRO_USE_SYSTEM_LIBZIP)
+if(ENV_STABLERETRO_TURBO_USE_SYSTEM_LIBZIP)
   pkg_search_module(LIBZIP QUIET libzip)
 endif()
 
@@ -351,7 +351,7 @@ if(APPLE)
 else()
   maybe_add_core(fbneo fbneo)
   if(BUILD_N64)
-    if(STABLE_RETRO_HAVE_GL_GL_H)
+    if(ENV_STABLERETRO_TURBO_HAVE_GL_GL_H)
       maybe_add_core(n64 parallel_n64)
     else()
       message(
@@ -443,13 +443,13 @@ set(BUILD_STATIC_LIBS
     CACHE BOOL "" FORCE)
 
 find_path(
-  STABLE_RETRO_LIBZIP_HEADER zip.h
+  ENV_STABLERETRO_TURBO_LIBZIP_HEADER zip.h
   PATHS ${LIBZIP_INCLUDE_DIRS}
   NO_DEFAULT_PATH)
-if(STABLE_RETRO_USE_SYSTEM_LIBZIP
+if(ENV_STABLERETRO_TURBO_USE_SYSTEM_LIBZIP
    AND LIBZIP_FOUND
    AND NOT LIBZIP_VERSION VERSION_LESS 1.0.0
-   AND STABLE_RETRO_LIBZIP_HEADER)
+   AND ENV_STABLERETRO_TURBO_LIBZIP_HEADER)
   include_directories(${LIBZIP_INCLUDE_DIRS})
   link_directories(${LIBZIP_LIBRARY_DIRS})
 else()
@@ -556,7 +556,7 @@ if(BUILD_TESTS)
       NAME python_hf_policy_env_stableretro_turbo_parity
       COMMAND
         ${Python_EXECUTABLE} -m pytest -q
-        ${CMAKE_SOURCE_DIR}/tests/test_python/test_stable_retro_policy_parity.py
+        ${CMAKE_SOURCE_DIR}/tests/test_python/test_upstream_stable_retro_policy_parity.py
       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   endif()
 endif()

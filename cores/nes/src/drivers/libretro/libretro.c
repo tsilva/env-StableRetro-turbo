@@ -95,7 +95,7 @@ static bool env_stableretro_turbo_audio_enabled(void)
    static int enabled = -1;
    if (enabled != -1)
       return enabled;
-   const char *value = getenv("STABLE_RETRO_DISABLE_AUDIO");
+   const char *value = getenv("ENV_STABLERETRO_TURBO_DISABLE_AUDIO");
    enabled = !value || !*value || !strcmp(value, "0") ||
       !strcmp(value, "false") || !strcmp(value, "False") ||
       !strcmp(value, "FALSE");

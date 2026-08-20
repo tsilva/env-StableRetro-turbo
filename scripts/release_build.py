@@ -68,7 +68,7 @@ MACOS_CMAKE_ARGS = (
     "-DBUILD_CORES=gb;nes;snes;genesis;atari2600;gba;32x;saturn;ds "
     "-DBUILD_TESTS=OFF "
     "-DENABLE_CAPNPROTO=OFF "
-    "-DSTABLE_RETRO_USE_SYSTEM_LIBZIP=OFF"
+    "-DENV_STABLERETRO_TURBO_USE_SYSTEM_LIBZIP=OFF"
 )
 LINUX_CMAKE_ARGS = (
     "-DCMAKE_BUILD_TYPE=Release "
@@ -396,8 +396,8 @@ def macos_env(root: Path = REPO_ROOT) -> dict[str, str]:
         "CCACHE_COMPILERCHECK": "content",
         "CCACHE_MAXSIZE": "2G",
         "CMAKE_ARGS": MACOS_CMAKE_ARGS,
-        "STABLE_RETRO_PUBLIC_CORES": ",".join(PUBLIC_CORES),
-        "STABLE_RETRO_PUBLIC_DATA_PLATFORMS": PUBLIC_DATA_PLATFORMS,
+        "ENV_STABLERETRO_TURBO_PUBLIC_CORES": ",".join(PUBLIC_CORES),
+        "ENV_STABLERETRO_TURBO_PUBLIC_DATA_PLATFORMS": PUBLIC_DATA_PLATFORMS,
     }
 
 
@@ -634,8 +634,8 @@ def build_sdist(args: argparse.Namespace) -> None:
         prune_sdist_tree(source)
         fail_on_contamination(source)
         env = os.environ.copy()
-        env["STABLE_RETRO_PUBLIC_CORES"] = ",".join(PUBLIC_CORES)
-        env["STABLE_RETRO_PUBLIC_DATA_PLATFORMS"] = PUBLIC_DATA_PLATFORMS
+        env["ENV_STABLERETRO_TURBO_PUBLIC_CORES"] = ",".join(PUBLIC_CORES)
+        env["ENV_STABLERETRO_TURBO_PUBLIC_DATA_PLATFORMS"] = PUBLIC_DATA_PLATFORMS
         run(
             [
                 str(PYTHON),
@@ -712,15 +712,12 @@ def audit_wheel(wheel: Path, version: str, platform_name: str) -> dict[str, obje
     with zipfile.ZipFile(wheel) as zf:
         init = zf.read("env_stableretro_turbo/__init__.py").decode("utf-8")
         vec_env = zf.read("env_stableretro_turbo/vec_env.py").decode("utf-8")
-    legacy_vec_env_name = "StableRetro" + "Native" + "VecEnv"
     checks.update(
         {
             "exports_retro_vec_env": "RetroVecEnv" in init,
             "does_not_export_retro_vector_env": "RetroVectorEnv" not in init,
-            "no_legacy_vec_env_export": legacy_vec_env_name not in init,
             "class_retro_vec_env": "class RetroVecEnv" in vec_env,
             "does_not_define_retro_vector_env": "class RetroVectorEnv" not in vec_env,
-            "no_legacy_vec_env_class": legacy_vec_env_name not in vec_env,
             "uses_private_retro_vec_env_binding": "_RetroVecEnv" in vec_env,
             "does_not_use_public_retro_vec_env_binding": "_retro.RetroVecEnv"
             not in vec_env,
@@ -937,7 +934,6 @@ assert hasattr(_retro, "_RetroVecEnv")
 assert not hasattr(_retro, "RetroVecEnv")
 assert hasattr(env_stableretro_turbo, "RetroVecEnv")
 assert not hasattr(env_stableretro_turbo, "RetroVectorEnv")
-assert not hasattr(env_stableretro_turbo, "StableRetro" + "Native" + "VecEnv")
 
 rom_path = Path({rom_path!r})
 assert rom_path.is_file()

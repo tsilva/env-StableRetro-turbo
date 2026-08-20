@@ -42,7 +42,7 @@ static inline T _hypot(T x, T y) {
 
 #if defined(__ARM_NEON) && defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 #include <arm_neon.h>
-#define STABLE_RETRO_ARM_NEON 1
+#define ENV_STABLERETRO_TURBO_ARM_NEON 1
 #endif
 
 namespace py = pybind11;
@@ -1229,7 +1229,7 @@ static void xrgb8888GrayscaleRow(
 	long width,
 	uint8_t* dst) {
 	long x = 0;
-#ifdef STABLE_RETRO_ARM_NEON
+#ifdef ENV_STABLERETRO_TURBO_ARM_NEON
 	for (; x + 16 <= width; x += 16) {
 		uint8x16x4_t pixels = vld4q_u8(raw + static_cast<size_t>(x) * 4);
 		if (maxRaw) {
@@ -1501,7 +1501,7 @@ void processNativeGrayscaleAreaPlanToBuffer(
 		return;
 	}
 	if (depth == 32) {
-#ifdef STABLE_RETRO_ARM_NEON
+#ifdef ENV_STABLERETRO_TURBO_ARM_NEON
 		if (!plan.masked) {
 			processXrgb8888GrayscaleAreaPlanToBuffer(
 				raw,
@@ -1766,7 +1766,7 @@ public:
 		// yield blank or stale public observations. Stable Retro fidelity takes
 		// priority over this optimization for NES vector lanes.
 		const bool renderSkipRequested =
-			!envFlagEnabled("STABLE_RETRO_DISABLE_RENDER_SKIP");
+			!envFlagEnabled("ENV_STABLERETRO_TURBO_DISABLE_RENDER_SKIP");
 		parseInitialStates(initialStateObj, initialStateLabelsObj);
 		m_numThreads = std::max(1, std::min<int>(m_numThreads <= 0 ? static_cast<int>(numEnvs) : m_numThreads, static_cast<int>(numEnvs)));
 		const unsigned hardwareThreads = std::thread::hardware_concurrency();
@@ -1774,9 +1774,9 @@ public:
 			m_numThreads = std::min(m_numThreads, static_cast<int>(hardwareThreads));
 		}
 		const std::string& constructionInitialState = initialStateForConstruction();
-		const bool indexedVideoEnabled = !envFlagEnabled("STABLE_RETRO_DISABLE_INDEXED_VIDEO");
+		const bool indexedVideoEnabled = !envFlagEnabled("ENV_STABLERETRO_TURBO_DISABLE_INDEXED_VIDEO");
 		const bool atariIndexedVideoEnabled =
-			!envFlagEnabled("STABLE_RETRO_DISABLE_ATARI_INDEXED_VIDEO");
+			!envFlagEnabled("ENV_STABLERETRO_TURBO_DISABLE_ATARI_INDEXED_VIDEO");
 		// Indexed video bypasses the CPU framebuffer. The downstream area plan
 		// applies remove and mask crops directly to indexed pixels.
 		const bool grayscaleAreaPlanEligible =

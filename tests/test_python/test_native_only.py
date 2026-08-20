@@ -7,8 +7,8 @@ import env_stableretro_turbo as retro
 
 
 def test_retro_emulator_is_native_only(monkeypatch):
-    monkeypatch.setenv("STABLE_RETRO_FORCE_ROSETTA_SNES", "1")
-    monkeypatch.setenv("STABLE_RETRO_BUILD_ROSETTA_SNES", "1")
+    monkeypatch.setenv("ENV_STABLERETRO_TURBO_FORCE_ROSETTA_SNES", "1")
+    monkeypatch.setenv("ENV_STABLERETRO_TURBO_BUILD_ROSETTA_SNES", "1")
 
     assert retro.RetroEmulator is retro.NativeRetroEmulator
 

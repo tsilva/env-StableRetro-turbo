@@ -66,15 +66,15 @@ def _policy_path(args: argparse.Namespace) -> Path:
     return resolve_hf_policy_path(
         args.repo_id,
         args.filename,
-        env_var="STABLE_RETRO_HF_POLICY_PATH",
+        env_var="ENV_STABLERETRO_TURBO_HF_POLICY_PATH",
     )
 
 
 def run(args: argparse.Namespace) -> int:
     model = load_sb3_policy(_policy_path(args), device=args.device)
-    previous_render_skip = os.environ.get("STABLE_RETRO_DISABLE_RENDER_SKIP")
+    previous_render_skip = os.environ.get("ENV_STABLERETRO_TURBO_DISABLE_RENDER_SKIP")
     if not args.no_window:
-        os.environ["STABLE_RETRO_DISABLE_RENDER_SKIP"] = "1"
+        os.environ["ENV_STABLERETRO_TURBO_DISABLE_RENDER_SKIP"] = "1"
     env = make_mario_level1_policy_env()
     viewer = None
     if not args.no_window:
@@ -126,9 +126,9 @@ def run(args: argparse.Namespace) -> int:
             viewer.close()
         env.close()
         if previous_render_skip is None:
-            os.environ.pop("STABLE_RETRO_DISABLE_RENDER_SKIP", None)
+            os.environ.pop("ENV_STABLERETRO_TURBO_DISABLE_RENDER_SKIP", None)
         else:
-            os.environ["STABLE_RETRO_DISABLE_RENDER_SKIP"] = previous_render_skip
+            os.environ["ENV_STABLERETRO_TURBO_DISABLE_RENDER_SKIP"] = previous_render_skip
 
     print(
         f"{args.event} did not fire within {args.episodes} episodes "

@@ -148,7 +148,7 @@ static string copyCoreForIsolation(const string& corePath) {
 }
 
 Emulator::Emulator() {
-	m_audioEnabled = !envFlagEnabled("STABLE_RETRO_DISABLE_AUDIO");
+	m_audioEnabled = !envFlagEnabled("ENV_STABLERETRO_TURBO_DISABLE_AUDIO");
 }
 
 Emulator::~Emulator() {
