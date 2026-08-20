@@ -145,8 +145,8 @@ See the video tutorial: [Windows WSL2 + Ubuntu 22.04 setup guide](https://www.yo
 After installation, verify it works by running:
 
 ```python
-import stable_retro
-env = stable_retro.make(game='Airstriker-Genesis-v0')
+import env_stableretro_turbo
+env = env_stableretro_turbo.make(game='Airstriker-Genesis-v0')
 print("Installation successful!")
 env.close()
 ```

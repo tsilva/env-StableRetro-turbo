@@ -45,7 +45,7 @@ def emit(payload):
 
 def import_retro(package):
     if package == "env-stableretro-turbo":
-        import stable_retro as retro
+        import env_stableretro_turbo as retro
     elif package == "stable-retro":
         import retro
     else:
@@ -425,7 +425,7 @@ def _run_runner(
     if package == "env-stableretro-turbo":
         cwd = repo_root
         pythonpath = str(repo_root)
-        python_executable = os.environ.get("STABLE_RETRO_TURBO_PYTHON", sys.executable)
+        python_executable = os.environ.get("ENV_STABLERETRO_TURBO_PYTHON", sys.executable)
     else:
         cwd = tmp_path
         pythonpath = os.environ.get("STABLE_RETRO_ORACLE_PATH", "")
@@ -513,7 +513,7 @@ def test_huggingface_level1_policy_trace_matches_stable_retro(tmp_path):
 
     assert turbo_trace["completed"] is True, json.dumps(
         {
-            "stable_retro_turbo": {
+            "env_stableretro_turbo": {
                 "version": turbo_trace.get("version"),
                 "episode_summaries": turbo_trace.get("episode_summaries"),
             },
@@ -532,7 +532,7 @@ def test_huggingface_level1_policy_trace_matches_stable_retro(tmp_path):
     )
     assert turbo_trace["trace"] == stable_retro_trace["trace"], json.dumps(
         {
-            "stable_retro_turbo": {
+            "env_stableretro_turbo": {
                 "version": turbo_trace.get("version"),
                 "completed": turbo_trace.get("completed"),
                 "episode_summaries": turbo_trace.get("episode_summaries"),

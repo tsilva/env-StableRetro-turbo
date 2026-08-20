@@ -1,7 +1,7 @@
 """Compatibility shim for ``retro.rendering``.
 
-Importing this module forwards to ``stable_retro.rendering`` without forcing
+Importing this module forwards to ``env_stableretro_turbo.rendering`` without forcing
 the renderer to initialize during ``import retro``.
 """
 
-from stable_retro.rendering import *  # noqa: F401, F403
+from env_stableretro_turbo.rendering import *  # noqa: F401, F403

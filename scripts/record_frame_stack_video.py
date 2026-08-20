@@ -113,8 +113,8 @@ def main(argv=None) -> int:
     os.environ.setdefault("MPLCONFIGDIR", "/private/tmp/matplotlib-stable-retro")
     os.environ["STABLE_RETRO_DISABLE_AUDIO"] = "1"
 
-    import stable_retro as retro
-    from stable_retro.vec_env import RetroVecEnv
+    import env_stableretro_turbo as retro
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     resize_h, resize_w = (int(part) for part in str(profile["resize"]).lower().split("x", 1))
     crop = _parse_crop(profile.get("obs_crop"))

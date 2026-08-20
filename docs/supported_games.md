@@ -1,12 +1,12 @@
 # Supported Games
 
-This page lists the bundled game integrations found under `stable_retro/data/`.
+This page lists the bundled game integrations found under `env_stableretro_turbo/data/`.
 
 The tables below are derived from the directory names in these folders:
 
-- `stable_retro/data/stable/`
-- `stable_retro/data/contrib/`
-- `stable_retro/data/experimental/`
+- `env_stableretro_turbo/data/stable/`
+- `env_stableretro_turbo/data/contrib/`
+- `env_stableretro_turbo/data/experimental/`
 
 Each table groups games by the emulator core that Stable-Retro uses for that system.
 
@@ -1098,11 +1098,11 @@ Each table groups games by the emulator core that Stable-Retro uses for that sys
 
 ## mGBA (GBA)
 
-No bundled games found in `stable_retro/data` for this emulator core.
+No bundled games found in `env_stableretro_turbo/data` for this emulator core.
 
 ## Mednafen PCE Fast (PC Engine)
 
-No bundled games found in `stable_retro/data` for this emulator core.
+No bundled games found in `env_stableretro_turbo/data` for this emulator core.
 
 ## PicoDrive (Sega 32X)
 

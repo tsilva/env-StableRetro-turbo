@@ -1,8 +1,8 @@
 import gzip
 import struct
 
-import stable_retro
-from stable_retro.scripts.import_path import _refresh_atari_start_state
+import env_stableretro_turbo
+from env_stableretro_turbo.scripts.import_path import _refresh_atari_start_state
 
 
 def test_refresh_atari_start_state_preserves_authority_format(monkeypatch, tmp_path):
@@ -21,7 +21,7 @@ def test_refresh_atari_start_state_preserves_authority_format(monkeypatch, tmp_p
         def __init__(self, rom_path):
             assert rom_path == "breakout.a26"
 
-    monkeypatch.setattr(stable_retro, "RetroEmulator", FakeEmulator)
+    monkeypatch.setattr(env_stableretro_turbo, "RetroEmulator", FakeEmulator)
 
     _refresh_atari_start_state(
         "Breakout-Atari2600-v0",

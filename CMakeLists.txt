@@ -34,7 +34,7 @@ endif()
 
 find_package(Git QUIET)
 
-file(READ "${CMAKE_SOURCE_DIR}/stable_retro/VERSION.txt" STABLE_RETRO_VERSION)
+file(READ "${CMAKE_SOURCE_DIR}/env_stableretro_turbo/VERSION.txt" STABLE_RETRO_VERSION)
 string(REGEX REPLACE "\n$" "" STABLE_RETRO_VERSION "${STABLE_RETRO_VERSION}")
 string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" PROJECT_VERSION
              "${STABLE_RETRO_VERSION}")
@@ -47,7 +47,7 @@ set_property(
   DIRECTORY
   APPEND
   PROPERTY CMAKE_CONFIGURE_DEPENDS
-           "${CMAKE_SOURCE_DIR}/stable_retro/VERSION.txt")
+           "${CMAKE_SOURCE_DIR}/env_stableretro_turbo/VERSION.txt")
 
 project("Gym Retro" VERSION ${PROJECT_VERSION})
 set(CMAKE_CXX_STANDARD 14)
@@ -175,7 +175,7 @@ endif()
 set(PYLIB_DIRECTORY
     "${CMAKE_CURRENT_BINARY_DIR}"
     CACHE PATH "Build directory that contains retro module")
-file(MAKE_DIRECTORY "${PYLIB_DIRECTORY}/stable_retro/cores")
+file(MAKE_DIRECTORY "${PYLIB_DIRECTORY}/env_stableretro_turbo/cores")
 
 set(CORES)
 set(COREINFO)
@@ -201,10 +201,10 @@ endfunction()
 function(add_core platform core_name)
   set(target_name ${core_name}_libretro${CMAKE_SHARED_LIBRARY_SUFFIX})
   get_filename_component(
-    TARGET_PATH "${PYLIB_DIRECTORY}/stable_retro/cores/${target_name}" ABSOLUTE)
+    TARGET_PATH "${PYLIB_DIRECTORY}/env_stableretro_turbo/cores/${target_name}" ABSOLUTE)
   list(APPEND CORES "${TARGET_PATH}")
   list(APPEND COREINFO
-       "${CMAKE_CURRENT_SOURCE_DIR}/stable_retro/cores/${core_name}.json")
+       "${CMAKE_CURRENT_SOURCE_DIR}/env_stableretro_turbo/cores/${core_name}.json")
   set(CORES
       "${CORES}"
       PARENT_SCOPE)
@@ -229,10 +229,10 @@ function(add_core platform core_name)
   endif()
 
   add_custom_command(
-    OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/stable_retro/cores/${core_name}-version"
+    OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/env_stableretro_turbo/cores/${core_name}-version"
     COMMAND
       ${CMAKE_COMMAND} -E touch
-      "${CMAKE_CURRENT_SOURCE_DIR}/stable_retro/cores/${core_name}-version")
+      "${CMAKE_CURRENT_SOURCE_DIR}/env_stableretro_turbo/cores/${core_name}-version")
 
   if(WIN32)
     set(libretro_platform platform=win)
@@ -291,23 +291,23 @@ function(add_core platform core_name)
             "${TARGET_PATH}"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/cores/${platform}/${subdir}"
     DEPENDS
-      "${CMAKE_CURRENT_SOURCE_DIR}/stable_retro/cores/${core_name}-version"
+      "${CMAKE_CURRENT_SOURCE_DIR}/env_stableretro_turbo/cores/${core_name}-version"
       JOB_SERVER_AWARE TRUE)
   unset(core_ldflags)
   add_custom_command(
-    OUTPUT "${PYLIB_DIRECTORY}/stable_retro/cores/${core_name}.json"
+    OUTPUT "${PYLIB_DIRECTORY}/env_stableretro_turbo/cores/${core_name}.json"
     COMMAND
       ${CMAKE_COMMAND} -E copy
       "${CMAKE_CURRENT_SOURCE_DIR}/cores/${platform}.json"
-      "${PYLIB_DIRECTORY}/stable_retro/cores/${core_name}.json"
+      "${PYLIB_DIRECTORY}/env_stableretro_turbo/cores/${core_name}.json"
     DEPENDS
-      "${CMAKE_CURRENT_SOURCE_DIR}/stable_retro/cores/${core_name}-version")
+      "${CMAKE_CURRENT_SOURCE_DIR}/env_stableretro_turbo/cores/${core_name}-version")
 
   add_custom_target(
     ${platform} ALL
     DEPENDS
-      "${CMAKE_CURRENT_SOURCE_DIR}/stable_retro/cores/${core_name}-version"
-      "${PYLIB_DIRECTORY}/stable_retro/cores/${core_name}.json"
+      "${CMAKE_CURRENT_SOURCE_DIR}/env_stableretro_turbo/cores/${core_name}-version"
+      "${PYLIB_DIRECTORY}/env_stableretro_turbo/cores/${core_name}.json"
       "${TARGET_PATH}")
   list(APPEND CORE_TARGETS "${platform}")
   set(CORE_TARGETS
@@ -518,16 +518,16 @@ if(CAPN_PROTO_FOUND)
   target_link_libraries(retro-capnp retro-base CapnProto::capnp)
 endif()
 
-include_directories(src stable_retro third-party/pybind11/include third-party
+include_directories(src env_stableretro_turbo third-party/pybind11/include third-party
                     third-party/gtest/googletest/include ${Python_INCLUDE_DIRS})
 
 if(BUILD_PYTHON)
-  add_library(stable_retro SHARED src/retro.cpp)
-  target_compile_features(stable_retro PRIVATE cxx_std_17)
+  add_library(env_stableretro_turbo SHARED src/retro.cpp)
+  target_compile_features(env_stableretro_turbo PRIVATE cxx_std_17)
   set_target_properties(
-    stable_retro
-    PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${PYLIB_DIRECTORY}/stable_retro"
-               RUNTIME_OUTPUT_DIRECTORY "${PYLIB_DIRECTORY}/stable_retro"
+    env_stableretro_turbo
+    PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${PYLIB_DIRECTORY}/env_stableretro_turbo"
+               RUNTIME_OUTPUT_DIRECTORY "${PYLIB_DIRECTORY}/env_stableretro_turbo"
                OUTPUT_NAME _retro
                PREFIX ""
                SUFFIX ${PYEXT_SUFFIX})
@@ -543,7 +543,7 @@ if(BUILD_PYTHON)
     set(PYBIND_LIBS "${Python_LIBRARY}")
   endif()
 
-  target_link_libraries(stable_retro retro-base ${LUA_LINK_LIBRARY}
+  target_link_libraries(env_stableretro_turbo retro-base ${LUA_LINK_LIBRARY}
                         ${PYBIND_LIBS} ${STATIC_LDFLAGS})
 endif()
 
@@ -553,7 +553,7 @@ if(BUILD_TESTS)
   add_subdirectory(tests)
   if(BUILD_PYTHON)
     add_test(
-      NAME python_hf_policy_stable_retro_parity
+      NAME python_hf_policy_env_stableretro_turbo_parity
       COMMAND
         ${Python_EXECUTABLE} -m pytest -q
         ${CMAKE_SOURCE_DIR}/tests/test_python/test_stable_retro_policy_parity.py

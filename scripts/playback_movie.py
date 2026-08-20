@@ -1,4 +1,4 @@
 #!/usr/bin/env python
-from stable_retro.scripts.playback_movie import main
+from env_stableretro_turbo.scripts.playback_movie import main
 
 main()

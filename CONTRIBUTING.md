@@ -36,12 +36,12 @@ pass the ROM-backed TurboBench v2 semantic oracle against original
 turbobench oracle supermario/canonical-v2 \
   --left stable-retro@1.0.1 \
   --right env-stableretro-turbo@checkout:"$PWD" \
-  --output /external/evidence/mario-stable-retro-turbo
+  --output /external/evidence/mario-env-stableretro-turbo
 
 turbobench oracle breakout/start-v2 \
   --left stable-retro@1.0.1 \
   --right env-stableretro-turbo@checkout:"$PWD" \
-  --output /external/evidence/breakout-stable-retro-turbo
+  --output /external/evidence/breakout-env-stableretro-turbo
 ```
 
 These checkout receipts are development evidence. After publishing the
@@ -49,9 +49,9 @@ candidate, regenerate both with `env-stableretro-turbo@VERSION`; only those PyPI
 candidate receipts may pass the canonical gate:
 
 ```bash
-turbobench verify-oracle /external/evidence/mario-stable-retro-turbo \
+turbobench verify-oracle /external/evidence/mario-env-stableretro-turbo \
   --require-canonical --require-provider env-stableretro-turbo
-turbobench verify-oracle /external/evidence/breakout-stable-retro-turbo \
+turbobench verify-oracle /external/evidence/breakout-env-stableretro-turbo \
   --require-canonical --require-provider env-stableretro-turbo
 ```
 

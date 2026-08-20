@@ -9,12 +9,12 @@ import hashlib
 import subprocess
 from pathlib import Path
 
-import stable_retro as retro
-from stable_retro.stella_state import migrate_legacy_state
+import env_stableretro_turbo as retro
+from env_stableretro_turbo.stella_state import migrate_legacy_state
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DATA_ROOT = REPO_ROOT / "stable_retro" / "data" / "stable"
+DATA_ROOT = REPO_ROOT / "env_stableretro_turbo" / "data" / "stable"
 
 
 def _sha1(path: Path) -> str:
@@ -45,7 +45,7 @@ def regenerate(*, update_imports: bool, legacy_ref: str) -> int:
                 [
                     "git",
                     "show",
-                    f"{legacy_ref}:stable_retro/data/stable/{game}/Start.state",
+                    f"{legacy_ref}:env_stableretro_turbo/data/stable/{game}/Start.state",
                 ],
                 cwd=REPO_ROOT,
             ),

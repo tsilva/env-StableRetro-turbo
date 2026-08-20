@@ -9,11 +9,11 @@ description: Generate and validate Super Mario Bros NES stable-retro state files
 
 Use the local source of truth first:
 
-1. List existing files in `stable_retro/data/stable/SuperMarioBros-Nes-v0`.
+1. List existing files in `env_stableretro_turbo/data/stable/SuperMarioBros-Nes-v0`.
 2. Treat existing `.state` files as protected. Do not overwrite them unless the user explicitly asks.
 3. For normal SMB levels, generate only missing `LevelW-L.state` files with `scripts/generate_smb_states.py`.
 4. Render screenshots for every generated state and compare them against NESMaps before calling the state valid.
-5. If the user wants the states available in another repo's installed package, copy only the generated files into that venv's `site-packages/stable_retro/data/stable/SuperMarioBros-Nes-v0/` and verify from that repo's cwd so the local checkout does not shadow the installed wheel.
+5. If the user wants the states available in another repo's installed package, copy only the generated files into that venv's `site-packages/env_stableretro_turbo/data/stable/SuperMarioBros-Nes-v0/` and verify from that repo's cwd so the local checkout does not shadow the installed wheel.
 
 ## Quick Commands
 
@@ -32,7 +32,7 @@ python3 .codex/skills/generate-mario-states/scripts/generate_smb_states.py Level
 Verify available states from the package actually being used:
 
 ```bash
-python3 -c "import stable_retro.data; print(stable_retro.data.list_states('SuperMarioBros-Nes-v0'))"
+python3 -c "import env_stableretro_turbo.data; print(env_stableretro_turbo.data.list_states('SuperMarioBros-Nes-v0'))"
 ```
 
 ## Validation

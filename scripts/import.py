@@ -1,4 +1,4 @@
 #!/usr/bin/env python
-from stable_retro.scripts.import_path import main
+from env_stableretro_turbo.scripts.import_path import main
 
 main()

@@ -3,9 +3,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import stable_retro.cli as cli
-import stable_retro.examples.interactive as interactive_module
-from stable_retro.examples.interactive import RetroInteractive
+import env_stableretro_turbo.cli as cli
+import env_stableretro_turbo.examples.interactive as interactive_module
+from env_stableretro_turbo.examples.interactive import RetroInteractive
 
 
 def test_resolve_platform_prefers_curated_game(monkeypatch):

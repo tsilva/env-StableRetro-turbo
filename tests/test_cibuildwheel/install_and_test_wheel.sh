@@ -14,7 +14,7 @@ python3 -c "import sys; print('Python', sys.version)"
 PYTHON_VERSION_MAJOR=$(python3 -c "import sys; print(sys.version_info.major)")
 PYTHON_VERSION_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)")
 PYTHON_VERSION="${PYTHON_VERSION_MAJOR}${PYTHON_VERSION_MINOR}"
-PYTHON_WHEEL=$(ls wheelhouse/stable_retro-*-cp${PYTHON_VERSION}-cp${PYTHON_VERSION}*.whl)
+PYTHON_WHEEL=$(ls wheelhouse/env_stableretro_turbo-*-cp${PYTHON_VERSION}-cp${PYTHON_VERSION}*.whl)
 
 if [ -z "${PYTHON_WHEEL}" ]; then
     echo "No matching wheel file was found"

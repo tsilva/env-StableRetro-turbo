@@ -53,7 +53,7 @@ def _step(env, actions):
 
 
 def test_retro_vec_env_binding_is_private():
-    from stable_retro import _retro
+    from env_stableretro_turbo import _retro
 
     assert not hasattr(_retro, "RetroVecEnv")
     assert hasattr(_retro, "_RetroVecEnv")
@@ -68,7 +68,7 @@ def test_retro_vec_env_binding_is_private():
 
 
 def test_retro_vec_env_legacy_aliases_are_removed():
-    from stable_retro.vec_env import RetroVecEnv
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     params = inspect.signature(RetroVecEnv.__init__).parameters
     assert params["use_fire_reset"].default is False
@@ -109,7 +109,7 @@ def test_retro_vec_env_legacy_aliases_are_removed():
 
 
 def test_retro_vec_env_public_export():
-    import stable_retro as retro
+    import env_stableretro_turbo as retro
     from gymnasium.vector import AutoresetMode
 
     assert issubclass(retro.RetroVecEnv, gym.vector.VectorEnv)
@@ -122,11 +122,11 @@ def test_retro_vec_env_public_export():
 
 
 def test_generic_gymnasium_registration_is_vector_only_and_idempotent(monkeypatch):
-    import stable_retro as retro
+    import env_stableretro_turbo as retro
 
     spec = gym.spec(retro.GYMNASIUM_ENV_ID)
     assert spec.entry_point is None
-    assert spec.vector_entry_point == "stable_retro:_make_gymnasium_vec_env"
+    assert spec.vector_entry_point == "env_stableretro_turbo:_make_gymnasium_vec_env"
     assert spec.kwargs == {}
     retro._register_gymnasium_env()
 
@@ -155,16 +155,16 @@ def test_module_qualified_gymnasium_id_registers_in_a_clean_process():
             sys.executable,
             "-c",
             'exec("""import gymnasium as gym\n'
-            "assert 'StableRetro-Turbo-v0' not in gym.registry\n"
+            "assert 'EnvStableRetroTurbo-v0' not in gym.registry\n"
             "try:\n"
-            "    gym.make_vec('stable_retro:StableRetro-Turbo-v0', num_envs=1)\n"
+            "    gym.make_vec('env_stableretro_turbo:EnvStableRetroTurbo-v0', num_envs=1)\n"
             "except TypeError as exc:\n"
             "    assert 'game' in str(exc)\n"
             "else:\n"
             "    raise AssertionError('game was not required')\n"
-            "spec = gym.spec('StableRetro-Turbo-v0')\n"
+            "spec = gym.spec('EnvStableRetroTurbo-v0')\n"
             "assert spec.vector_entry_point == "
-            '\'stable_retro:_make_gymnasium_vec_env\'\n""")',
+            '\'env_stableretro_turbo:_make_gymnasium_vec_env\'\n""")',
         ],
         check=True,
         cwd=root,
@@ -180,9 +180,9 @@ def blocked_import(name, *args, **kwargs):
         raise ModuleNotFoundError(name)
     return original_import(name, *args, **kwargs)
 builtins.__import__ = blocked_import
-import stable_retro
-from stable_retro.vec_env import RetroVecEnv
-assert stable_retro.RetroVecEnv is RetroVecEnv
+import env_stableretro_turbo
+from env_stableretro_turbo.vec_env import RetroVecEnv
+assert env_stableretro_turbo.RetroVecEnv is RetroVecEnv
 """
     subprocess.run(
         [sys.executable, "-c", code],
@@ -269,8 +269,8 @@ def _life_counter_info_path(tmp_path):
 
 
 def _make_test_retro_vec_env(tmp_path, **kwargs):
-    import stable_retro as retro
-    from stable_retro.vec_env import RetroVecEnv
+    import env_stableretro_turbo as retro
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     num_envs = kwargs.pop("num_envs", 2)
     root = Path(__file__).resolve().parents[1]
@@ -298,14 +298,14 @@ def _make_test_retro_vec_env(tmp_path, **kwargs):
 
 
 def test_generic_gymnasium_factory_runs_native_vector_env(tmp_path):
-    import stable_retro as retro
-    from stable_retro.vec_env import RetroVecEnv
+    import env_stableretro_turbo as retro
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     root = Path(__file__).resolve().parents[1]
     rom_path = root / "roms" / "Dr88-FamiconIntro.nes"
     empty_info = _empty_info_path(tmp_path)
     env = gym.make_vec(
-        "stable_retro:StableRetro-Turbo-v0",
+        "env_stableretro_turbo:EnvStableRetroTurbo-v0",
         game="Dr88-FamiconIntro",
         state=retro.State.NONE,
         num_envs=2,
@@ -347,7 +347,7 @@ def test_retro_vec_env_ram_is_lane_aligned_owned_and_read_only(tmp_path):
 
 
 def _street_fighter_rom_path_or_skip():
-    import stable_retro as retro
+    import env_stableretro_turbo as retro
 
     try:
         return retro.data.get_original_romfile_path(
@@ -361,7 +361,7 @@ def _street_fighter_rom_path_or_skip():
 
 @pytest.mark.parametrize("state", ["default", "none"])
 def test_retro_vec_env_genesis_geometry_matches_scalar_if_rom_present(state):
-    import stable_retro as retro
+    import env_stableretro_turbo as retro
 
     game = "StreetFighterIISpecialChampionEdition-Genesis-v0"
     state_value = retro.State.DEFAULT if state == "default" else retro.State.NONE
@@ -439,7 +439,7 @@ def test_retro_vec_env_genesis_saved_state_geometry_preprocessing_modes_if_rom_p
     obs_layout,
     preprocessing,
 ):
-    import stable_retro as retro
+    import env_stableretro_turbo as retro
 
     env = retro.RetroVecEnv(
         "StreetFighterIISpecialChampionEdition-Genesis-v0",
@@ -468,7 +468,7 @@ def test_retro_vec_env_genesis_saved_state_geometry_preprocessing_modes_if_rom_p
 
 
 def test_retro_vec_env_genesis_catalog_masked_reset_geometry_if_rom_present():
-    import stable_retro as retro
+    import env_stableretro_turbo as retro
 
     state = "Champion.Level1.RyuVsGuile"
     env = retro.RetroVecEnv(
@@ -615,7 +615,7 @@ def test_retro_vec_env_rendering_is_disabled_by_default(tmp_path):
 
 
 def test_retro_vec_env_v2_shared_defaults_resolve_filtered_chw_stack():
-    import stable_retro as retro
+    import env_stableretro_turbo as retro
 
     env = retro.RetroVecEnv(
         "SuperMarioBros-Nes-v0",
@@ -638,8 +638,8 @@ def test_retro_vec_env_v2_shared_defaults_resolve_filtered_chw_stack():
 
 
 def test_native_retro_vec_env_rejects_frame_geometry_before_observation_write(tmp_path):
-    import stable_retro as retro
-    from stable_retro import _retro
+    import env_stableretro_turbo as retro
+    from env_stableretro_turbo import _retro
 
     root = Path(__file__).resolve().parents[1]
     rom_path = root / "roms" / "Dr88-FamiconIntro.nes"
@@ -693,7 +693,7 @@ def test_native_retro_vec_env_rejects_frame_geometry_before_observation_write(tm
 )
 def test_retro_vec_env_rejects_native_observation_contract_mismatch(observations):
     import gymnasium as gym
-    from stable_retro.vec_env import RetroVecEnv
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     env = RetroVecEnv.__new__(RetroVecEnv)
     env.observation_space = gym.spaces.Box(
@@ -708,8 +708,8 @@ def test_retro_vec_env_rejects_native_observation_contract_mismatch(observations
 
 
 def _make_crop_retro_vec_env(tmp_path, **kwargs):
-    import stable_retro as retro
-    from stable_retro.vec_env import RetroVecEnv
+    import env_stableretro_turbo as retro
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     num_envs = kwargs.pop("num_envs", 1)
     info_path = kwargs.pop("info_path", _empty_info_path(tmp_path))
@@ -738,8 +738,8 @@ def _make_crop_retro_vec_env(tmp_path, **kwargs):
 
 
 def test_retro_vec_env_crop_mask_signature_defaults():
-    from stable_retro.retro_env import RetroEnv
-    from stable_retro.vec_env import RetroVecEnv
+    from env_stableretro_turbo.retro_env import RetroEnv
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     vec_sig = inspect.signature(RetroVecEnv)
     env_sig = inspect.signature(RetroEnv)
@@ -908,7 +908,7 @@ def test_retro_vec_env_rejects_removed_constructor_options(tmp_path, removed_opt
 
 
 def test_retro_vec_env_rejects_unsupported_render_mode_before_resources():
-    from stable_retro.vec_env import RetroVecEnv
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     with pytest.raises(ValueError, match="render_mode"):
         RetroVecEnv("missing-game", render_mode="human")
@@ -1111,8 +1111,8 @@ def test_retro_vec_env_seeded_positive_noop_counts_are_inclusive(tmp_path):
 
 
 def _make_dr88_retro_vec_env(tmp_path, info_path, **kwargs):
-    import stable_retro as retro
-    from stable_retro.vec_env import RetroVecEnv
+    import env_stableretro_turbo as retro
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     num_envs = kwargs.pop("num_envs", 2)
     root = Path(__file__).resolve().parents[1]
@@ -1205,8 +1205,8 @@ def test_retro_vec_env_rgb_array_render_updates_with_indexed_video(
         os.environ.pop("STABLE_RETRO_DISABLE_RENDER_SKIP", None)
 
 
-def test_stable_retro_simple_image_viewer_close_ignores_cocoa_shutdown_error():
-    from stable_retro.rendering import SimpleImageViewer
+def test_env_stableretro_turbo_simple_image_viewer_close_ignores_cocoa_shutdown_error():
+    from env_stableretro_turbo.rendering import SimpleImageViewer
 
     class BrokenCloseWindow:
         def close(self):
@@ -1266,7 +1266,7 @@ def test_retro_vec_env_fast_info_filters(info_filter, tmp_path):
 
 
 def test_retro_vec_env_keyword_normalization():
-    from stable_retro.vec_env import RetroVecEnv
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     assert RetroVecEnv._normalize_obs_copy("copy") == "copy"
     assert RetroVecEnv._normalize_obs_copy("safe_view") == "safe_view"
@@ -1349,8 +1349,8 @@ def test_retro_vec_env_rejects_invalid_keyword_values(
     invalid_kwarg,
     match,
 ):
-    import stable_retro as retro
-    from stable_retro.vec_env import RetroVecEnv
+    import env_stableretro_turbo as retro
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     root = Path(__file__).resolve().parents[1]
     rom_path = root / "roms" / "Dr88-FamiconIntro.nes"
@@ -1377,8 +1377,8 @@ def test_retro_vec_env_rejects_invalid_keyword_values(
 
 
 def test_retro_vec_env_validates_mixed_state_config():
-    import stable_retro as retro
-    from stable_retro.vec_env import RetroVecEnv, _STATE_UNSET
+    import env_stableretro_turbo as retro
+    from env_stableretro_turbo.vec_env import RetroVecEnv, _STATE_UNSET
 
     resolve = RetroVecEnv._resolve_state_config
     game = "SuperMarioBros-Nes-v0"
@@ -1419,7 +1419,7 @@ def test_retro_vec_env_validates_mixed_state_config():
 
 
 def _mario_rom_path_or_skip():
-    import stable_retro as retro
+    import env_stableretro_turbo as retro
 
     try:
         return retro.data.get_original_romfile_path("SuperMarioBros-Nes-v0")
@@ -1428,7 +1428,7 @@ def _mario_rom_path_or_skip():
 
 
 def _make_mario_retro_vec_env(num_envs, rom_path, **kwargs):
-    from stable_retro.vec_env import RetroVecEnv
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     state_kwargs = {}
     if "state_catalog" not in kwargs:
@@ -1475,7 +1475,7 @@ def test_retro_vec_env_single_state_active_indices_if_rom_present():
 
 
 def test_retro_vec_env_mixed_states_reset_infos_if_rom_present():
-    from stable_retro.vec_env import RetroVecEnv
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     rom_path = _mario_rom_path_or_skip()
     states = ["Level1-1", "Level1-4", "Level2-1"]
@@ -1515,7 +1515,7 @@ def test_retro_vec_env_mixed_states_reset_infos_if_rom_present():
 
 
 def test_retro_vec_env_duplicate_catalog_is_rejected_if_rom_present():
-    from stable_retro.vec_env import RetroVecEnv
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     rom_path = _mario_rom_path_or_skip()
     states = ["Level1-1", "Level1-4", "Level1-1", "Level1-4"]
@@ -1529,7 +1529,7 @@ def test_retro_vec_env_duplicate_catalog_is_rejected_if_rom_present():
 
 
 def test_retro_vec_env_catalog_selection_is_explicit_if_rom_present():
-    from stable_retro.vec_env import RetroVecEnv
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     rom_path = _mario_rom_path_or_skip()
     states = ["Level1-1", "Level1-4", "Level2-1"]
@@ -1568,8 +1568,8 @@ def test_retro_vec_env_catalog_selection_is_explicit_if_rom_present():
 
 
 def test_retro_vec_env_selected_info_keys(tmp_path):
-    import stable_retro as retro
-    from stable_retro.vec_env import RetroVecEnv
+    import env_stableretro_turbo as retro
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     root = Path(__file__).resolve().parents[1]
     rom_path = root / "roms" / "Dr88-FamiconIntro.nes"
@@ -1657,7 +1657,7 @@ def test_retro_vec_env_unsafe_view_aliases_observations(tmp_path):
 
 def test_retro_vec_env_forwards_per_env_reset_seeds():
     import gymnasium as gym
-    from stable_retro.vec_env import RetroVecEnv
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     class FakeNative:
         def __init__(self):
@@ -1720,8 +1720,8 @@ def test_retro_vec_env_frame_stack_order(tmp_path):
 
 
 def _native_test_rom_trace(tmp_path, obs_copy, num_threads, seed, actions):
-    import stable_retro as retro
-    from stable_retro.vec_env import RetroVecEnv
+    import env_stableretro_turbo as retro
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     root = Path(__file__).resolve().parents[1]
     rom_path = root / "roms" / "Dr88-FamiconIntro.nes"
@@ -1800,8 +1800,8 @@ def test_retro_vec_env_seed_determinism_ci_rom(
 
 
 def _native_render_skip_trace(tmp_path, *, disable_render_skip, maxpool_last_two):
-    import stable_retro as retro
-    from stable_retro.vec_env import RetroVecEnv
+    import env_stableretro_turbo as retro
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     if disable_render_skip:
         os.environ["STABLE_RETRO_DISABLE_RENDER_SKIP"] = "1"
@@ -1874,13 +1874,13 @@ def test_retro_vec_env_nes_render_skip_matches_full_render(
 
 def _has_stella_core():
     root = Path(__file__).resolve().parents[2]
-    return (root / "stable_retro" / "cores" / "stella.json").exists() and any(
-        (root / "stable_retro" / "cores").glob("stella_libretro.*"),
+    return (root / "env_stableretro_turbo" / "cores" / "stella.json").exists() and any(
+        (root / "env_stableretro_turbo" / "cores").glob("stella_libretro.*"),
     )
 
 
 def _breakout_rom_path_or_skip():
-    import stable_retro as retro
+    import env_stableretro_turbo as retro
 
     try:
         return retro.data.get_original_romfile_path("Breakout-Atari2600-v0")
@@ -1891,13 +1891,13 @@ def _breakout_rom_path_or_skip():
 def _authority_breakout_state_path():
     return (
         Path(__file__).resolve().parents[2]
-        / "stable_retro/data/stable/Breakout-Atari2600-v0/Start.state"
+        / "env_stableretro_turbo/data/stable/Breakout-Atari2600-v0/Start.state"
     )
 
 
 def _make_breakout_vec_env(**kwargs):
-    import stable_retro as retro
-    from stable_retro.vec_env import RetroVecEnv
+    import env_stableretro_turbo as retro
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     if not _has_stella_core():
         pytest.skip("stella core is not built")
@@ -2206,7 +2206,7 @@ def test_stella_breakout_autodetects_ntsc_palette():
     if not _has_stella_core():
         pytest.skip("stella core is not built")
 
-    import stable_retro as retro
+    import env_stableretro_turbo as retro
 
     emulator = retro.RetroEmulator(_breakout_rom_path_or_skip())
     state_path = _authority_breakout_state_path()
@@ -2230,7 +2230,7 @@ def test_stella_reports_the_submitted_frame_width():
     if not _has_stella_core():
         pytest.skip("stella core is not built")
 
-    import stable_retro as retro
+    import env_stableretro_turbo as retro
 
     root = Path(__file__).resolve().parents[1]
     emulator = retro.RetroEmulator(str(root / "roms" / "automaton.a26"))
@@ -2245,9 +2245,9 @@ def test_stella_live_snapshot_continuation_is_exact():
     if not _has_stella_core():
         pytest.skip("stella core is not built")
 
-    import stable_retro as retro
+    import env_stableretro_turbo as retro
 
-    root = Path(__file__).resolve().parents[2] / "stable_retro" / "data" / "stable" / "Breakout-Atari2600-v0"
+    root = Path(__file__).resolve().parents[2] / "env_stableretro_turbo" / "data" / "stable" / "Breakout-Atari2600-v0"
     env = retro.RetroVecEnv(
         "Breakout-Atari2600-v0",
         state=str(root / "Start.state"),
@@ -2293,8 +2293,8 @@ def test_stella_live_snapshot_continuation_is_exact():
 
 
 def _native_atari_render_skip_trace(tmp_path, *, disable_render_skip, state_path):
-    import stable_retro as retro
-    from stable_retro.vec_env import RetroVecEnv
+    import env_stableretro_turbo as retro
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     if disable_render_skip:
         os.environ["STABLE_RETRO_DISABLE_RENDER_SKIP"] = "1"
@@ -2346,7 +2346,7 @@ def test_retro_vec_env_atari_render_skip_preserves_control_trace(tmp_path):
     if not _has_stella_core():
         pytest.skip("stella core is not built")
 
-    import stable_retro as retro
+    import env_stableretro_turbo as retro
 
     root = Path(__file__).resolve().parents[1]
     rom_path = root / "roms" / "automaton.a26"
@@ -2383,8 +2383,8 @@ def test_retro_vec_env_atari_repeated_state_resets_are_deterministic(tmp_path):
     if not _has_stella_core():
         pytest.skip("stella core is not built")
 
-    import stable_retro as retro
-    from stable_retro.vec_env import RetroVecEnv
+    import env_stableretro_turbo as retro
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     root = Path(__file__).resolve().parents[1]
     rom_path = root / "roms" / "automaton.a26"
@@ -2456,8 +2456,8 @@ def _normalize_infos_as_hwc(infos, obs_layout):
 
 
 def _native_layout_trace(tmp_path, obs_layout, actions):
-    import stable_retro as retro
-    from stable_retro.vec_env import RetroVecEnv
+    import env_stableretro_turbo as retro
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     root = Path(__file__).resolve().parents[1]
     rom_path = root / "roms" / "Dr88-FamiconIntro.nes"
@@ -2518,8 +2518,8 @@ def test_retro_vec_env_chw_matches_hwc_trace(tmp_path):
 
 
 def test_retro_vec_env_mario_infos_if_rom_present():
-    import stable_retro as retro
-    from stable_retro.vec_env import RetroVecEnv
+    import env_stableretro_turbo as retro
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     try:
         rom_path = retro.data.get_original_romfile_path("SuperMarioBros-Nes-v0")
@@ -2581,8 +2581,8 @@ def test_retro_vec_env_mario_infos_if_rom_present():
         terminal_env.close()
 
 
-def test_stable_retro_hf_mario_policy_playback_command_parses():
-    from stable_retro.scripts.play_hf_policy import build_parser
+def test_env_stableretro_turbo_hf_mario_policy_playback_command_parses():
+    from env_stableretro_turbo.scripts.play_hf_policy import build_parser
 
     parser = build_parser()
     args = parser.parse_args(
@@ -2648,8 +2648,8 @@ def test_retro_vec_env_mario_all_info_keys_match_default():
 
 
 def _mario_native_trace(obs_copy, num_threads, seed, actions, **env_kwargs):
-    import stable_retro as retro
-    from stable_retro.vec_env import RetroVecEnv
+    import env_stableretro_turbo as retro
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     try:
         rom_path = retro.data.get_original_romfile_path("SuperMarioBros-Nes-v0")

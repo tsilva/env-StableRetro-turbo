@@ -25,12 +25,12 @@ With lawful local ROMs imported, run:
 turbobench oracle supermario/canonical-v2 \
   --left stable-retro@1.0.1 \
   --right env-stableretro-turbo@checkout:"$PWD" \
-  --output /external/evidence/mario-stable-retro-turbo
+  --output /external/evidence/mario-env-stableretro-turbo
 
 turbobench oracle breakout/start-v2 \
   --left stable-retro@1.0.1 \
   --right env-stableretro-turbo@checkout:"$PWD" \
-  --output /external/evidence/breakout-stable-retro-turbo
+  --output /external/evidence/breakout-env-stableretro-turbo
 ```
 
 After publishing the candidate, regenerate both commands with
@@ -38,9 +38,9 @@ After publishing the candidate, regenerate both commands with
 published-release receipts:
 
 ```bash
-turbobench verify-oracle /external/evidence/mario-stable-retro-turbo \
+turbobench verify-oracle /external/evidence/mario-env-stableretro-turbo \
   --require-canonical --require-provider env-stableretro-turbo
-turbobench verify-oracle /external/evidence/breakout-stable-retro-turbo \
+turbobench verify-oracle /external/evidence/breakout-env-stableretro-turbo \
   --require-canonical --require-provider env-stableretro-turbo
 ```
 

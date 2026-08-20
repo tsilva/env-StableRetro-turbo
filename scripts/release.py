@@ -13,11 +13,9 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-MIGRATION_VERSION = "1.0.1.post44"
-REDIRECT_PACKAGE = "stable-retro-turbo"
 RELEASE_HELPER = REPO_ROOT / "scripts" / "release_build.py"
 PYTHON = REPO_ROOT / ".venv314" / "bin" / "python"
-VERSION_PATH = REPO_ROOT / "stable_retro" / "VERSION.txt"
+VERSION_PATH = REPO_ROOT / "env_stableretro_turbo" / "VERSION.txt"
 CHANGES = REPO_ROOT / "CHANGES.md"
 VERSION_RE = re.compile(r"^(?P<base>\d+\.\d+\.\d+)(?:\.post(?P<post>\d+))?$")
 
@@ -106,14 +104,6 @@ def target_version(args: argparse.Namespace) -> str:
         )
     helper("check-version")
     helper("check-pypi", "--version", version)
-    if version == MIGRATION_VERSION:
-        helper(
-            "check-pypi",
-            "--version",
-            version,
-            "--package",
-            REDIRECT_PACKAGE,
-        )
     return version
 
 
@@ -152,7 +142,7 @@ def create_commit_and_tag(version: str) -> str:
     tag = f"v{version}"
     if subprocess.run(["git", "rev-parse", "--verify", "--quiet", tag], cwd=REPO_ROOT).returncode == 0:
         raise SystemExit(f"tag already exists locally: {tag}")
-    run(["git", "add", "stable_retro/VERSION.txt", "CHANGES.md"])
+    run(["git", "add", "env_stableretro_turbo/VERSION.txt", "CHANGES.md"])
     run(["git", "commit", "-m", f"Release {tag}"])
     run(["git", "tag", tag, "HEAD"])
     return tag

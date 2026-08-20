@@ -84,9 +84,9 @@ For more information on the possible variable types, see {ref}`appendix-types`.
 
 ### Scenario `scenario.json`
 
-Information pertaining to reward functions and done conditions can either be specified by manually overriding functions in {class}`stable_retro.RetroEnv` or can be done by writing a scenario file.
+Information pertaining to reward functions and done conditions can either be specified by manually overriding functions in {class}`env_stableretro_turbo.RetroEnv` or can be done by writing a scenario file.
 
-Scenario files contain information that is used to compute the reward function and done condition from variables defined in the information manifest. Each variable specified in the scenario file is multiplied by a `reward` value if positive and a `penalty` value if negative and then summed up to create the reward for that step. Similarly, states of these variables can be checked to see if the game is over. By default the scenario file will be loaded from `scenario.json`, but alternative scenario files can be specified in the {class}`stable_retro.RetroEnv` constructor.
+Scenario files contain information that is used to compute the reward function and done condition from variables defined in the information manifest. Each variable specified in the scenario file is multiplied by a `reward` value if positive and a `penalty` value if negative and then summed up to create the reward for that step. Similarly, states of these variables can be checked to see if the game is over. By default the scenario file will be loaded from `scenario.json`, but alternative scenario files can be specified in the {class}`env_stableretro_turbo.RetroEnv` constructor.
 
 Scenario files are again JSON and specified with the following sections:
 
@@ -240,26 +240,26 @@ Once you have created an integration, you can put it in a folder called `custom_
 - `.pce`: `*-PCEngine` (e.g. `SoldierBlade-PCEngine`)
 - `.sms`: `*-Sms` (e.g. `AddamsFamily-Sms`)
 
-Then you can tell `stable_retro` about your custom integration using the `add_custom_path` function:
+Then you can tell `env_stableretro_turbo` about your custom integration using the `add_custom_path` function:
 
 ```python
 import os
-import stable_retro
+import env_stableretro_turbo
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def main():
-    stable_retro.data.Integrations.add_custom_path(
+    env_stableretro_turbo.data.Integrations.add_custom_path(
         os.path.join(SCRIPT_DIR, "custom_integrations")
     )
     print(
         "FakeGame-Nes"
-        in stable_retro.data.list_games(inttype=stable_retro.data.Integrations.ALL)
+        in env_stableretro_turbo.data.list_games(inttype=env_stableretro_turbo.data.Integrations.ALL)
     )
-    env = stable_retro.make(
+    env = env_stableretro_turbo.make(
         "FakeGame-Nes",
-        inttype=stable_retro.data.Integrations.ALL,
+        inttype=env_stableretro_turbo.data.Integrations.ALL,
     )
     print(env)
 
@@ -268,7 +268,7 @@ if __name__ == "__main__":
     main()
 ```
 
-This lets you use your integration without having to add it to `stable_retro` directly.
+This lets you use your integration without having to add it to `env_stableretro_turbo` directly.
 
 (appendix-types)=
 

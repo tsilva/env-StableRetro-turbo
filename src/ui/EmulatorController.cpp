@@ -43,7 +43,7 @@ void EmulatorController::initCorePath() {
 #ifdef Q_OS_MAC
 	hint = QString("%1/../PlugIns").arg(appPath);
 #else
-	hint = QString("%1/stable_retro").arg(appPath);
+	hint = QString("%1/env_stableretro_turbo").arg(appPath);
 #endif
 	Retro::corePath(hint.toStdString()); // Set hint
 }
@@ -339,7 +339,7 @@ QString EmulatorController::dataPath() {
 		connect(subproc, static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(&QProcess::finished), subproc, [subproc](int, QProcess::ExitStatus) {
 			subproc->deleteLater();
 		});
-		subproc->start("python3", {"-c", "import stable_retro; print(stable_retro.data.path())"});
+		subproc->start("python3", {"-c", "import env_stableretro_turbo; print(env_stableretro_turbo.data.path())"});
 		subproc->waitForStarted();
 		while (subproc->state() != QProcess::NotRunning) {
 			subproc->waitForFinished(10);

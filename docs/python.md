@@ -2,29 +2,29 @@
 
 ## RetroEnv
 
-The Python API consists primarily of {func}`stable_retro.make`, {class}`stable_retro.RetroEnv`, and a few enums.  The main function most users will want is {func}`stable_retro.make`.
+The Python API consists primarily of {func}`env_stableretro_turbo.make`, {class}`env_stableretro_turbo.RetroEnv`, and a few enums.  The main function most users will want is {func}`env_stableretro_turbo.make`.
 
 ```{eval-rst}
-.. autofunction:: stable_retro.make
+.. autofunction:: env_stableretro_turbo.make
 ```
 
 ```{eval-rst}
-.. autoclass:: stable_retro.RetroEnv
+.. autoclass:: env_stableretro_turbo.RetroEnv
 ```
 
-If you want to specify either the default state named in the game integration's `metadata.json` or specify that you want to start from the initial power on state of the console, you can use the {class}`stable_retro.State` enum:
+If you want to specify either the default state named in the game integration's `metadata.json` or specify that you want to start from the initial power on state of the console, you can use the {class}`env_stableretro_turbo.State` enum:
 
 ```{eval-rst}
-.. autoclass:: stable_retro.State
+.. autoclass:: env_stableretro_turbo.State
    :members:
 ```
 
 ## Actions
 
-There are a few possible action spaces included with {class}`stable_retro.RetroEnv`:
+There are a few possible action spaces included with {class}`env_stableretro_turbo.RetroEnv`:
 
 ```{eval-rst}
-.. autoclass:: stable_retro.Actions
+.. autoclass:: env_stableretro_turbo.Actions
    :members:
 ```
 
@@ -33,12 +33,12 @@ There are a few possible action spaces included with {class}`stable_retro.RetroE
 produce an exact `Discrete` space:
 
 ```python
-env = stable_retro.make(
+env = env_stableretro_turbo.make(
     game="SuperMarioBros-Nes-v0",
     use_restricted_actions="simple",
 )
 
-custom = stable_retro.make(
+custom = env_stableretro_turbo.make(
     game="SuperMarioBros-Nes-v0",
     use_restricted_actions=[[], ["RIGHT"], ["RIGHT", "A"]],
 )
@@ -54,15 +54,15 @@ Cartesian product for them.
 The default observations are RGB images of the game, but you can view RAM values instead (often much smaller than the RGB images and also your agent can observe the game state more directly).  If you want variable values, any variables defined in `data.json` will appear in the `info` dict after each step.
 
 ```{eval-rst}
-.. autoclass:: stable_retro.Observations
+.. autoclass:: env_stableretro_turbo.Observations
    :members:
 ```
 
 ## Multiplayer Environments
 
-A small number of games support multiplayer.  To use this feature, pass `players=<n>` to {class}`stable_retro.RetroEnv`.  Here is an example random agent that controls both paddles in `Pong-Atari2600`:
+A small number of games support multiplayer.  To use this feature, pass `players=<n>` to {class}`env_stableretro_turbo.RetroEnv`.  Here is an example random agent that controls both paddles in `Pong-Atari2600`:
 
-```{literalinclude} ../stable_retro/examples/trivial_random_agent_multiplayer.py
+```{literalinclude} ../env_stableretro_turbo/examples/trivial_random_agent_multiplayer.py
 ```
 
 ## Replay files
@@ -78,9 +78,9 @@ You can create and view replay files using the {ref}`integration-ui` (Game > Pla
 If you have an agent playing a game, you can record the gameplay to a `.bk2` file for later processing:
 
 ```python
-import stable_retro
+import env_stableretro_turbo
 
-env = stable_retro.make(game='Airstriker-Genesis-v0', record='.')
+env = env_stableretro_turbo.make(game='Airstriker-Genesis-v0', record='.')
 env.reset()
 while True:
     _, _, terminate, truncate, _ = env.step(env.action_space.sample())
@@ -93,16 +93,16 @@ while True:
 Given a `.bk2` file you can load it in python and either play it back or use the actions for training.
 
 ```python
-import stable_retro
+import env_stableretro_turbo
 
-movie = stable_retro.Movie('Airstriker-Genesis-Level1-000000.bk2')
+movie = env_stableretro_turbo.Movie('Airstriker-Genesis-Level1-000000.bk2')
 movie.step()
 
-env = stable_retro.make(
+env = env_stableretro_turbo.make(
     game=movie.get_game(),
     state=None,
     # bk2s can contain any button presses, so allow everything
-    use_restricted_actions=stable_retro.Actions.ALL,
+    use_restricted_actions=env_stableretro_turbo.Actions.ALL,
     players=movie.players,
 )
 env.initial_state = movie.get_state()
@@ -121,5 +121,5 @@ while movie.step():
 This requires [ffmpeg](https://www.ffmpeg.org/) to be installed and writes the output to the directory that the input file is located in.
 
 ```shell
-python3 -m stable_retro.scripts.playback_movie Airstriker-Genesis-Level1-000000.bk2
+python3 -m env_stableretro_turbo.scripts.playback_movie Airstriker-Genesis-Level1-000000.bk2
 ```

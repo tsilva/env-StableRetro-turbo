@@ -39,14 +39,14 @@ static retro_input_poll_t poll_cb = NULL;
 static retro_input_state_t input_cb = NULL;
 static retro_audio_sample_batch_t audio_batch_cb = NULL;
 static retro_environment_t environ_cb = NULL;
-static bool stable_retro_indexed_video = false;
-static const uint8_t *stable_retro_indexed_data = NULL;
-static const uint16_t *stable_retro_indexed_palette = NULL;
-static unsigned stable_retro_indexed_width = 0;
-static unsigned stable_retro_indexed_height = 0;
-static size_t stable_retro_indexed_pitch = 0;
-static bool stable_retro_indexed_raw_palette = false;
-static int stable_retro_indexed_deemp = 0;
+static bool env_stableretro_turbo_indexed_video = false;
+static const uint8_t *env_stableretro_turbo_indexed_data = NULL;
+static const uint16_t *env_stableretro_turbo_indexed_palette = NULL;
+static unsigned env_stableretro_turbo_indexed_width = 0;
+static unsigned env_stableretro_turbo_indexed_height = 0;
+static size_t env_stableretro_turbo_indexed_pitch = 0;
+static bool env_stableretro_turbo_indexed_raw_palette = false;
+static int env_stableretro_turbo_indexed_deemp = 0;
 static bool use_overscan;
 static bool use_raw_palette;
 static bool use_par;
@@ -90,7 +90,7 @@ static uint32_t current_palette = 0;
 int PPUViewScanline=0;
 int PPUViewer=0;
 
-static bool stable_retro_audio_enabled(void)
+static bool env_stableretro_turbo_audio_enabled(void)
 {
    static int enabled = -1;
    if (enabled != -1)
@@ -1314,7 +1314,7 @@ static void retro_run_blit(uint8_t *gfx)
 
 }
 
-static void stable_retro_run_internal(bool skip_render)
+static void env_stableretro_turbo_run_internal(bool skip_render)
 {
    unsigned i;
    uint8_t *gfx;
@@ -1325,7 +1325,7 @@ static void stable_retro_run_internal(bool skip_render)
       check_variables(false);
 
    if (skip_render)
-      stable_retro_indexed_data = NULL;
+      env_stableretro_turbo_indexed_data = NULL;
 
    FCEUD_UpdateInput();
    FCEUI_Emulate(&gfx, &sound, &ssize, skip_render ? 1 : 0);
@@ -1338,19 +1338,19 @@ static void stable_retro_run_internal(bool skip_render)
    if (skip_render)
       return;
 
-   if (stable_retro_indexed_video)
+   if (env_stableretro_turbo_indexed_video)
    {
-      stable_retro_indexed_width = use_overscan ? 256 : 240;
-      stable_retro_indexed_height = use_overscan ? 240 : 224;
-      stable_retro_indexed_pitch = 256;
-      stable_retro_indexed_data = use_overscan ? gfx : gfx + 8 + 256 * 8;
-      stable_retro_indexed_palette = retro_palette;
-      stable_retro_indexed_raw_palette = use_raw_palette;
-      stable_retro_indexed_deemp = 0;
+      env_stableretro_turbo_indexed_width = use_overscan ? 256 : 240;
+      env_stableretro_turbo_indexed_height = use_overscan ? 240 : 224;
+      env_stableretro_turbo_indexed_pitch = 256;
+      env_stableretro_turbo_indexed_data = use_overscan ? gfx : gfx + 8 + 256 * 8;
+      env_stableretro_turbo_indexed_palette = retro_palette;
+      env_stableretro_turbo_indexed_raw_palette = use_raw_palette;
+      env_stableretro_turbo_indexed_deemp = 0;
       if (use_raw_palette)
       {
          extern uint8 PPU[4];
-         stable_retro_indexed_deemp = (PPU[1] >> 5) << 2;
+         env_stableretro_turbo_indexed_deemp = (PPU[1] >> 5) << 2;
       }
       return;
    }
@@ -1360,20 +1360,20 @@ static void stable_retro_run_internal(bool skip_render)
 
 void retro_run(void)
 {
-   stable_retro_run_internal(false);
+   env_stableretro_turbo_run_internal(false);
 }
 
-RETRO_API void stable_retro_run_skip_render(void)
+RETRO_API void env_stableretro_turbo_run_skip_render(void)
 {
-   stable_retro_run_internal(true);
+   env_stableretro_turbo_run_internal(true);
 }
 
-RETRO_API void stable_retro_set_indexed_video(bool enabled)
+RETRO_API void env_stableretro_turbo_set_indexed_video(bool enabled)
 {
-   stable_retro_indexed_video = enabled;
+   env_stableretro_turbo_indexed_video = enabled;
 }
 
-RETRO_API bool stable_retro_get_indexed_video(
+RETRO_API bool env_stableretro_turbo_get_indexed_video(
    const uint8_t **data,
    const uint16_t **palette,
    unsigned *width,
@@ -1382,15 +1382,15 @@ RETRO_API bool stable_retro_get_indexed_video(
    bool *raw_palette,
    int *deemp)
 {
-   if (!stable_retro_indexed_video || !stable_retro_indexed_data || !stable_retro_indexed_palette)
+   if (!env_stableretro_turbo_indexed_video || !env_stableretro_turbo_indexed_data || !env_stableretro_turbo_indexed_palette)
       return false;
-   *data = stable_retro_indexed_data;
-   *palette = stable_retro_indexed_palette;
-   *width = stable_retro_indexed_width;
-   *height = stable_retro_indexed_height;
-   *pitch = stable_retro_indexed_pitch;
-   *raw_palette = stable_retro_indexed_raw_palette;
-   *deemp = stable_retro_indexed_deemp;
+   *data = env_stableretro_turbo_indexed_data;
+   *palette = env_stableretro_turbo_indexed_palette;
+   *width = env_stableretro_turbo_indexed_width;
+   *height = env_stableretro_turbo_indexed_height;
+   *pitch = env_stableretro_turbo_indexed_pitch;
+   *raw_palette = env_stableretro_turbo_indexed_raw_palette;
+   *deemp = env_stableretro_turbo_indexed_deemp;
    return true;
 }
 
@@ -1804,7 +1804,7 @@ bool retro_load_game(const struct retro_game_info *game)
    FCEUI_Initialize();
 
    FCEUI_SetSoundVolume(256);
-   FCEUI_Sound(stable_retro_audio_enabled() ? 32050 : 0);
+   FCEUI_Sound(env_stableretro_turbo_audio_enabled() ? 32050 : 0);
 
    GameInfo = (FCEUGI*)FCEUI_LoadGame(game->path, (uint8_t*)game->data, game->size);
    if (!GameInfo)

@@ -22,7 +22,7 @@ copyright = "2023 Farama Foundation"
 author = "Farama Foundation"
 
 # The full version, including alpha/beta/rc tags
-with open(os.path.join(os.path.dirname(__file__), "../stable_retro/VERSION.txt")) as f:
+with open(os.path.join(os.path.dirname(__file__), "../env_stableretro_turbo/VERSION.txt")) as f:
     release = f.read().strip()
 
 
@@ -88,11 +88,11 @@ html_baseurl = "https://stable-retro.farama.org"
 html_copy_source = False
 html_favicon = "_static/img/favicon.png"
 html_theme_options = {
-    "light_logo": "img/stable_retro_black.svg",
-    "dark_logo": "img/stable_retro_white.svg",
+    "light_logo": "img/env-stableretro-turbo-icon.png",
+    "dark_logo": "img/env-stableretro-turbo-icon.png",
     "gtag": "G-0VNK81VVGP",
     "description": "",
-    "image": "img/stable-retro-github.svg",
+    "image": "img/env-stableretro-turbo-github.png",
     "versioning": True,
     "source_repository": "https://github.com/Farama-Foundation/stable-retro/",
     "source_branch": "master",

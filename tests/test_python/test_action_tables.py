@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from stable_retro.action_tables import normalize_action_table, resolve_action_spec
-from stable_retro.enums import Actions
+from env_stableretro_turbo.action_tables import normalize_action_table, resolve_action_spec
+from env_stableretro_turbo.enums import Actions
 
 
 NES_BUTTONS = ("B", None, "SELECT", "START", "UP", "DOWN", "LEFT", "RIGHT", "A")
@@ -74,7 +74,7 @@ def test_metadata_preset_resolution(monkeypatch, tmp_path):
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "stable_retro.data.get_file_path",
+        "env_stableretro_turbo.data.get_file_path",
         lambda *_args, **_kwargs: str(metadata),
     )
 
@@ -98,7 +98,7 @@ def test_unknown_preset_lists_builtins_and_game_presets(monkeypatch, tmp_path):
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "stable_retro.data.get_file_path",
+        "env_stableretro_turbo.data.get_file_path",
         lambda *_args, **_kwargs: str(metadata),
     )
 
@@ -119,7 +119,7 @@ def test_metadata_cannot_shadow_builtin_mode(monkeypatch, tmp_path):
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "stable_retro.data.get_file_path",
+        "env_stableretro_turbo.data.get_file_path",
         lambda *_args, **_kwargs: str(metadata),
     )
 

@@ -6,9 +6,8 @@
 
 ## 1.0.1.post44 - 2026-08-20
 
-* rename the project and distribution to `env-StableRetro-turbo` and
-  `env-stableretro-turbo` while preserving the `stable_retro` import package,
-  and publish a metadata-only `stable-retro-turbo` migration package
+* complete the project identity rename to `env-StableRetro-turbo`,
+  `env-stableretro-turbo`, and `env_stableretro_turbo`
 
 ## 1.0.1.post43 - 2026-08-13
 
@@ -25,7 +24,7 @@
 ## 1.0.1.post42 - 2026-08-13
 
 * add the vector-only Gymnasium factory
-  `stable_retro:StableRetro-Turbo-v0`, with an explicit `game` argument and the
+  `env_stableretro_turbo:EnvStableRetroTurbo-v0`, with an explicit `game` argument and the
   native `RetroVecEnv` as its result; retain the direct scalar API unchanged
 
 ## 1.0.1.post41 - 2026-08-12
@@ -134,12 +133,12 @@
 
 ### Breaking Changes (with backward compatibility)
 
-**Package import name changed from `retro` to `stable_retro`**
+**Package import name changed from `retro` to `env_stableretro_turbo`**
 
-- Users should now use `import stable_retro` instead of `import retro`
+- Users should now use `import env_stableretro_turbo` instead of `import retro`
 - The old `import retro` will continue to work with a deprecation warning for backward compatibility
 - This change aligns the Python import name with the PyPI package name `stable-retro`
-- All internal code has been updated to use `stable_retro`
+- All internal code has been updated to use `env_stableretro_turbo`
 - Documentation updated to reflect the new import name
 - Backward compatibility will be maintained for multiple versions to allow gradual migration
 
@@ -204,7 +203,7 @@
 * add ability to use arbitrary additional integration directories
 * integration UI searches for current Python's Gym Retro data directory
 * import script can now accept files in addition to directories
-* you can now use RAM observations by sending `obs_type=stable_retro.Observations.RAM` to `stable_retro.make`
+* you can now use RAM observations by sending `obs_type=env_stableretro_turbo.Observations.RAM` to `env_stableretro_turbo.make`
 * update Atari 2600 emulator
 
 ## 0.6.0

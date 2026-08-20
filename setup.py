@@ -10,7 +10,7 @@ from pathlib import Path
 from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
 
-VERSION_PATH = Path(__file__).resolve().parent / "stable_retro" / "VERSION.txt"
+VERSION_PATH = Path(__file__).resolve().parent / "env_stableretro_turbo" / "VERSION.txt"
 SCRIPT_DIR = Path(__file__).resolve().parent
 README = (SCRIPT_DIR / "README.md").read_text(encoding="utf-8")
 
@@ -56,12 +56,12 @@ DEFAULT_CMAKE_ARGS = (
 )
 
 DATA_PACKAGE_DIRS = {
-    "stable_retro.data.stable": SCRIPT_DIR / "stable_retro" / "data" / "stable",
-    "stable_retro.data.experimental": SCRIPT_DIR
-    / "stable_retro"
+    "env_stableretro_turbo.data.stable": SCRIPT_DIR / "env_stableretro_turbo" / "data" / "stable",
+    "env_stableretro_turbo.data.experimental": SCRIPT_DIR
+    / "env_stableretro_turbo"
     / "data"
     / "experimental",
-    "stable_retro.data.contrib": SCRIPT_DIR / "stable_retro" / "data" / "contrib",
+    "env_stableretro_turbo.data.contrib": SCRIPT_DIR / "env_stableretro_turbo" / "data" / "contrib",
 }
 
 
@@ -94,7 +94,7 @@ def is_excluded_data_platform(root: Path, path: Path):
     return data_dir_platform(relative.parts[0]) not in PUBLIC_DATA_PLATFORMS
 
 
-def stable_retro_data_package_data(package_root: Path):
+def env_stableretro_turbo_data_package_data(package_root: Path):
     return package_files(
         package_root,
         exclude=lambda path: is_rom_payload(path)
@@ -102,7 +102,7 @@ def stable_retro_data_package_data(package_root: Path):
     )
 
 
-def stable_retro_package_data():
+def env_stableretro_turbo_package_data():
     files = [
         "VERSION.txt",
         "README.md",
@@ -128,7 +128,7 @@ def copy_public_core_assets(destination: Path):
             asset = None
             direct_candidates = [
                 destination / asset_name,
-                SCRIPT_DIR / "stable_retro" / "cores" / asset_name,
+                SCRIPT_DIR / "env_stableretro_turbo" / "cores" / asset_name,
             ]
             for candidate in direct_candidates:
                 if candidate.exists():
@@ -158,7 +158,7 @@ class CMakeBuild(build_ext):
         if self.inplace:
             pylib_dir = f"-DPYLIB_DIRECTORY={SCRIPT_DIR}"
         else:
-            ext_path = Path(self.get_ext_fullpath("stable_retro._retro"))
+            ext_path = Path(self.get_ext_fullpath("env_stableretro_turbo._retro"))
             package_dir = ext_path.parent
             pylib_dir = f"-DPYLIB_DIRECTORY={package_dir.parent}"
         # Provide hints to CMake about where to find Python (this should be enough for most cases)
@@ -240,29 +240,29 @@ setup(
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.14",
     ],
-    ext_modules=[Extension("stable_retro._retro", ["CMakeLists.txt", "src/*.cpp"])],
+    ext_modules=[Extension("env_stableretro_turbo._retro", ["CMakeLists.txt", "src/*.cpp"])],
     cmdclass={"build_ext": CMakeBuild},
     packages=[
         "retro",  # Compatibility shim
-        "stable_retro",
-        "stable_retro.data",
-        "stable_retro.data.stable",
-        "stable_retro.data.experimental",
-        "stable_retro.data.contrib",
-        "stable_retro.scripts",
-        "stable_retro.import",
-        "stable_retro.examples",
-        "stable_retro.testing",
+        "env_stableretro_turbo",
+        "env_stableretro_turbo.data",
+        "env_stableretro_turbo.data.stable",
+        "env_stableretro_turbo.data.experimental",
+        "env_stableretro_turbo.data.contrib",
+        "env_stableretro_turbo.scripts",
+        "env_stableretro_turbo.import",
+        "env_stableretro_turbo.examples",
+        "env_stableretro_turbo.testing",
     ],
     entry_points={
         "console_scripts": [
-            "stable-retro-turbo=stable_retro.cli:main",
+            "env-stableretro-turbo=env_stableretro_turbo.cli:main",
         ],
     },
     package_data={
-        "stable_retro": stable_retro_package_data(),
+        "env_stableretro_turbo": env_stableretro_turbo_package_data(),
         **{
-            package_name: stable_retro_data_package_data(package_root)
+            package_name: env_stableretro_turbo_data_package_data(package_root)
             for package_name, package_root in DATA_PACKAGE_DIRS.items()
         },
     },

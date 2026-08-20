@@ -4,7 +4,7 @@ import pickle
 
 import pytest
 
-import stable_retro as retro
+import env_stableretro_turbo as retro
 
 
 def supported_test_rom_names():
@@ -23,12 +23,12 @@ def supported_test_rom_names():
     params=supported_test_rom_names(),
 )
 def generate_test_env(request):
-    import stable_retro.data
+    import env_stableretro_turbo.data
 
     path = os.path.join(os.path.dirname(__file__), "../roms")
 
-    get_file_path_fn = stable_retro.data.get_file_path
-    get_romfile_path_fn = stable_retro.data.get_romfile_path
+    get_file_path_fn = env_stableretro_turbo.data.get_file_path
+    get_romfile_path_fn = env_stableretro_turbo.data.get_romfile_path
 
     retro.data.get_file_path = lambda game, file, *args, **kwargs: os.path.join(
         path,

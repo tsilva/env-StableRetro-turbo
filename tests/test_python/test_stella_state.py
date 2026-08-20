@@ -1,6 +1,6 @@
 import struct
 
-from stable_retro.stella_state import migrate_legacy_state
+from env_stableretro_turbo.stella_state import migrate_legacy_state
 
 
 def test_migrate_legacy_state_preserves_authority_state_bytes():

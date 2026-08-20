@@ -17,7 +17,7 @@ if str(REPO_ROOT) not in sys.path:
 RAM_OFFSET = 93
 RAM_SIZE = 2048
 GAME = "SuperMarioBros-Nes-v0"
-GAME_DIR = pathlib.Path("stable_retro/data/stable/SuperMarioBros-Nes-v0")
+GAME_DIR = pathlib.Path("env_stableretro_turbo/data/stable/SuperMarioBros-Nes-v0")
 
 LEVELS = {
     "Level1-1": (0, 0, 0, 0x25),
@@ -154,7 +154,7 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     base_cache = {}
 
-    import stable_retro
+    import env_stableretro_turbo
 
     for level_name in levels:
         base_state = BASE_STATE_OVERRIDES.get(level_name, args.base_state)
@@ -166,7 +166,7 @@ def main() -> int:
             print(f"skip existing {out_path}", file=sys.stderr)
             continue
 
-        env = stable_retro.make(game=GAME, state=stable_retro.State.NONE, render_mode="rgb_array")
+        env = env_stableretro_turbo.make(game=GAME, state=env_stableretro_turbo.State.NONE, render_mode="rgb_array")
         try:
             env.reset()
             env.em.set_state(patch_level(base_raw, level_name))

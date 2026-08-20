@@ -16,7 +16,7 @@ dynamic = [
 ]
 
 [project.scripts]
-stable-retro-turbo = "stable_retro.cli:main"
+env-stableretro-turbo = "env_stableretro_turbo.cli:main"
 
 [dependency-groups]
 dev = [
@@ -26,7 +26,7 @@ dev = [
 [tool.cibuildwheel]
 build = "cp314-*"
 build-verbosity = 1
-test-command = "python -c \"import stable_retro, stable_retro._retro\""
+test-command = "python -c \"import env_stableretro_turbo, env_stableretro_turbo._retro\""
 
 [tool.cibuildwheel.macos]
 archs = "arm64"

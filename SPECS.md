@@ -4,7 +4,7 @@
 
 ## PROJECT REQUIREMENTS
 
-- Publish the Python distribution as `env-stableretro-turbo` while preserving the public `stable_retro` import package.
+- Use `env-StableRetro-turbo` as the project and GitHub repository name, `env-stableretro-turbo` as the Python distribution name, and `env_stableretro_turbo` as the public Python import package; current project-owned identities must not use any former project, distribution, import, or command identifier.
 - The project must preserve Stable Retro's supported game integrations and public single-environment semantics, including saved-state loading, scenario rewards and termination, raw info variables, and ROM import; Turbo features must not reinterpret or remove them.
 - Scalar and vector environments must accept every Stable Retro built-in action mode, exact caller-supplied button-label action tables, and game-owned named tables with identical ordered controller semantics.
 - Published package artifacts must exclude ROM payloads and allow users to supply required ROMs through the supported import workflow.

@@ -117,6 +117,9 @@ roms/
 *.png
 !logo.png
 !architecture.png
+!docs/_static/img/env-stableretro-turbo-github.png
+!docs/_static/img/env-stableretro-turbo-icon.png
+!docs/_static/img/env-stableretro-turbo-text.png
 artifacts/*.mp4
 /SuperMarioBros-Nes-v0-*.bk2
 
@@ -142,11 +145,11 @@ lib*.a
 *.app
 *_autogen
 *.capnp.*
-stable_retro/cores/*-version
-stable_retro/cores/*.json
-stable_retro/helpers/rosetta_snes_helper
-stable_retro/data/**/rom.*
-!stable_retro/data/**/rom.sha
+env_stableretro_turbo/cores/*-version
+env_stableretro_turbo/cores/*.json
+env_stableretro_turbo/helpers/rosetta_snes_helper
+env_stableretro_turbo/data/**/rom.*
+!env_stableretro_turbo/data/**/rom.sha
 
 # FBNeo build artifacts (only ignore actual build outputs, not source dependencies)
 cores/fbneo/src/obj/
@@ -157,8 +160,8 @@ cores/fbneo/*.dll
 # Test stuff
 Temporary
 Testing/
-!stable_retro/testing/
-!stable_retro/testing/*.py
+!env_stableretro_turbo/testing/
+!env_stableretro_turbo/testing/*.py
 *.mkv
 *.search
 

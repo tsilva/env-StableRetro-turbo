@@ -19,7 +19,7 @@ import zipfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-VERSION_PATH = REPO_ROOT / "stable_retro" / "VERSION.txt"
+VERSION_PATH = REPO_ROOT / "env_stableretro_turbo" / "VERSION.txt"
 PYTHON = REPO_ROOT / ".venv314" / "bin" / "python"
 PACKAGE_NAME = "env-stableretro-turbo"
 PYTHON_TAGS = ("cp314",)
@@ -216,7 +216,7 @@ def is_under(parts: tuple[str, ...], prefix: tuple[str, ...]) -> bool:
 def is_rom_payload(rel: Path) -> bool:
     parts = rel.parts
     return (
-        is_under(parts, ("stable_retro", "data"))
+        is_under(parts, ("env_stableretro_turbo", "data"))
         and rel.name.lower() in ROM_PAYLOAD_NAMES
     )
 
@@ -270,7 +270,7 @@ def prune_sdist_tree(root: Path) -> None:
             shutil.rmtree(path)
 
     public_platforms = frozenset(PUBLIC_DATA_PLATFORMS.split(","))
-    data = root / "stable_retro" / "data"
+    data = root / "env_stableretro_turbo" / "data"
     for collection in ("stable", "experimental", "contrib"):
         collection_root = data / collection
         if not collection_root.is_dir():
@@ -674,12 +674,12 @@ def audit_wheel(wheel: Path, version: str, platform_name: str) -> dict[str, obje
     python_abi = tag.replace("cp", "")
     if platform_name == "macos-arm64":
         expected_names = {path.name for path in expected_macos_wheels(version)}
-        expected_extension = f"stable_retro/_retro.cpython-{python_abi}-darwin.so"
+        expected_extension = f"env_stableretro_turbo/_retro.cpython-{python_abi}-darwin.so"
         core_suffix = ".dylib"
     elif platform_name == "linux-x86_64":
         expected_names = {path.name for path in expected_linux_wheels(version)}
         expected_extension = (
-            f"stable_retro/_retro.cpython-{python_abi}-x86_64-linux-gnu.so"
+            f"env_stableretro_turbo/_retro.cpython-{python_abi}-x86_64-linux-gnu.so"
         )
         core_suffix = ".so"
     else:
@@ -687,7 +687,7 @@ def audit_wheel(wheel: Path, version: str, platform_name: str) -> dict[str, obje
 
     rom_payloads = []
     for name in names:
-        if not name.startswith("stable_retro/data/"):
+        if not name.startswith("env_stableretro_turbo/data/"):
             continue
         lower_name = name.lower()
         if Path(name).name.lower() in ROM_PAYLOAD_NAMES or lower_name.endswith(
@@ -700,18 +700,18 @@ def audit_wheel(wheel: Path, version: str, platform_name: str) -> dict[str, obje
         "version_in_filename": version in wheel.name,
         "expected_extension": expected_extension in names,
         "all_public_cores": all(
-            f"stable_retro/cores/{core}_libretro{core_suffix}" in names
+            f"env_stableretro_turbo/cores/{core}_libretro{core_suffix}" in names
             for core in PUBLIC_CORES
         ),
         "all_public_core_json": all(
-            f"stable_retro/cores/{core}.json" in names for core in PUBLIC_CORES
+            f"env_stableretro_turbo/cores/{core}.json" in names for core in PUBLIC_CORES
         ),
         "no_rom_payloads": not rom_payloads,
-        "has_retro_vec_env_source": "stable_retro/vec_env.py" in names,
+        "has_retro_vec_env_source": "env_stableretro_turbo/vec_env.py" in names,
     }
     with zipfile.ZipFile(wheel) as zf:
-        init = zf.read("stable_retro/__init__.py").decode("utf-8")
-        vec_env = zf.read("stable_retro/vec_env.py").decode("utf-8")
+        init = zf.read("env_stableretro_turbo/__init__.py").decode("utf-8")
+        vec_env = zf.read("env_stableretro_turbo/vec_env.py").decode("utf-8")
     legacy_vec_env_name = "StableRetro" + "Native" + "VecEnv"
     checks.update(
         {
@@ -781,7 +781,7 @@ def audit_sdist(sdist: Path, version: str) -> dict[str, object]:
                 source_core_dirs.add(core_dir)
         if (
             len(parts) >= 5
-            and parts[1:3] == ("stable_retro", "data")
+            and parts[1:3] == ("env_stableretro_turbo", "data")
             and parts[3] in {"stable", "experimental", "contrib"}
             and "-" in parts[4]
         ):
@@ -803,7 +803,7 @@ def audit_sdist(sdist: Path, version: str) -> dict[str, object]:
         "only_public_core_sources": source_core_dirs <= PUBLIC_CORE_SOURCE_DIRS,
         "only_public_data_platforms": data_platforms <= public_platforms,
         "has_bundled_saved_states": any(
-            name.startswith(f"{root}/stable_retro/data/") and name.endswith(".state")
+            name.startswith(f"{root}/env_stableretro_turbo/data/") and name.endswith(".state")
             for name in names
         ),
         "no_libzip_regression_corpus": not any(
@@ -828,7 +828,7 @@ def audit_sdist(sdist: Path, version: str) -> dict[str, object]:
         ),
         "within_pypi_file_limit": sdist.stat().st_size < 100_000_000,
         "has_setup_py": f"{root}/setup.py" in names,
-        "has_version_file": f"{root}/stable_retro/VERSION.txt" in names,
+        "has_version_file": f"{root}/env_stableretro_turbo/VERSION.txt" in names,
     }
     return {
         "sdist": str(sdist),
@@ -928,24 +928,24 @@ def smoke_wheel(args: argparse.Namespace) -> None:
 from pathlib import Path
 
 import numpy as np
-import stable_retro
-from stable_retro import _retro
-print(stable_retro.__file__)
+import env_stableretro_turbo
+from env_stableretro_turbo import _retro
+print(env_stableretro_turbo.__file__)
 print(_retro.__file__)
-assert stable_retro.__file__.startswith({target!r})
+assert env_stableretro_turbo.__file__.startswith({target!r})
 assert hasattr(_retro, "_RetroVecEnv")
 assert not hasattr(_retro, "RetroVecEnv")
-assert hasattr(stable_retro, "RetroVecEnv")
-assert not hasattr(stable_retro, "RetroVectorEnv")
-assert not hasattr(stable_retro, "StableRetro" + "Native" + "VecEnv")
+assert hasattr(env_stableretro_turbo, "RetroVecEnv")
+assert not hasattr(env_stableretro_turbo, "RetroVectorEnv")
+assert not hasattr(env_stableretro_turbo, "StableRetro" + "Native" + "VecEnv")
 
 rom_path = Path({rom_path!r})
 assert rom_path.is_file()
 empty_info = Path({empty_info!r})
 empty_info.write_text('{{"info": {{}}}}', encoding="utf-8")
-env = stable_retro.RetroVecEnv(
+env = env_stableretro_turbo.RetroVecEnv(
     "Dr88-FamiconIntro",
-    state=stable_retro.State.NONE,
+    state=env_stableretro_turbo.State.NONE,
     num_envs=2,
     num_threads=1,
     rom_path=str(rom_path),
@@ -1078,7 +1078,7 @@ def main() -> None:
     bump.add_argument(
         "--write",
         action="store_true",
-        help="Write the target to stable_retro/VERSION.txt",
+        help="Write the target to env_stableretro_turbo/VERSION.txt",
     )
     bump.set_defaults(func=bump_version)
 

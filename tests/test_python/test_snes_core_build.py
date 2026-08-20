@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import stable_retro as retro
+import env_stableretro_turbo as retro
 
 
 def test_snes_core_treats_arm64_as_little_endian():

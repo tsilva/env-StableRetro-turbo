@@ -16,7 +16,7 @@ recovery.
 - verifies the tree is clean and the branch is synced with its upstream;
 - checks the upstream Stable Retro base version;
 - checks the target version is unused on PyPI;
-- bumps `stable_retro/VERSION.txt`;
+- bumps `env_stableretro_turbo/VERSION.txt`;
 - requires non-empty, human-authored notes in the checked-in `CHANGES.md`
   `Unreleased` section;
 - promotes those notes to the target version and release date, then creates a

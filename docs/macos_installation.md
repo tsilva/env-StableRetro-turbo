@@ -96,8 +96,8 @@ An alternative option for M1/M2/M3 Macs is to use Docker:
 After installation, verify it works by running:
 
 ```python
-import stable_retro
-env = stable_retro.make(game='Airstriker-Genesis-v0')
+import env_stableretro_turbo
+env = env_stableretro_turbo.make(game='Airstriker-Genesis-v0')
 print("Installation successful!")
 env.close()
 ```

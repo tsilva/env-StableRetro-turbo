@@ -6,7 +6,7 @@ or workloads beyond the exact profile named with each table.
 
 ## Official Super Mario Bros comparison
 
-On 2026-08-11, `stable-retro-turbo==1.0.1.post37` was compared directly with
+On 2026-08-11, `env-stableretro-turbo==1.0.1.post37` was compared directly with
 original `stable-retro==1.0.1` on `beast-3` using TurboBench's immutable
 `supermario/canonical-v1` profile. The comparison passed every validity gate and
 produced an official, independently verified result bundle.
@@ -68,7 +68,7 @@ uv tool install \
   --exclude-newer-package turbobench-cli=2026-08-12T00:00:00Z \
   turbobench-cli==1.0.0
 turbobench compare supermario/canonical-v1 \
-  --left stable-retro-turbo@1.0.1.post37 \
+  --left env-stableretro-turbo@1.0.1.post37 \
   --right stable-retro@1.0.1
 ```
 

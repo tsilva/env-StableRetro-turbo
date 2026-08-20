@@ -289,7 +289,7 @@ void Emulator::run() {
 }
 
 bool Emulator::runSkipRender() {
-	if (!m_stable_retro_run_skip_render) {
+	if (!m_env_stableretro_turbo_run_skip_render) {
 		run();
 		return false;
 	}
@@ -297,7 +297,7 @@ bool Emulator::runSkipRender() {
 		m_audioData.clear();
 	}
 	CallbackScope callbackScope(this);
-	m_stable_retro_run_skip_render();
+	m_env_stableretro_turbo_run_skip_render();
 	if (m_serializationQuirks & RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE) {
 		m_needsInitFrame = false;
 	}
@@ -488,7 +488,7 @@ bool Emulator::loadCore(const string& corePath) {
 	m_retro_get_system_av_info = reinterpret_cast<void (*)(struct retro_system_av_info*)>(GETSYM(m_coreHandle, "retro_get_system_av_info"));
 	m_retro_reset = reinterpret_cast<void (*)()>(GETSYM(m_coreHandle, "retro_reset"));
 	m_retro_run = reinterpret_cast<void (*)()>(GETSYM(m_coreHandle, "retro_run"));
-	m_stable_retro_run_skip_render = reinterpret_cast<void (*)()>(GETSYM(m_coreHandle, "stable_retro_run_skip_render"));
+	m_env_stableretro_turbo_run_skip_render = reinterpret_cast<void (*)()>(GETSYM(m_coreHandle, "env_stableretro_turbo_run_skip_render"));
 	m_retro_serialize_size = reinterpret_cast<size_t (*)()>(GETSYM(m_coreHandle, "retro_serialize_size"));
 	m_retro_serialize = reinterpret_cast<bool (*)(void*, size_t)>(GETSYM(m_coreHandle, "retro_serialize"));
 	m_retro_unserialize = reinterpret_cast<bool (*)(const void*, size_t)>(GETSYM(m_coreHandle, "retro_unserialize"));
@@ -504,10 +504,10 @@ bool Emulator::loadCore(const string& corePath) {
 	m_retro_set_audio_sample_batch = reinterpret_cast<void (*)(retro_audio_sample_batch_t)>(GETSYM(m_coreHandle, "retro_set_audio_sample_batch"));
 	m_retro_set_input_poll = reinterpret_cast<void (*)(retro_input_poll_t)>(GETSYM(m_coreHandle, "retro_set_input_poll"));
 	m_retro_set_input_state = reinterpret_cast<void (*)(short (*)(unsigned int, unsigned int, unsigned int, unsigned int))>(GETSYM(m_coreHandle, "retro_set_input_state"));
-	m_stable_retro_set_audio_enabled = reinterpret_cast<void (*)(bool)>(GETSYM(m_coreHandle, "stable_retro_set_audio_enabled"));
-	m_stable_retro_set_indexed_video = reinterpret_cast<void (*)(bool)>(GETSYM(m_coreHandle, "stable_retro_set_indexed_video"));
-	m_stable_retro_get_indexed_video = reinterpret_cast<bool (*)(const uint8_t**, const uint16_t**, unsigned*, unsigned*, size_t*, bool*, int*)>(GETSYM(m_coreHandle, "stable_retro_get_indexed_video"));
-	m_stable_retro_get_previous_indexed_video = reinterpret_cast<bool (*)(const uint8_t**)>(GETSYM(m_coreHandle, "stable_retro_get_previous_indexed_video"));
+	m_env_stableretro_turbo_set_audio_enabled = reinterpret_cast<void (*)(bool)>(GETSYM(m_coreHandle, "env_stableretro_turbo_set_audio_enabled"));
+	m_env_stableretro_turbo_set_indexed_video = reinterpret_cast<void (*)(bool)>(GETSYM(m_coreHandle, "env_stableretro_turbo_set_indexed_video"));
+	m_env_stableretro_turbo_get_indexed_video = reinterpret_cast<bool (*)(const uint8_t**, const uint16_t**, unsigned*, unsigned*, size_t*, bool*, int*)>(GETSYM(m_coreHandle, "env_stableretro_turbo_get_indexed_video"));
+	m_env_stableretro_turbo_get_previous_indexed_video = reinterpret_cast<bool (*)(const uint8_t**)>(GETSYM(m_coreHandle, "env_stableretro_turbo_get_previous_indexed_video"));
 
 	// The default according to the docs
 	m_imgDepth = 15;
@@ -527,8 +527,8 @@ bool Emulator::loadCore(const string& corePath) {
 	m_retro_set_input_poll(cbInputPoll);
 	m_retro_set_input_state(cbInputState);
 	m_retro_init();
-	if (m_stable_retro_set_audio_enabled) {
-		m_stable_retro_set_audio_enabled(m_audioEnabled);
+	if (m_env_stableretro_turbo_set_audio_enabled) {
+		m_env_stableretro_turbo_set_audio_enabled(m_audioEnabled);
 	}
 
 		if (m_serializationQuirks & RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE) {
@@ -540,8 +540,8 @@ bool Emulator::loadCore(const string& corePath) {
 
 void Emulator::setAudioEnabled(bool enabled) {
 	m_audioEnabled = enabled;
-	if (m_stable_retro_set_audio_enabled) {
-		m_stable_retro_set_audio_enabled(enabled);
+	if (m_env_stableretro_turbo_set_audio_enabled) {
+		m_env_stableretro_turbo_set_audio_enabled(enabled);
 	}
 	if (!enabled) {
 		m_audioData.clear();
@@ -549,19 +549,19 @@ void Emulator::setAudioEnabled(bool enabled) {
 }
 
 bool Emulator::setIndexedVideoEnabled(bool enabled) {
-	if (!m_stable_retro_set_indexed_video || !m_stable_retro_get_indexed_video) {
+	if (!m_env_stableretro_turbo_set_indexed_video || !m_env_stableretro_turbo_get_indexed_video) {
 		return false;
 	}
-	m_stable_retro_set_indexed_video(enabled);
+	m_env_stableretro_turbo_set_indexed_video(enabled);
 	return true;
 }
 
 bool Emulator::getIndexedVideoFrame(IndexedVideoFrame& frame) {
-	if (!m_stable_retro_get_indexed_video) {
+	if (!m_env_stableretro_turbo_get_indexed_video) {
 		return false;
 	}
 	frame.previousData = nullptr;
-	const bool valid = m_stable_retro_get_indexed_video(
+	const bool valid = m_env_stableretro_turbo_get_indexed_video(
 		&frame.data,
 		&frame.palette,
 		&frame.width,
@@ -570,8 +570,8 @@ bool Emulator::getIndexedVideoFrame(IndexedVideoFrame& frame) {
 		&frame.rawPalette,
 		&frame.deemp
 	) && frame.data && frame.palette && frame.width && frame.height && frame.pitch;
-	if (valid && m_stable_retro_get_previous_indexed_video) {
-		m_stable_retro_get_previous_indexed_video(&frame.previousData);
+	if (valid && m_env_stableretro_turbo_get_previous_indexed_video) {
+		m_env_stableretro_turbo_get_previous_indexed_video(&frame.previousData);
 	}
 	return valid;
 }

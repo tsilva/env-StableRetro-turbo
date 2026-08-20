@@ -138,7 +138,7 @@ private:
 	void (*m_retro_get_system_av_info)(struct retro_system_av_info* info) = nullptr;
 	void (*m_retro_reset)(void) = nullptr;
 	void (*m_retro_run)(void) = nullptr;
-	void (*m_stable_retro_run_skip_render)(void) = nullptr;
+	void (*m_env_stableretro_turbo_run_skip_render)(void) = nullptr;
 	size_t (*m_retro_serialize_size)(void) = nullptr;
 	bool (*m_retro_serialize)(void* data, size_t size) = nullptr;
 	bool (*m_retro_unserialize)(const void* data, size_t size) = nullptr;
@@ -154,10 +154,10 @@ private:
 	void (*m_retro_set_audio_sample_batch)(retro_audio_sample_batch_t) = nullptr;
 	void (*m_retro_set_input_poll)(retro_input_poll_t) = nullptr;
 	void (*m_retro_set_input_state)(retro_input_state_t) = nullptr;
-	void (*m_stable_retro_set_audio_enabled)(bool) = nullptr;
-	void (*m_stable_retro_set_indexed_video)(bool) = nullptr;
-	bool (*m_stable_retro_get_indexed_video)(const uint8_t**, const uint16_t**, unsigned*, unsigned*, size_t*, bool*, int*) = nullptr;
-	bool (*m_stable_retro_get_previous_indexed_video)(const uint8_t**) = nullptr;
+	void (*m_env_stableretro_turbo_set_audio_enabled)(bool) = nullptr;
+	void (*m_env_stableretro_turbo_set_indexed_video)(bool) = nullptr;
+	bool (*m_env_stableretro_turbo_get_indexed_video)(const uint8_t**, const uint16_t**, unsigned*, unsigned*, size_t*, bool*, int*) = nullptr;
+	bool (*m_env_stableretro_turbo_get_previous_indexed_video)(const uint8_t**) = nullptr;
 
 	bool m_romLoaded = false;
 	std::string m_core;

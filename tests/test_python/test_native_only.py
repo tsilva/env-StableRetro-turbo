@@ -3,7 +3,7 @@ import types
 
 import pytest
 
-import stable_retro as retro
+import env_stableretro_turbo as retro
 
 
 def test_retro_emulator_is_native_only(monkeypatch):
@@ -15,7 +15,7 @@ def test_retro_emulator_is_native_only(monkeypatch):
 
 def test_rosetta_snes_module_is_not_available():
     with pytest.raises(ModuleNotFoundError):
-        importlib.import_module("stable_retro.rosetta_snes")
+        importlib.import_module("env_stableretro_turbo.rosetta_snes")
 
 
 def test_rosetta_process_guard_rejects_translated_process(monkeypatch):

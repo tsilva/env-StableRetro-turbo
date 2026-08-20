@@ -6,7 +6,7 @@
 
 `env-StableRetro-turbo` is a Python library for reinforcement-learning developers who need faster batched rollouts from classic console games. It keeps Stable Retro's game integrations and single-environment API, and adds `RetroVecEnv`, a Gymnasium vector environment that steps many libretro emulators and preprocesses observations in native code.
 
-Install the package, import your legally obtained ROMs, and use the upstream-compatible `stable_retro` import. The native path is useful for parallel training workloads that would otherwise spend substantial time crossing between Python wrappers and individual emulator instances.
+Install the package, import your legally obtained ROMs, and use the upstream-compatible `env_stableretro_turbo` import. The native path is useful for parallel training workloads that would otherwise spend substantial time crossing between Python wrappers and individual emulator instances.
 
 ## Install
 
@@ -16,7 +16,7 @@ Release wheels require Python 3.14 and support macOS on Apple Silicon and Linux 
 uv venv --python 3.14
 source .venv/bin/activate
 uv pip install env-stableretro-turbo
-python -m stable_retro.import /path/to/your/roms
+python -m env_stableretro_turbo.import /path/to/your/roms
 ```
 
 ROMs are not included. The importer matches supported ROMs to Stable Retro's game integrations.
@@ -24,10 +24,10 @@ ROMs are not included. The importer matches supported ROMs to Stable Retro's gam
 Check the games available on your machine, then open one in the interactive player:
 
 ```bash
-stable-retro-turbo play --list
-stable-retro-turbo play nes
-stable-retro-turbo play SuperMarioBros-Nes-v0 --press START
-stable-retro-turbo play Breakout-Atari2600-v0 --mode 32 --difficulty A
+env-stableretro-turbo play --list
+env-stableretro-turbo play nes
+env-stableretro-turbo play SuperMarioBros-Nes-v0 --press START
+env-stableretro-turbo play Breakout-Atari2600-v0 --mode 32 --difficulty A
 ```
 
 Pass a full game ID such as `SuperMarioBros-Nes-v0`, or use `all` to open one imported game per platform. Add `--show-obs` to display the raw game beside its PPO-style preprocessed observation.
@@ -46,7 +46,7 @@ import gymnasium as gym
 import numpy as np
 
 env = gym.make_vec(
-    "stable_retro:StableRetro-Turbo-v0",
+    "env_stableretro_turbo:EnvStableRetroTurbo-v0",
     game="SuperMarioBros-Nes-v0",
     state="Level1-1",
     num_envs=32,
@@ -76,7 +76,7 @@ if done.any():
 
 The module-qualified ID imports the package and registers the factory. This ID
 is vector-only and requires an explicit `game`; `RetroVecEnv` remains available
-for direct use. Stable Retro's existing scalar `stable_retro.make()` and
+for direct use. Stable Retro's existing scalar `env_stableretro_turbo.make()` and
 `RetroEnv` APIs are unchanged and are not registered under the Turbo ID.
 
 `RetroVecEnv` uses Gymnasium's disabled-autoreset semantics. A finished lane keeps its terminal observation and cannot be stepped again until it is selected by a masked reset; unselected lanes keep their emulator state, RNG stream, frame stack, and sticky-action history.
@@ -156,7 +156,7 @@ Source builds require Python 3.14, CMake, a C/C++ compiler, and the platform dep
 Run these commands from the repository root:
 
 ```bash
-uv run --frozen stable-retro-turbo play --list                                      # list imported games by platform
+uv run --frozen env-stableretro-turbo play --list                                      # list imported games by platform
 uv run --frozen --with pytest pytest tests/test_python/test_cli.py                   # run quick tests
 uv run --frozen --with build python -m build                                        # build source and wheel artifacts
 ```
@@ -171,7 +171,7 @@ commands, and release receipt gate are documented in
 In an official correctness-gated
 [TurboBench 1.0.0](https://pypi.org/project/turbobench-cli/1.0.0/) comparison on
 the matched `supermario/canonical-v1` workload,
-`stable-retro-turbo==1.0.1.post37` measured
+`env-stableretro-turbo==1.0.1.post37` measured
 2.1248x to 2.2465x the throughput of original `stable-retro==1.0.1` at 1, 16,
 and 32 environments. This is a workload-specific result, not a claim across all
 games or emulator cores. See [`BENCHMARKS.md`](BENCHMARKS.md) for exact SPS,
@@ -186,7 +186,7 @@ uv tool install \
 
 ## Notes
 
-- The distribution is `env-stableretro-turbo`; the Python package is `stable_retro`. The upstream-compatible `retro` import remains available for scalar integrations, while new code should import `stable_retro`.
+- The distribution is `env-stableretro-turbo`; the Python package is `env_stableretro_turbo`. The upstream-compatible `retro` import remains available for scalar integrations, while new code should import `env_stableretro_turbo`.
 - `RetroVecEnv` implements Gymnasium's vector API directly. It is not a Stable-Baselines3 `VecEnv`, and Stable-Baselines3 is not a runtime dependency.
 - A scalar reset seed expands to `seed + lane_index`. Seed sequences must contain one integer or `None` per lane.
 - `state_catalog` preloads an ordered saved-state catalog. Select reset lanes with `reset_mask` and their exact catalog entries with `state_indices`; Turbo does not sample states.

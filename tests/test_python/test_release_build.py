@@ -53,18 +53,18 @@ def test_next_post_version_handles_base_version():
 
 def test_version_file_is_the_single_source_of_truth():
     root = Path(__file__).resolve().parents[2]
-    version_path = root / "stable_retro" / "VERSION.txt"
+    version_path = root / "env_stableretro_turbo" / "VERSION.txt"
 
     assert (root / "setup.py").read_text(encoding="utf-8").count(
-        'stable_retro" / "VERSION.txt',
+        'env_stableretro_turbo" / "VERSION.txt',
     ) == 1
-    assert "../stable_retro/VERSION.txt" in (root / "docs" / "conf.py").read_text(
+    assert "../env_stableretro_turbo/VERSION.txt" in (root / "docs" / "conf.py").read_text(
         encoding="utf-8",
     )
-    assert "stable_retro/VERSION.txt" in (
+    assert "env_stableretro_turbo/VERSION.txt" in (
         root / ".github" / "workflows" / "release.yml"
     ).read_text(encoding="utf-8")
-    assert (root / "stable_retro" / "__init__.py").read_text(encoding="utf-8").count(
+    assert (root / "env_stableretro_turbo" / "__init__.py").read_text(encoding="utf-8").count(
         "VERSION.txt",
     ) == 1
     assert version_path.read_text(encoding="utf-8").strip()
@@ -108,10 +108,10 @@ def test_should_ignore_root_build_but_not_skill_build_directory():
 def test_rom_payload_detection_is_path_scoped():
     release_build = _release_build_module()
 
-    assert release_build.is_rom_payload(Path("stable_retro/data/stable/Foo/rom.nes"))
-    assert release_build.is_rom_payload(Path("stable_retro/data/stable/Foo/rom.md"))
+    assert release_build.is_rom_payload(Path("env_stableretro_turbo/data/stable/Foo/rom.nes"))
+    assert release_build.is_rom_payload(Path("env_stableretro_turbo/data/stable/Foo/rom.md"))
     assert not release_build.is_rom_payload(
-        Path("stable_retro/data/stable/Foo/rom.sha"),
+        Path("env_stableretro_turbo/data/stable/Foo/rom.sha"),
     )
     assert not release_build.is_rom_payload(Path("docs/rom.nes"))
 
@@ -162,9 +162,9 @@ def test_sdist_audit_accepts_clean_source_and_rejects_rom_payload(
     version = "1.0.1.post40"
     root = f"env_stableretro_turbo-{version}"
     source = tmp_path / "source"
-    (source / "stable_retro").mkdir(parents=True)
+    (source / "env_stableretro_turbo").mkdir(parents=True)
     (source / "setup.py").write_text("from setuptools import setup\n", encoding="utf-8")
-    (source / "stable_retro" / "VERSION.txt").write_text(
+    (source / "env_stableretro_turbo" / "VERSION.txt").write_text(
         f"{version}\n",
         encoding="utf-8",
     )
@@ -173,15 +173,15 @@ def test_sdist_audit_accepts_clean_source_and_rejects_rom_payload(
     with tarfile.open(sdist, mode="w:gz") as archive:
         archive.add(source / "setup.py", arcname=f"{root}/setup.py")
         archive.add(
-            source / "stable_retro" / "VERSION.txt",
-            arcname=f"{root}/stable_retro/VERSION.txt",
+            source / "env_stableretro_turbo" / "VERSION.txt",
+            arcname=f"{root}/env_stableretro_turbo/VERSION.txt",
         )
         for core_dir in sorted(release_build.PUBLIC_CORE_SOURCE_DIRS):
             member = tarfile.TarInfo(f"{root}/cores/{core_dir}")
             member.type = tarfile.DIRTYPE
             archive.addfile(member)
         saved_state = tarfile.TarInfo(
-            f"{root}/stable_retro/data/stable/Breakout-Atari2600-v0/Start.state"
+            f"{root}/env_stableretro_turbo/data/stable/Breakout-Atari2600-v0/Start.state"
         )
         saved_state.size = 0
         archive.addfile(saved_state)
@@ -189,25 +189,25 @@ def test_sdist_audit_accepts_clean_source_and_rejects_rom_payload(
     result = release_build.audit_sdist(sdist, version)
     release_build.assert_sdist_audit_passed(result)
 
-    rom = source / "stable_retro" / "data" / "stable" / "Game" / "rom.nes"
+    rom = source / "env_stableretro_turbo" / "data" / "stable" / "Game" / "rom.nes"
     rom.parent.mkdir(parents=True)
     rom.write_bytes(b"not-a-real-rom")
     with tarfile.open(sdist, mode="w:gz") as archive:
         archive.add(source / "setup.py", arcname=f"{root}/setup.py")
         archive.add(
-            source / "stable_retro" / "VERSION.txt",
-            arcname=f"{root}/stable_retro/VERSION.txt",
+            source / "env_stableretro_turbo" / "VERSION.txt",
+            arcname=f"{root}/env_stableretro_turbo/VERSION.txt",
         )
         for core_dir in sorted(release_build.PUBLIC_CORE_SOURCE_DIRS):
             member = tarfile.TarInfo(f"{root}/cores/{core_dir}")
             member.type = tarfile.DIRTYPE
             archive.addfile(member)
         saved_state = tarfile.TarInfo(
-            f"{root}/stable_retro/data/stable/Breakout-Atari2600-v0/Start.state"
+            f"{root}/env_stableretro_turbo/data/stable/Breakout-Atari2600-v0/Start.state"
         )
         saved_state.size = 0
         archive.addfile(saved_state)
-        archive.add(rom, arcname=f"{root}/stable_retro/data/stable/Game/rom.nes")
+        archive.add(rom, arcname=f"{root}/env_stableretro_turbo/data/stable/Game/rom.nes")
     contaminated = release_build.audit_sdist(sdist, version)
     assert contaminated["checks"]["no_rom_payloads"] is False
 
@@ -218,7 +218,7 @@ def test_sdist_pruning_keeps_only_supported_cores_and_platforms(
     release_build = _release_build_module()
     for core_dir in release_build.KNOWN_CORE_SOURCE_DIRS:
         (tmp_path / "cores" / core_dir).mkdir(parents=True)
-    stable = tmp_path / "stable_retro" / "data" / "stable"
+    stable = tmp_path / "env_stableretro_turbo" / "data" / "stable"
     (stable / "SuperMarioBros-Nes-v0").mkdir(parents=True)
     (stable / "Breakout-Atari2600-v0").mkdir()
     (stable / "MortalKombatTrilogy-N64-v0").mkdir()

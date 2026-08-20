@@ -12,7 +12,7 @@ using namespace std;
 using namespace ::testing;
 
 static bool hasCoreInfo(const string& core) {
-	ifstream in("../stable_retro/cores/" + core + ".json");
+	ifstream in("../env_stableretro_turbo/cores/" + core + ".json");
 	return !!in;
 }
 
@@ -34,12 +34,12 @@ struct EmulatorTestParamName {
 
 void EmulatorTest::SetUp() {
 	for (const string& core : { "fceumm", "gambatte", "genesis_plus_gx", "mednafen_pce_fast", "mgba", "snes9x", "stella", "picodrive" }) {
-		ifstream in("../stable_retro/cores/" + core + ".json");
+		ifstream in("../env_stableretro_turbo/cores/" + core + ".json");
 		if (!in) {
 			continue;
 		}
 		ostringstream out;
-		Retro::corePath("../stable_retro/cores");
+		Retro::corePath("../env_stableretro_turbo/cores");
 		while (in) {
 			string line;
 			if (in >> line) {

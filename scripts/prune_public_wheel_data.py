@@ -28,7 +28,7 @@ def should_prune(path: Path, root: Path, platforms: set[str]) -> bool:
     parts = relative.parts
     if len(parts) < 5:
         return False
-    if parts[0] != "stable_retro" or parts[1] != "data":
+    if parts[0] != "env_stableretro_turbo" or parts[1] != "data":
         return False
     if parts[2] not in {"stable", "contrib", "experimental"}:
         return False

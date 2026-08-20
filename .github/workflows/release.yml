@@ -54,7 +54,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="$(tr -d '[:space:]' < stable_retro/VERSION.txt)"
+          version="$(tr -d '[:space:]' < env_stableretro_turbo/VERSION.txt)"
           post="0"
           if [[ "$version" == *.post* ]]; then
             post="${version##*.post}"
@@ -75,17 +75,6 @@ jobs:
       - name: Check PyPI version is unused
         if: github.event_name == 'push' && github.ref_type == 'tag'
         run: .venv314/bin/python scripts/release_build.py check-pypi --version "${{ steps.version.outputs.version }}"
-
-      - name: Check migration package source and PyPI version
-        if: steps.version.outputs.version == '1.0.1.post44'
-        run: |
-          .venv314/bin/python scripts/redirect_release.py check-source \
-            --version "${{ steps.version.outputs.version }}"
-          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref_type }}" == "tag" ]]; then
-            .venv314/bin/python scripts/release_build.py check-pypi \
-              --package stable-retro-turbo \
-              --version "${{ steps.version.outputs.version }}"
-          fi
 
   test-python:
     name: Full Python test suite
@@ -254,23 +243,12 @@ jobs:
       - name: Final audit
         run: .venv314/bin/python scripts/release_build.py final-check --version "${{ needs.validate.outputs.version }}"
 
-      - name: Build and audit metadata-only migration distributions
-        if: needs.validate.outputs.version == '1.0.1.post44'
-        run: |
-          .venv314/bin/python scripts/redirect_release.py build \
-            --version "${{ needs.validate.outputs.version }}" \
-            --out-dir redirect-dist
-          .venv314/bin/python -m twine check redirect-dist/*
-
       - name: Prepare publish distributions
         run: |
-          mkdir -p publish/primary publish/redirect
+          mkdir -p publish/primary
           cp wheelhouse-post*-repaired/*.whl publish/primary/
           cp wheelhouse-post*-linux/*.whl publish/primary/
           cp dist/*.tar.gz publish/primary/
-          if [[ "${{ needs.validate.outputs.version }}" == "1.0.1.post44" ]]; then
-            cp redirect-dist/*.{whl,tar.gz} publish/redirect/
-          fi
 
       - name: Upload final distribution bundle
         uses: actions/upload-artifact@v4
@@ -305,12 +283,6 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: publish/primary
-
-      - name: Publish metadata-only migration distributions to PyPI
-        if: needs.validate.outputs.version == '1.0.1.post44'
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: publish/redirect
 
       - name: Create immutable GitHub release
         env:

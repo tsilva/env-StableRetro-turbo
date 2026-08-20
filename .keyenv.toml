@@ -3,5 +3,5 @@
 version = 1
 
 [secrets.TWINE_PASSWORD]
-account = "stable-retro-turbo/TWINE_PASSWORD"
+account = "env-stableretro-turbo/TWINE_PASSWORD"
 required = true

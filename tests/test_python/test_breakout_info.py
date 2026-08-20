@@ -7,7 +7,7 @@ import pytest
 
 
 def _breakout_rom_path_or_skip():
-    import stable_retro as retro
+    import env_stableretro_turbo as retro
 
     try:
         return retro.data.get_original_romfile_path("Breakout-Atari2600-v0")
@@ -16,11 +16,11 @@ def _breakout_rom_path_or_skip():
 
 
 def test_breakout_lives_info_matches_authority_integration():
-    from stable_retro.vec_env import RetroVecEnv
+    from env_stableretro_turbo.vec_env import RetroVecEnv
 
     info_path = (
         Path(__file__).resolve().parents[2]
-        / "stable_retro/data/stable/Breakout-Atari2600-v0/data.json"
+        / "env_stableretro_turbo/data/stable/Breakout-Atari2600-v0/data.json"
     )
     state_path = info_path.with_name("Start.state")
     env = RetroVecEnv(
