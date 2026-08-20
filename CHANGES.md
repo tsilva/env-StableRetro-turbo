@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Nothing yet.
+
+## 1.0.1.post45 - 2026-08-20
+
 * rename the project and distribution to `env-StableRetro-turbo` and
   `env-stableretro-turbo` while preserving the `stable_retro` import package,
   and publish a metadata-only `stable-retro-turbo` migration package
