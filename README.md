@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./logo.png" alt="env-StableRetro-turbo" width="260" />
+  <img src="./logo.png" alt="StableRetro-turbo" width="260" />
 
   **🚀 Blazing-fast Stable Retro fork with native vectorization and preprocessing 🚀**
 </div>
