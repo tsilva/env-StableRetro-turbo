@@ -230,7 +230,8 @@ jobs:
         run: |
           uv venv --python 3.11 .parity-venv
           uv pip install --exclude-newer "7 days" --python .parity-venv/bin/python \
-            "turbobench-cli==2.0.0"
+            --exclude-newer-package turbobench-cli=2026-09-01T00:00:00Z \
+            "turbobench-cli==2.0.1"
 
       - name: Install canonical game payloads
         env:
@@ -383,7 +384,7 @@ jobs:
           path: publish
 
       - name: Publish primary package distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: publish/primary
 
