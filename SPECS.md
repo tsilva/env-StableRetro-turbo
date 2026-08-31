@@ -15,5 +15,7 @@
 - Saved-state catalogs must preserve declared order, and each selected lane must reset to an explicit caller-selected catalog index so execution is reproducible without provider-owned sampling.
 - Snapshot-capable `RetroVecEnv` instances must capture live lanes and restore selected lanes from reusable same-instance snapshots without advancing emulation or changing unselected lanes; capability must report unavailable when exact core and scenario state cannot be preserved.
 - Non-benchmark observation ownership modes must not expose results that a later environment call can unexpectedly mutate.
-- Require releases to pass ROM-backed, bit-exact differential validation against the pinned original Stable Retro release for canonical Super Mario Bros and Breakout scalar and vector workloads, covering native and processed observations, actions, rewards, episode boundaries, emulator RAM, shared info signals, lane behavior, and snapshot-restored continuation.
+- Require every release’s exact final wheel for the canonical parity host to pass immutable TurboBench parity profiles against the pinned original Stable Retro release for canonical Super Mario Bros and Breakout scalar and vector workloads, covering native and processed observations, actions, rewards, episode boundaries, emulator RAM, shared info signals, lane behavior, and snapshot-restored continuation.
+- Provide a thin TurboBench command for isolated quick parity of current repository work; checkout results must remain diagnostic, and this repository must not implement cross-provider comparison logic.
+- Use provider-owned internal checks to prove that canonical behavior remains identical across supported binary platforms.
 - Publish binary distributions only for Apple-silicon macOS and x86-64 Linux.

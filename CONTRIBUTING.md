@@ -29,34 +29,29 @@ Before creating a pull request, make sure that your new code does not cause any 
 
 Changes to the NES or Atari cores, vector stepping, preprocessing, rewards,
 lifecycle handling, info, RAM exposure, saved states, or snapshots must also
-pass the ROM-backed TurboBench v2 semantic oracle against original
+pass the ROM-backed TurboBench parity profiles against original
 `stable-retro==1.0.1` for both supported reference integrations:
 
 ```bash
-turbobench oracle supermario/canonical-v2 \
-  --left stable-retro@1.0.1 \
-  --right env-stableretro-turbo@checkout:"$PWD" \
-  --output /external/evidence/mario-env-stableretro-turbo
+turbobench parity supermario/canonical-v2 \
+  --candidate env-stableretro-turbo@checkout:"$PWD" --allow-dirty --quick
 
-turbobench oracle breakout/start-v2 \
-  --left stable-retro@1.0.1 \
-  --right env-stableretro-turbo@checkout:"$PWD" \
-  --output /external/evidence/breakout-env-stableretro-turbo
+turbobench parity breakout/start-v2 \
+  --candidate env-stableretro-turbo@checkout:"$PWD" --allow-dirty --quick
 ```
 
-These checkout receipts are development evidence. After publishing the
-candidate, regenerate both with `env-stableretro-turbo@VERSION`; only those PyPI
-candidate receipts may pass the canonical gate:
+These checkout receipts are development evidence. Release certification must
+use the exact final wheel through an `@artifact:/absolute/path.whl` selector:
 
 ```bash
-turbobench verify-oracle /external/evidence/mario-env-stableretro-turbo \
+turbobench verify-parity /external/evidence/mario-env-stableretro-turbo \
   --require-canonical --require-provider env-stableretro-turbo
-turbobench verify-oracle /external/evidence/breakout-env-stableretro-turbo \
+turbobench verify-parity /external/evidence/breakout-env-stableretro-turbo \
   --require-canonical --require-provider env-stableretro-turbo
 ```
 
 Keep ROMs and receipts outside the repository. See
-[`docs/semantic_oracle.md`](docs/semantic_oracle.md) for the exact contract.
+[`docs/parity.md`](docs/parity.md) for the exact contract.
 
 #### Testing on Linux
 ```bash

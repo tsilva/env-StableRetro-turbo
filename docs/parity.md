@@ -1,4 +1,4 @@
-# Stable Retro semantic oracle
+# Cross-provider parity
 
 Original `stable-retro==1.0.1` is the semantic authority for the Turbo fork.
 The fork must match that authority directly; comparing only against another
@@ -11,7 +11,7 @@ TurboBench's immutable v2 profiles exercise two reference integrations:
 - `breakout/start-v2` uses the cartridge `Start` state and runs shapes 1 and 4
   for 4,096 seeded transitions.
 
-The oracle compares the native scalar authority with `RetroVecEnv` across
+TurboBench compares the native scalar authority with `RetroVecEnv` across
 processed observations, lossless raw frames, actions, rewards, termination and
 truncation, selected info, lane resets, RAM, and snapshot continuation. Mario
 uses the canonical 2 KiB NES CPU RAM address space. The only allowed Mario
@@ -22,30 +22,27 @@ Breakout public RGB bytes are compared directly.
 With lawful local ROMs imported, run:
 
 ```bash
-turbobench oracle supermario/canonical-v2 \
-  --left stable-retro@1.0.1 \
-  --right env-stableretro-turbo@checkout:"$PWD" \
-  --output /external/evidence/mario-env-stableretro-turbo
+turbobench parity supermario/canonical-v2 \
+  --candidate env-stableretro-turbo@checkout:"$PWD" \
+  --allow-dirty --quick
 
-turbobench oracle breakout/start-v2 \
-  --left stable-retro@1.0.1 \
-  --right env-stableretro-turbo@checkout:"$PWD" \
-  --output /external/evidence/breakout-env-stableretro-turbo
+turbobench parity breakout/start-v2 \
+  --candidate env-stableretro-turbo@checkout:"$PWD" \
+  --allow-dirty --quick
 ```
 
-After publishing the candidate, regenerate both commands with
-`env-stableretro-turbo@VERSION` instead of the checkout selector, then verify the
-published-release receipts:
+For release certification, run both profiles against the exact final wheel and
+verify the receipts:
 
 ```bash
-turbobench verify-oracle /external/evidence/mario-env-stableretro-turbo \
+turbobench verify-parity /external/evidence/mario-env-stableretro-turbo \
   --require-canonical --require-provider env-stableretro-turbo
-turbobench verify-oracle /external/evidence/breakout-env-stableretro-turbo \
+turbobench verify-parity /external/evidence/breakout-env-stableretro-turbo \
   --require-canonical --require-provider env-stableretro-turbo
 ```
 
 The canonical gate rejects shortened workloads, missing shapes, every checkout
-candidate, dirty overrides, a non-PyPI authority, the wrong Stable Retro
+candidate, dirty overrides, an authority override, the wrong Stable Retro
 version, failed exact checks, and receipts for a different candidate.
 `--allow-dirty`, `--steps`, or `--shapes` remain useful for diagnosis but cannot
 produce release evidence.

@@ -85,7 +85,7 @@ python.md
 :caption: Development
 
 release_notes.md
-semantic_oracle.md
+parity.md
 Github <https://github.com/Farama-Foundation/stable-retro>
 Contribute to the Docs <https://github.com/Farama-Foundation/stable-retro/blob/master/docs/README.md>
 ```

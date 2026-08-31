@@ -198,11 +198,106 @@ jobs:
           path: wheelhouse-post${{ needs.validate.outputs.post }}-${{ matrix.wheelhouse_suffix }}/*.whl
           if-no-files-found: error
 
+  parity:
+    name: Verify exact macOS wheel parity
+    needs:
+      - validate
+      - build
+    runs-on: macos-15
+    environment: parity
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Download canonical wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-arm64-wheel-v${{ needs.validate.outputs.version }}
+          path: candidate
+
+      - name: Install pinned parity tool
+        run: |
+          uv venv --python 3.11 .parity-venv
+          uv pip install --exclude-newer "7 days" --python .parity-venv/bin/python \
+            "turbobench-cli==2.0.0"
+
+      - name: Install canonical game payloads
+        env:
+          BREAKOUT_ROM_URL: ${{ secrets.BREAKOUT_ROM_URL }}
+          SMB_ROM_URL: ${{ secrets.SMB_ROM_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset_root="$PWD/env_stableretro_turbo/data/stable"
+          curl --fail --location --silent --show-error "$SMB_ROM_URL" \
+            --output "$asset_root/SuperMarioBros-Nes-v0/rom.nes"
+          curl --fail --location --silent --show-error "$BREAKOUT_ROM_URL" \
+            --output "$asset_root/Breakout-Atari2600-v0/rom.a26"
+          .parity-venv/bin/python - \
+            "$asset_root/SuperMarioBros-Nes-v0/rom.nes" \
+            "$asset_root/Breakout-Atari2600-v0/rom.a26" <<'PY'
+          import hashlib
+          import pathlib
+          import sys
+
+          expected = (
+              "f61548fdf1670cffefcc4f0b7bdcdd9eaba0c226e3b74f8666071496988248de",
+              "376323f051c3c373c887fd83abead39d87d844ff283d435f4addbfc1710c6fd5",
+          )
+          for filename, digest in zip(sys.argv[1:], expected, strict=True):
+              observed = hashlib.sha256(pathlib.Path(filename).read_bytes()).hexdigest()
+              if observed != digest:
+                  raise SystemExit(f"unexpected ROM SHA-256 for {filename}: {observed}")
+          PY
+          echo "TURBOBENCH_ASSET_ROOT=$asset_root" >> "$GITHUB_ENV"
+
+      - name: Run and verify exact parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          wheels=(candidate/*-cp311-cp311-*.whl)
+          if (( ${#wheels[@]} != 1 )); then
+            printf 'expected one canonical cp311 wheel, found %s\n' "${#wheels[@]}" >&2
+            exit 1
+          fi
+          wheel="$(cd "$(dirname "${wheels[0]}")" && pwd)/$(basename "${wheels[0]}")"
+          .parity-venv/bin/python scripts/check_parity.py all \
+            --turbobench .parity-venv/bin/turbobench \
+            --python 3.11 \
+            --wheel "$wheel" \
+            --output parity-receipts
+          .parity-venv/bin/turbobench verify-parity \
+            parity-receipts/supermario-canonical-v2 \
+            --require-canonical --require-provider env-stableretro-turbo
+          .parity-venv/bin/turbobench verify-parity \
+            parity-receipts/breakout-start-v2 \
+            --require-canonical --require-provider env-stableretro-turbo
+
+      - name: Upload parity receipts
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-receipts-v${{ needs.validate.outputs.version }}
+          path: parity-receipts/**
+          if-no-files-found: error
+
   final-check:
     name: Audit release distributions
     needs:
       - validate
       - build
+      - parity
     runs-on: ubuntu-24.04
 
     steps:
@@ -237,6 +332,12 @@ jobs:
           name: linux-x86_64-wheel-v${{ needs.validate.outputs.version }}
           path: wheelhouse-post${{ needs.validate.outputs.post }}-linux
 
+      - name: Download parity receipts
+        uses: actions/download-artifact@v4
+        with:
+          name: parity-receipts-v${{ needs.validate.outputs.version }}
+          path: parity-receipts
+
       - name: Build clean source distribution
         run: .venv314/bin/python scripts/release_build.py build-sdist --version "${{ needs.validate.outputs.version }}"
 
@@ -246,9 +347,11 @@ jobs:
       - name: Prepare publish distributions
         run: |
           mkdir -p publish/primary
+          mkdir -p publish/evidence
           cp wheelhouse-post*-repaired/*.whl publish/primary/
           cp wheelhouse-post*-linux/*.whl publish/primary/
           cp dist/*.tar.gz publish/primary/
+          cp -R parity-receipts publish/evidence/
 
       - name: Upload final distribution bundle
         uses: actions/upload-artifact@v4

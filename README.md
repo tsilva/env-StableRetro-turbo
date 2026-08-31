@@ -161,10 +161,10 @@ uv run --frozen --with pytest pytest tests/test_python/test_cli.py              
 uv run --frozen --with build python -m build                                        # build source and wheel artifacts
 ```
 
-Core and semantic changes additionally use a pinned original-Stable-Retro
-oracle for Super Mario Bros. and Breakout. The compared fields, reproducible
+Core and semantic changes additionally use pinned TurboBench parity profiles
+against original Stable Retro for Super Mario Bros. and Breakout. The compared fields, reproducible
 commands, and release receipt gate are documented in
-[`docs/semantic_oracle.md`](docs/semantic_oracle.md).
+[`docs/parity.md`](docs/parity.md).
 
 ## Benchmark
 

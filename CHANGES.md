@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-* Nothing yet.
+* delegate cross-provider Mario and Breakout parity to TurboBench, remove the
+  duplicated upstream comparator, and gate releases on one exact macOS wheel
 
 ## 1.0.1.post44 - 2026-08-20
 
