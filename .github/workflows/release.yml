@@ -235,29 +235,36 @@ jobs:
 
       - name: Install canonical game payloads
         env:
-          BREAKOUT_ROM_URL: ${{ secrets.BREAKOUT_ROM_URL }}
-          SMB_ROM_URL: ${{ secrets.SMB_ROM_URL }}
+          BREAKOUT_ROM_GZIP_BASE64: ${{ secrets.BREAKOUT_ROM_GZIP_BASE64 }}
+          SMB_ROM_GZIP_BASE64: ${{ secrets.SMB_ROM_GZIP_BASE64 }}
         shell: bash
         run: |
           set -euo pipefail
           asset_root="$PWD/env_stableretro_turbo/data/stable"
-          curl --fail --location --silent --show-error "$SMB_ROM_URL" \
-            --output "$asset_root/SuperMarioBros-Nes-v0/rom.nes"
-          curl --fail --location --silent --show-error "$BREAKOUT_ROM_URL" \
-            --output "$asset_root/Breakout-Atari2600-v0/rom.a26"
           .parity-venv/bin/python - \
             "$asset_root/SuperMarioBros-Nes-v0/rom.nes" \
             "$asset_root/Breakout-Atari2600-v0/rom.a26" <<'PY'
+          import base64
+          import gzip
           import hashlib
+          import os
           import pathlib
           import sys
 
+          encoded = (
+              os.environ.get("SMB_ROM_GZIP_BASE64"),
+              os.environ.get("BREAKOUT_ROM_GZIP_BASE64"),
+          )
           expected = (
               "f61548fdf1670cffefcc4f0b7bdcdd9eaba0c226e3b74f8666071496988248de",
               "376323f051c3c373c887fd83abead39d87d844ff283d435f4addbfc1710c6fd5",
           )
-          for filename, digest in zip(sys.argv[1:], expected, strict=True):
-              observed = hashlib.sha256(pathlib.Path(filename).read_bytes()).hexdigest()
+          for filename, payload, digest in zip(sys.argv[1:], encoded, expected, strict=True):
+              if not payload:
+                  raise SystemExit(f"protected ROM secret is not configured for {filename}")
+              path = pathlib.Path(filename)
+              path.write_bytes(gzip.decompress(base64.b64decode(payload)))
+              observed = hashlib.sha256(path.read_bytes()).hexdigest()
               if observed != digest:
                   raise SystemExit(f"unexpected ROM SHA-256 for {filename}: {observed}")
           PY
