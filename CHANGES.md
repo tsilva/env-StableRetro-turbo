@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-* Nothing yet.
+* Use TurboBench 2.0.5 so release parity isolates the original Stable Retro
+  runtime and keeps state catalog paths out of receipts.
 
 ## 1.0.1.post46 - 2026-09-01
 
