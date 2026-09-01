@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Nothing yet.
+
+## 1.0.1.post48 - 2026-09-01
+
 * Allow the newly released TurboBench 2.0.5 package through the release
   workflow's seven-day dependency-age gate.
 
