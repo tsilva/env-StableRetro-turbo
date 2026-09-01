@@ -86,6 +86,7 @@ def test_release_parity_fetches_hash_pinned_roms_from_private_r2():
     assert "secrets.R2_SECRET_ACCESS_KEY" in workflow
     assert "aws s3 cp" in workflow
     assert '"turbobench-cli==2.0.5"' in workflow
+    assert "turbobench-cli=2026-09-02T00:00:00Z" in workflow
     assert 'AWS_REGION: auto' in workflow
     assert 'if: ${{ always() }}' in workflow
     assert "candidate/*-cp314-cp314-*.whl" in workflow
