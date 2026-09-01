@@ -231,7 +231,7 @@ jobs:
           uv venv --python 3.14 .parity-venv
           uv pip install --exclude-newer "7 days" --python .parity-venv/bin/python \
             --exclude-newer-package turbobench-cli=2026-09-01T00:00:00Z \
-            "turbobench-cli==2.0.3"
+            "turbobench-cli==2.0.4"
 
       - name: Fetch lawful canonical ROMs
         env:
