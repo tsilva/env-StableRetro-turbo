@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-* Nothing yet.
+* Fetch protected Mario and Breakout parity ROMs from private Cloudflare R2
+  storage instead of storing their bytes in GitHub secrets.
 
 ## 1.0.1.post45 - 2026-08-31
 
