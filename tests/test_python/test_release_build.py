@@ -87,6 +87,8 @@ def test_release_parity_fetches_hash_pinned_roms_from_private_r2():
     assert "aws s3 cp" in workflow
     assert 'AWS_REGION: auto' in workflow
     assert 'if: ${{ always() }}' in workflow
+    assert "candidate/*-cp314-cp314-*.whl" in workflow
+    assert "canonical cp311 wheel" not in workflow
     assert manifest == {
         "schema": 1,
         "roms": {

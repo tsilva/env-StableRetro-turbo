@@ -215,7 +215,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.14"
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
@@ -228,7 +228,7 @@ jobs:
 
       - name: Install pinned parity tool
         run: |
-          uv venv --python 3.11 .parity-venv
+          uv venv --python 3.14 .parity-venv
           uv pip install --exclude-newer "7 days" --python .parity-venv/bin/python \
             --exclude-newer-package turbobench-cli=2026-09-01T00:00:00Z \
             "turbobench-cli==2.0.3"
@@ -268,15 +268,15 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          wheels=(candidate/*-cp311-cp311-*.whl)
+          wheels=(candidate/*-cp314-cp314-*.whl)
           if (( ${#wheels[@]} != 1 )); then
-            printf 'expected one canonical cp311 wheel, found %s\n' "${#wheels[@]}" >&2
+            printf 'expected one canonical cp314 wheel, found %s\n' "${#wheels[@]}" >&2
             exit 1
           fi
           wheel="$(cd "$(dirname "${wheels[0]}")" && pwd)/$(basename "${wheels[0]}")"
           .parity-venv/bin/python scripts/check_parity.py all \
             --turbobench .parity-venv/bin/turbobench \
-            --python 3.11 \
+            --python 3.14 \
             --wheel "$wheel" \
             --output parity-receipts
           .parity-venv/bin/turbobench verify-parity \
