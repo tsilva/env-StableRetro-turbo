@@ -18,24 +18,13 @@ jobs:
       R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
       R2_BUCKET: ${{ vars.R2_BUCKET }}
     steps:
-      - name: Upload and verify protected assets
-        env:
-          SMB_ROM_GZIP_BASE64: ${{ secrets.SMB_ROM_GZIP_BASE64 }}
+      - name: Verify protected assets
         run: |
           set -euo pipefail
           asset_dir="$RUNNER_TEMP/parity-assets"
           endpoint="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
           mkdir -p "$asset_dir"
 
-          printf '%s' "$SMB_ROM_GZIP_BASE64" |
-            base64 --decode | gzip --decompress > "$asset_dir/rom.nes"
-          test "$(sha256sum "$asset_dir/rom.nes" | awk '{print $1}')" = \
-            "f61548fdf1670cffefcc4f0b7bdcdd9eaba0c226e3b74f8666071496988248de"
-          aws s3 cp "$asset_dir/rom.nes" \
-            "s3://$R2_BUCKET/nes/SuperMarioBros-Nes-v0/rom.nes" \
-            --endpoint-url "$endpoint" --no-progress --only-show-errors
-
-          rm "$asset_dir/rom.nes"
           aws s3 cp "s3://$R2_BUCKET/nes/SuperMarioBros-Nes-v0/rom.nes" \
             "$asset_dir/rom.nes" \
             --endpoint-url "$endpoint" --no-progress --only-show-errors
