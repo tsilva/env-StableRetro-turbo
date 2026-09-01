@@ -231,43 +231,36 @@ jobs:
           uv venv --python 3.11 .parity-venv
           uv pip install --exclude-newer "7 days" --python .parity-venv/bin/python \
             --exclude-newer-package turbobench-cli=2026-09-01T00:00:00Z \
-            "turbobench-cli==2.0.1"
+            "turbobench-cli==2.0.3"
 
-      - name: Install canonical game payloads
+      - name: Fetch lawful canonical ROMs
         env:
-          BREAKOUT_ROM_GZIP_BASE64: ${{ secrets.BREAKOUT_ROM_GZIP_BASE64 }}
-          SMB_ROM_GZIP_BASE64: ${{ secrets.SMB_ROM_GZIP_BASE64 }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_EC2_METADATA_DISABLED: "true"
+          AWS_REGION: auto
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
         shell: bash
         run: |
           set -euo pipefail
-          asset_root="$PWD/env_stableretro_turbo/data/stable"
-          .parity-venv/bin/python - \
-            "$asset_root/SuperMarioBros-Nes-v0/rom.nes" \
-            "$asset_root/Breakout-Atari2600-v0/rom.a26" <<'PY'
-          import base64
-          import gzip
-          import hashlib
-          import os
-          import pathlib
-          import sys
-
-          encoded = (
-              os.environ.get("SMB_ROM_GZIP_BASE64"),
-              os.environ.get("BREAKOUT_ROM_GZIP_BASE64"),
-          )
-          expected = (
-              "f61548fdf1670cffefcc4f0b7bdcdd9eaba0c226e3b74f8666071496988248de",
-              "376323f051c3c373c887fd83abead39d87d844ff283d435f4addbfc1710c6fd5",
-          )
-          for filename, payload, digest in zip(sys.argv[1:], encoded, expected, strict=True):
-              if not payload:
-                  raise SystemExit(f"protected ROM secret is not configured for {filename}")
-              path = pathlib.Path(filename)
-              path.write_bytes(gzip.decompress(base64.b64decode(payload)))
-              observed = hashlib.sha256(path.read_bytes()).hexdigest()
-              if observed != digest:
-                  raise SystemExit(f"unexpected ROM SHA-256 for {filename}: {observed}")
-          PY
+          manifest=validation/parity-assets.json
+          endpoint="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
+          asset_root="$RUNNER_TEMP/turbobench-assets/stable"
+          mkdir -p "$asset_root"
+          for game in SuperMarioBros-Nes-v0 Breakout-Atari2600-v0; do
+            source_dir="env_stableretro_turbo/data/stable/$game"
+            cp -R "$source_dir" "$asset_root/$game"
+            filename="$(jq -er --arg game "$game" '.roms[$game].filename' "$manifest")"
+            object_key="$(jq -er --arg game "$game" '.roms[$game].object_key' "$manifest")"
+            expected_sha256="$(jq -er --arg game "$game" '.roms[$game].sha256' "$manifest")"
+            expected_size="$(jq -er --arg game "$game" '.roms[$game].size' "$manifest")"
+            target="$asset_root/$game/$filename"
+            aws s3 cp "s3://$R2_BUCKET/$object_key" "$target" \
+              --endpoint-url "$endpoint" --no-progress --only-show-errors
+            test "$(shasum -a 256 "$target" | awk '{print $1}')" = "$expected_sha256"
+            test "$(stat -f '%z' "$target")" = "$expected_size"
+          done
           echo "TURBOBENCH_ASSET_ROOT=$asset_root" >> "$GITHUB_ENV"
 
       - name: Run and verify exact parity
@@ -292,6 +285,10 @@ jobs:
           .parity-venv/bin/turbobench verify-parity \
             parity-receipts/breakout-start-v2 \
             --require-canonical --require-provider env-stableretro-turbo
+
+      - name: Remove private inputs
+        if: ${{ always() }}
+        run: rm -rf "$RUNNER_TEMP/turbobench-assets"
 
       - name: Upload parity receipts
         uses: actions/upload-artifact@v4

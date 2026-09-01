@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "roms": {
+    "SuperMarioBros-Nes-v0": {
+      "filename": "rom.nes",
+      "object_key": "nes/SuperMarioBros-Nes-v0/rom.nes",
+      "sha256": "f61548fdf1670cffefcc4f0b7bdcdd9eaba0c226e3b74f8666071496988248de",
+      "size": 40976
+    },
+    "Breakout-Atari2600-v0": {
+      "filename": "rom.a26",
+      "object_key": "atari2600/Breakout-Atari2600-v0/rom.a26",
+      "sha256": "376323f051c3c373c887fd83abead39d87d844ff283d435f4addbfc1710c6fd5",
+      "size": 2048
+    }
+  }
+}

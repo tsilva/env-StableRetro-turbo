@@ -1,5 +1,6 @@
 import ast
 import importlib.util
+import json
 import tarfile
 import tomllib
 from pathlib import Path
@@ -68,6 +69,47 @@ def test_version_file_is_the_single_source_of_truth():
         "VERSION.txt",
     ) == 1
     assert version_path.read_text(encoding="utf-8").strip()
+
+
+def test_release_parity_fetches_hash_pinned_roms_from_private_r2():
+    root = Path(__file__).resolve().parents[2]
+    workflow = (root / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8",
+    )
+    manifest = json.loads(
+        (root / "validation" / "parity-assets.json").read_text(encoding="utf-8"),
+    )
+
+    assert "SMB_ROM_GZIP_BASE64" not in workflow
+    assert "BREAKOUT_ROM_GZIP_BASE64" not in workflow
+    assert "secrets.R2_ACCESS_KEY_ID" in workflow
+    assert "secrets.R2_SECRET_ACCESS_KEY" in workflow
+    assert "aws s3 cp" in workflow
+    assert 'AWS_REGION: auto' in workflow
+    assert 'if: ${{ always() }}' in workflow
+    assert manifest == {
+        "schema": 1,
+        "roms": {
+            "SuperMarioBros-Nes-v0": {
+                "filename": "rom.nes",
+                "object_key": "nes/SuperMarioBros-Nes-v0/rom.nes",
+                "sha256": (
+                    "f61548fdf1670cffefcc4f0b7bdcdd9e"
+                    "aba0c226e3b74f8666071496988248de"
+                ),
+                "size": 40976,
+            },
+            "Breakout-Atari2600-v0": {
+                "filename": "rom.a26",
+                "object_key": "atari2600/Breakout-Atari2600-v0/rom.a26",
+                "sha256": (
+                    "376323f051c3c373c887fd83abead39d"
+                    "87d844ff283d435f4addbfc1710c6fd5"
+                ),
+                "size": 2048,
+            },
+        },
+    }
 
 
 def test_latest_non_yanked_pypi_version_ignores_fully_yanked_latest_release():
