@@ -7,7 +7,7 @@ import argparse
 import subprocess
 from pathlib import Path
 
-PROFILES = ("supermario/canonical-v2", "breakout/start-v2")
+PROFILES = ("supermario/world1-v1", "breakout/start-v1")
 PROVIDER = "env-stableretro-turbo"
 
 

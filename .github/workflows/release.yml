@@ -230,8 +230,8 @@ jobs:
         run: |
           uv venv --python 3.14 .parity-venv
           uv pip install --exclude-newer "7 days" --python .parity-venv/bin/python \
-            --exclude-newer-package turbobench-cli=2026-09-02T00:00:00Z \
-            "turbobench-cli==2.0.5"
+            --exclude-newer-package turbobench-cli=2026-09-02T14:27:04.219491Z \
+            "turbobench-cli==2.0.6"
 
       - name: Fetch lawful canonical ROMs
         env:
@@ -280,10 +280,10 @@ jobs:
             --wheel "$wheel" \
             --output parity-receipts
           .parity-venv/bin/turbobench verify-parity \
-            parity-receipts/supermario-canonical-v2 \
+            parity-receipts/supermario-world1-v1 \
             --require-canonical --require-provider env-stableretro-turbo
           .parity-venv/bin/turbobench verify-parity \
-            parity-receipts/breakout-start-v2 \
+            parity-receipts/breakout-start-v1 \
             --require-canonical --require-provider env-stableretro-turbo
 
       - name: Remove private inputs

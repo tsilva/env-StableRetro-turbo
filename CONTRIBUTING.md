@@ -33,10 +33,10 @@ pass the ROM-backed TurboBench parity profiles against original
 `stable-retro==1.0.1` for both supported reference integrations:
 
 ```bash
-turbobench parity supermario/canonical-v2 \
+turbobench parity supermario/world1-v1 \
   --candidate env-stableretro-turbo@checkout:"$PWD" --allow-dirty --quick
 
-turbobench parity breakout/start-v2 \
+turbobench parity breakout/start-v1 \
   --candidate env-stableretro-turbo@checkout:"$PWD" --allow-dirty --quick
 ```
 

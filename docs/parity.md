@@ -4,11 +4,11 @@ Original `stable-retro==1.0.1` is the semantic authority for the Turbo fork.
 The fork must match that authority directly; comparing only against another
 Turbo environment can reproduce the same bug on both sides.
 
-TurboBench's immutable v2 profiles exercise two reference integrations:
+TurboBench's immutable profiles exercise two reference integrations:
 
-- `supermario/canonical-v2` assigns World 1 levels 1-1 through 1-4 across
+- `supermario/world1-v1` assigns World 1 levels 1-1 through 1-4 across
   lanes and runs shapes 1 and 4 for 4,096 seeded transitions.
-- `breakout/start-v2` uses the cartridge `Start` state and runs shapes 1 and 4
+- `breakout/start-v1` uses the cartridge `Start` state and runs shapes 1 and 4
   for 4,096 seeded transitions.
 
 TurboBench compares the native scalar authority with `RetroVecEnv` across
@@ -22,11 +22,11 @@ Breakout public RGB bytes are compared directly.
 With lawful local ROMs imported, run:
 
 ```bash
-turbobench parity supermario/canonical-v2 \
+turbobench parity supermario/world1-v1 \
   --candidate env-stableretro-turbo@checkout:"$PWD" \
   --allow-dirty --quick
 
-turbobench parity breakout/start-v2 \
+turbobench parity breakout/start-v1 \
   --candidate env-stableretro-turbo@checkout:"$PWD" \
   --allow-dirty --quick
 ```
