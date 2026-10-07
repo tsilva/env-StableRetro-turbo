@@ -1,8 +1,10 @@
-<div align="center">
+<p align="center">
   <img src="./logo.png" alt="StableRetro-turbo" width="260" />
-
-  **🚀 Blazing-fast Stable Retro fork with native vectorization and preprocessing 🚀**
-</div>
+  <br />
+  <!-- repo-tagline:start -->
+  <strong>🚀 Blazing-fast Stable Retro fork with native vectorization and preprocessing 🚀</strong>
+  <!-- repo-tagline:end -->
+</p>
 
 `env-StableRetro-turbo` is a Python library for reinforcement-learning developers who need faster batched rollouts from classic console games. It keeps Stable Retro's game integrations and single-environment API, and adds `RetroVecEnv`, a Gymnasium vector environment that steps many libretro emulators and preprocesses observations in native code.
 
