@@ -1,0 +1,106 @@
+name: R2 ROM input verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_access_key_id:
+        description: Expected non-secret R2 token identifier
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify parity environment ROM downloads
+    runs-on: macos-15
+    timeout-minutes: 5
+    environment: parity
+    steps:
+      - name: Download and verify both canonical inputs without publishing them
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_EC2_METADATA_DISABLED: "true"
+          AWS_REGION: auto
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          EXPECTED_ACCESS_KEY_ID: ${{ inputs.expected_access_key_id }}
+          MANIFEST_READ_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import hmac
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import tempfile
+          import urllib.parse
+          import urllib.request
+
+          def main():
+              expected = os.environ["EXPECTED_ACCESS_KEY_ID"]
+              actual = os.environ.get("AWS_ACCESS_KEY_ID", "")
+              matched = bool(actual) and hmac.compare_digest(actual, expected)
+              print(json.dumps({"configured_key_matches_expected": matched}), flush=True)
+              if not matched or not os.environ.get("AWS_SECRET_ACCESS_KEY"):
+                  return 1
+              account = os.environ["R2_ACCOUNT_ID"]
+              bucket = os.environ["R2_BUCKET"]
+              if account != "83e1ce4a70ea388693e8525a772ccefa" or bucket != "roms-private":
+                  raise ValueError("Unexpected target")
+              repository = os.environ["GITHUB_REPOSITORY"]
+              if repository != "tsilva/env-StableRetro-turbo":
+                  raise ValueError("Unexpected repository")
+              ref = urllib.parse.quote(os.environ["GITHUB_SHA"], safe="")
+              url = f"https://api.github.com/repos/{repository}/contents/validation/parity-assets.json?ref={ref}"
+              request = urllib.request.Request(url, headers={
+                  "Authorization": "Bearer " + os.environ["MANIFEST_READ_TOKEN"],
+                  "Accept": "application/vnd.github+json",
+              })
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  manifest = json.loads(base64.b64decode(json.load(response)["content"]))
+              endpoint = f"https://{account}.r2.cloudflarestorage.com"
+              child_env = {key: value for key, value in os.environ.items()
+                           if key not in ("MANIFEST_READ_TOKEN", "EXPECTED_ACCESS_KEY_ID")}
+              count = 0
+              with tempfile.TemporaryDirectory(prefix="rom-input-verification-") as folder:
+                  for game in ("SuperMarioBros-Nes-v0", "Breakout-Atari2600-v0"):
+                      asset = manifest["roms"][game]
+                      filename = asset["filename"]
+                      if Path(filename).name != filename:
+                          raise ValueError("Unexpected filename")
+                      target = Path(folder) / game / filename
+                      target.parent.mkdir(parents=True)
+                      result = subprocess.run([
+                          "aws", "s3", "cp", f"s3://{bucket}/{asset['object_key']}", str(target),
+                          "--endpoint-url", endpoint, "--no-progress", "--only-show-errors",
+                      ], env=child_env, capture_output=True, timeout=60)
+                      if result.returncode:
+                          print(json.dumps({"game": game, "downloaded": False}), flush=True)
+                          return 1
+                      data = target.read_bytes()
+                      size_matches = len(data) == asset["size"]
+                      hash_matches = hmac.compare_digest(hashlib.sha256(data).hexdigest(), asset["sha256"])
+                      print(json.dumps({"game": game, "downloaded": True,
+                                        "size_matches": size_matches,
+                                        "sha256_matches": hash_matches}), flush=True)
+                      if not size_matches or not hash_matches:
+                          return 1
+                      count += 1
+              print(json.dumps({"verified_input_count": count,
+                                "temporary_inputs_removed": True}), flush=True)
+              return 0
+
+          try:
+              sys.exit(main())
+          except Exception:
+              print("ROM input verification failed; provider details suppressed.", flush=True)
+              sys.exit(1)
+          PY
