@@ -16,6 +16,11 @@
 
 # -- Project information -----------------------------------------------------
 import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "_scripts"))
+from pages_presentation import BASE_URL, finish_html  # noqa: E402
+
 
 project = "Stable-Retro"
 copyright = "2023 Farama Foundation"
@@ -74,6 +79,7 @@ def remove_lines_before_parameters(app, what, name, obj, options, lines):
 
 
 def setup(app):
+    app.connect("build-finished", finish_html)
     app.connect("autodoc-process-docstring", remove_lines_before_parameters)
 
 
@@ -84,7 +90,7 @@ def setup(app):
 #
 html_theme = "furo"
 html_title = "Stable-Retro Documentation"
-html_baseurl = "https://stable-retro.farama.org"
+html_baseurl = BASE_URL
 html_copy_source = False
 html_favicon = "_static/img/favicon.png"
 html_theme_options = {
