@@ -199,13 +199,11 @@ uv tool install \
 - [Stable Retro](https://stable-retro.farama.org/) remains the source for inherited game, integration, and emulator documentation.
 - Bundled emulator cores have their own licenses; see [`LICENSES.md`](LICENSES.md).
 
-## Local credentials
+## Publishing credentials
 
-Private local values declared in `.keyenv.toml` live in macOS Keychain. Run
-`keyenv doctor` to verify them and launch credential-dependent commands with
-`keyenv run -- <command>`. Python, Node, and their child processes receive the
-values through their normal environment APIs. Keep only public or non-secret
-configuration in dotenv files.
+Supply credentials required by your chosen release workflow through its normal,
+trusted mechanism. Repository commands do not load a personal credential manager.
+Keep credentials out of tracked files, dotenv files and command arguments.
 
 ## Architecture
 
